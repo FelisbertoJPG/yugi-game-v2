@@ -1,0 +1,152 @@
+/**
+ * Testes das regras de construção de deck.
+ *   node web/js/deck.test.mjs
+ */
+import { Deck, RULES, isExtraDeck } from './deck.js';
+import assert from 'node:assert/strict';
+
+let pass = 0, fail = 0;
+const t = (name, fn) => {
+  try { fn(); console.log(`  \x1b[32mOK  \x1b[0m ${name}`); pass++; }
+  catch (e) { console.log(`  \x1b[31mFALHA\x1b[0m ${name}\n        ${e.message}`); fail++; }
+};
+
+const mon   = (id) => ({ id, tl: 'Effect Monster' });
+const fus   = (id) => ({ id, tl: 'Fusion/Effect Monster' });
+const link  = (id) => ({ id, tl: 'Link/Effect Monster' });
+const xyzP  = (id) => ({ id, tl: 'Xyz/Pendulum/Effect Monster' });
+const pend  = (id) => ({ id, tl: 'Pendulum/Effect Monster' });
+const spell = (id) => ({ id, tl: 'Quick-Play Spell' });
+
+console.log('\n=== roteamento Main / Extra ===');
+t('monstro de efeito vai para o Main', () => assert.equal(isExtraDeck(mon(1)), false));
+t('magia vai para o Main',             () => assert.equal(isExtraDeck(spell(1)), false));
+t('Fusion vai para o Extra',           () => assert.equal(isExtraDeck(fus(1)), true));
+t('Link vai para o Extra',             () => assert.equal(isExtraDeck(link(1)), true));
+t('Xyz/Pendulum vai para o Extra',     () => assert.equal(isExtraDeck(xyzP(1)), true));
+t('Pendulum puro fica no Main',        () => assert.equal(isExtraDeck(pend(1)), false));
+
+console.log('\n=== limite de 3 cópias ===');
+t('aceita 3 cópias e recusa a 4a', () => {
+  const d = new Deck();
+  for (let i = 0; i < 3; i++) assert.equal(d.add(mon(7)).ok, true);
+  const r = d.add(mon(7));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /3 cópias/);
+  assert.equal(d.main.length, 3);
+});
+t('o limite soma Main + Extra da mesma carta', () => {
+  const d = new Deck();
+  d.main.push(9, 9);          // 2 no main
+  assert.equal(d.copies(9), 2);
+  d.extra.push(9);            // 1 no extra
+  assert.equal(d.copies(9), 3);
+  assert.equal(d.add(mon(9)).ok, false);
+});
+
+console.log('\n=== capacidade das zonas ===');
+t('Main recusa a 61a carta', () => {
+  const d = new Deck();
+  for (let i = 0; i < RULES.MAIN_MAX; i++) d.add(mon(i));
+  assert.equal(d.main.length, 60);
+  const r = d.add(mon(999));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /Main Deck cheio/);
+});
+t('Extra recusa a 16a carta', () => {
+  const d = new Deck();
+  for (let i = 0; i < RULES.EXTRA_MAX; i++) d.add(fus(i));
+  assert.equal(d.extra.length, 15);
+  assert.equal(d.add(fus(999)).ok, false);
+});
+t('encher o Extra não bloqueia o Main', () => {
+  const d = new Deck();
+  for (let i = 0; i < RULES.EXTRA_MAX; i++) d.add(fus(i));
+  assert.equal(d.add(mon(500)).ok, true);
+});
+
+console.log('\n=== validação ===');
+t('deck vazio é inválido', () => {
+  assert.equal(new Deck().validate().valid, false);
+});
+t('39 cartas é inválido, 40 é válido', () => {
+  const d = new Deck();
+  for (let i = 0; i < 39; i++) d.main.push(i);
+  assert.equal(d.validate().valid, false);
+  d.main.push(39);
+  assert.equal(d.validate().valid, true);
+});
+t('60 é válido, 61 é inválido', () => {
+  const d = new Deck();
+  for (let i = 0; i < 60; i++) d.main.push(i);
+  assert.equal(d.validate().valid, true);
+  d.main.push(60);
+  assert.equal(d.validate().valid, false);
+});
+t('extra de 15 é válido, 16 é inválido', () => {
+  const d = new Deck();
+  for (let i = 0; i < 40; i++) d.main.push(i);
+  for (let i = 0; i < 15; i++) d.extra.push(1000 + i);
+  assert.equal(d.validate().valid, true);
+  d.extra.push(2000);
+  assert.equal(d.validate().valid, false);
+});
+t('4 cópias inseridas na marra são pegas pela validação', () => {
+  const d = new Deck();
+  for (let i = 0; i < 36; i++) d.main.push(i);
+  d.main.push(77, 77, 77, 77);
+  assert.equal(d.main.length, 40);
+  const v = d.validate();
+  assert.equal(v.valid, false);
+  assert.match(v.errors[0], /77/);
+});
+
+console.log('\n=== remoção e agrupamento ===');
+t('remove só uma cópia', () => {
+  const d = new Deck();
+  d.add(mon(5)); d.add(mon(5)); d.add(mon(5));
+  d.remove(5, 'main');
+  assert.equal(d.copies(5), 2);
+});
+t('removeAll limpa todas', () => {
+  const d = new Deck();
+  d.add(mon(5)); d.add(mon(5));
+  d.removeAll(5, 'main');
+  assert.equal(d.copies(5), 0);
+});
+t('grouped agrupa mantendo a ordem', () => {
+  const d = new Deck();
+  d.add(mon(1)); d.add(mon(2)); d.add(mon(1));
+  assert.deepEqual(d.grouped('main'), [{ id: 1, count: 2 }, { id: 2, count: 1 }]);
+});
+
+console.log('\n=== formato .ydk (o que o ocgcore vai ler) ===');
+t('exporta com as seções corretas', () => {
+  const d = new Deck({ name: 'T', main: [1, 1, 2], extra: [9] });
+  const lines = d.toYdk().trim().split('\n');
+  assert.equal(lines[1], '#main');
+  assert.deepEqual(lines.slice(2, 5), ['1', '1', '2']);
+  assert.equal(lines[5], '#extra');
+  assert.equal(lines[6], '9');
+  assert.equal(lines[7], '!side');
+});
+t('ida e volta preserva o deck', () => {
+  const d = new Deck({ name: 'X', main: [10, 10, 11], extra: [20] });
+  const back = Deck.fromYdk(d.toYdk());
+  assert.deepEqual(back.main, d.main);
+  assert.deepEqual(back.extra, d.extra);
+});
+t('importa .ydk real do ygopro e descarta o side', () => {
+  const ydk = `#created by ygopro\n#main\n89631139\n89631139\n#extra\n1861629\n!side\n46986414\n`;
+  const d = Deck.fromYdk(ydk);
+  assert.deepEqual(d.main, [89631139, 89631139]);
+  assert.deepEqual(d.extra, [1861629]);
+  assert.equal(d.main.includes(46986414), false, 'side não deve entrar');
+});
+t('ignora lixo e linhas vazias', () => {
+  const d = Deck.fromYdk('#main\n\n  123  \nabc\n0\n#extra\n');
+  assert.deepEqual(d.main, [123]);
+});
+
+console.log(`\n${pass} passaram, ${fail} falharam\n`);
+process.exitCode = fail ? 1 : 0;

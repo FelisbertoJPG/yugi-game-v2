@@ -1,0 +1,15 @@
+{
+  "name": "yugi-game-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mini RPG de Yu-Gi-Oh com duelo fiel as regras oficiais, front web em estilo retro.",
+  "scripts": {
+    "dev": "node tools/serve.mjs",
+    "data:build": "python ygo-data/tools/build.py",
+    "data:check": "node ygo-data/examples/node-demo.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,119 @@
+/* Tema compartilhado: painel escuro com acento dourado, tipografia monoespaçada.
+   Retrô de jogo de navegador, mas com a densidade do Master Duel. */
+
+:root {
+  --bg:      #0c0f16;
+  --bg2:     #121724;
+  --panel:   #1a2032;
+  --panel2:  #232b41;
+  --line:    #38425f;
+  --line2:   #4d5a80;
+  --ink:     #dde3f0;
+  --dim:     #8b95ae;
+  --gold:    #e8c46a;
+  --blue:    #6fa8dc;
+  --green:   #6fce9f;
+  --red:     #e2707a;
+  --mon:     #d09340;
+  --spell:   #2fa596;
+  --trap:    #b0629b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 "Courier New", ui-monospace, monospace;
+}
+
+img { image-rendering: auto; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  padding: 5px 8px;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+input:focus, select:focus { outline: 1px solid var(--blue); }
+
+.btn-primary {
+  background: var(--gold);
+  color: #1a1408;
+  border-color: var(--gold);
+  font-weight: bold;
+}
+.btn-primary:hover:not(:disabled) { background: #f3d68a; color: #1a1408; }
+.btn-danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+
+/* ---------- topo ---------- */
+.topbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-bottom: 2px solid var(--line);
+}
+.topbar h1 {
+  margin: 0; font-size: 14px; letter-spacing: 1px; color: var(--gold);
+}
+.topbar .spacer { flex: 1; }
+.muted { color: var(--dim); font-size: 11px; }
+
+/* ---------- etiquetas de tipo ---------- */
+.tag {
+  display: inline-block; padding: 0 4px; font-size: 9px;
+  border: 1px solid; line-height: 1.4;
+}
+.t-M { color: var(--mon);   border-color: var(--mon); }
+.t-S { color: var(--spell); border-color: var(--spell); }
+.t-T { color: var(--trap);  border-color: var(--trap); }
+
+/* ---------- miniatura de carta ---------- */
+.thumb {
+  position: relative;
+  aspect-ratio: 59 / 86;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  overflow: hidden;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb:hover { border-color: var(--gold); }
+.thumb .count {
+  position: absolute; right: 0; bottom: 0;
+  background: #000c; color: var(--gold);
+  font-size: 10px; padding: 0 4px; border-top-left-radius: 3px;
+}
+.thumb.full { opacity: .45; }
+.thumb.full::after {
+  content: "MAX"; position: absolute; inset: auto 0 50% 0;
+  text-align: center; font-size: 9px; color: var(--red);
+}
+
+/* ---------- avisos ---------- */
+.banner {
+  padding: 7px 12px; font-size: 11px;
+  border: 1px solid var(--line); background: var(--panel);
+}
+.banner.ok   { border-color: var(--green); color: var(--green); }
+.banner.err  { border-color: var(--red);   color: var(--red); }
+
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--gold); color: var(--gold);
+  padding: 8px 16px; font-size: 12px; z-index: 50;
+  opacity: 0; pointer-events: none; transition: opacity .18s;
+}
+.toast.show { opacity: 1; }
+
+/* ---------- scrollbar ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--bg2); }
+::-webkit-scrollbar-thumb:hover { background: var(--line2); }

@@ -1,0 +1,6 @@
+node_modules/
+
+# Os artefatos abaixo sao gerados por `npm run build` a partir do projeto
+# Unity. Descomente se preferir nao versionar os ~20 MB de dados e os
+# 12.7k arquivos .lua, deixando cada dev rodar o build localmente.
+# data/

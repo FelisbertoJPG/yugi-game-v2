@@ -1,0 +1,25 @@
+# Ferramentas
+.claude/
+node_modules/
+
+# Unity — o duel_academy/.gitignore ja cobre a subpasta, isto e' rede de seguranca
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+*.csproj
+*.sln
+*.unityproj
+*.pidb
+*.booproj
+
+# SO / editor
+.DS_Store
+Thumbs.db
+.vs/
+.idea/
+*.swp

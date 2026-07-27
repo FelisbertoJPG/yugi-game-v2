@@ -1,0 +1,1 @@
+Coloque o arquivo ocgcore.dll e outras bibliotecas nativas nesta pasta.

@@ -1,0 +1,1 @@
+Coloque o arquivo cards.cdb e a pasta script aqui.

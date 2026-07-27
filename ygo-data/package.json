@@ -1,0 +1,19 @@
+{
+  "name": "ygo-data",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Banco local de cartas e scripts de Yu-Gi-Oh, extraido do ygopro/ocgcore para consumo web.",
+  "exports": {
+    ".": "./src/ygodb.js",
+    "./decode": "./src/decode.js"
+  },
+  "scripts": {
+    "build": "python tools/build.py",
+    "demo": "node examples/node-demo.mjs",
+    "serve": "node tools/serve.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,58 @@
+{
+ "generatedAt": "2026-07-27T16:29:33.015876+00:00",
+ "source": {
+  "path": "C:\\Users\\suporteti2\\Desktop\\duel academy\\duel_academy\\Assets\\StreamingAssets\\YGODemo",
+  "note": "cards.cdb e scripts .lua extraidos do ygopro/ocgcore (edo9300), via projeto Unity duel_academy"
+ },
+ "counts": {
+  "cards": 13728,
+  "byCardType": {
+   "Monster": 9087,
+   "Trap": 1974,
+   "Spell": 2666,
+   "Unknown": 1
+  },
+  "withScript": 12582,
+  "alternateArt": 298,
+  "archetypesNamed": 577,
+  "scripts": {
+   "official": 12702,
+   "core": 24,
+   "coreFiles": [
+    "archetype_setcode_constants.lua",
+    "card_counter_constants.lua",
+    "cards_specific_functions.lua",
+    "constant.lua",
+    "debug_utility.lua",
+    "deprecated_functions.lua",
+    "proc_equip.lua",
+    "proc_fusion.lua",
+    "proc_fusion_spell.lua",
+    "proc_gemini.lua",
+    "proc_link.lua",
+    "proc_maximum.lua",
+    "proc_normal.lua",
+    "proc_pendulum.lua",
+    "proc_persistent.lua",
+    "proc_ritual.lua",
+    "proc_rush.lua",
+    "proc_skill.lua",
+    "proc_spirit.lua",
+    "proc_synchro.lua",
+    "proc_union.lua",
+    "proc_workaround.lua",
+    "proc_xyz.lua",
+    "utility.lua"
+   ]
+  }
+ },
+ "language": "en",
+ "files": {
+  "cards.json": "dataset completo decodificado",
+  "cards.index.json": "indice enxuto para busca no browser",
+  "constants.json": "constantes do motor (parseadas de constant.lua)",
+  "archetypes.json": "setcode -> nome do arquetipo",
+  "scripts.index.json": "id da carta -> caminho do script lua",
+  "cards.cdb": "SQLite original, intocado"
+ }
+}

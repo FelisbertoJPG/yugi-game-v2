@@ -2,6 +2,9 @@
 .claude/
 node_modules/
 
+# Handoff local — instrucoes de retomada, nao vao para o GitHub
+continue.md
+
 # Unity — o duel_academy/.gitignore ja cobre a subpasta, isto e' rede de seguranca
 [Ll]ibrary/
 [Tt]emp/

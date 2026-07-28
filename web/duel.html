@@ -82,6 +82,12 @@
     animation: pisca 1s ease-in-out infinite;
   }
   @keyframes pisca { 50% { outline-color: #6b5220; } }
+  /* já marcada para a seleção: para de piscar e ganha um visto */
+  .zone.selectable.picked { animation: none; outline-color: var(--green); }
+  .zone.selectable.picked::after {
+    content: "✓"; position: absolute; top: 0; right: 2px; z-index: 3;
+    color: var(--green); font-size: 15px; text-shadow: 0 0 3px #000;
+  }
 
   /* ---------- aviso de fase ---------- */
   /* Entra deslizando, segura um instante e sai. Não intercepta clique. */
@@ -508,6 +514,15 @@ function handle(ev) {
       break;
     }
     case 'summoning': log(`invocando ${nameOf(ev.code)}`); break;
+    case 'retry':
+      // O motor recusou. Sem avisar, a tela só "não reage" e parece bug de clique.
+      warn('O motor recusou essa escolha — confira se ela atende ao que foi pedido '
+         + '(por exemplo, no ritual os níveis têm de somar exatamente).');
+      log('⚠ escolha recusada pelo motor');
+      break;
+    case 'refused':
+      warn(`Ação "${ev.action}" não vale agora (o motor espera: ${ev.expected}).`);
+      break;
     case 'attack':
       log(ev.direct ? '⚔ ataque direto!' : '⚔ ataque declarado');
       break;
@@ -641,12 +656,27 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   if (cell && selKey) {
     const c = SELECIONAVEIS.get(selKey);
     if (c) {
+      const q = question;
+      const marcada = picked.has(c.index);
       z.classList.add('selectable');
-      z.title = `${nameOf(cell.code)} — clique para escolher`;
+      if (marcada) z.classList.add('picked');
+      z.title = `${nameOf(cell.code)}` + (q.kind === 'selectsum' ? ` — nível ${c.param}` : '')
+              + (marcada ? ' — escolhida (clique para tirar)' : ' — clique para escolher');
       z.onclick = () => {
-        const q = question;
-        if (q.kind === 'selectunselect') act('pick', c.index, `escolher ${nameOf(cell.code)}`);
-        else act('select', 0, `escolher ${nameOf(cell.code)}`, [c.index]);
+        // Escolha única (seletor incremental ou seleção de 1) envia na hora.
+        // As demais ACUMULAM: um ritual precisa somar o nível exato, e mandar
+        // uma carta só fazia o motor recusar em silêncio.
+        if (q.kind === 'selectunselect') {
+          act('pick', c.index, `escolher ${nameOf(cell.code)}`);
+          return;
+        }
+        if (q.selMax === 1 && q.kind !== 'selectsum') {
+          act('select', 0, `escolher ${nameOf(cell.code)}`, [c.index]);
+          return;
+        }
+        picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
+        render();
+        renderSelection();
       };
       return z;   // nesta pergunta a zona não faz mais nada
     }

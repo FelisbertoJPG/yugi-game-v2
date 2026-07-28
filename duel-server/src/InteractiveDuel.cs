@@ -334,6 +334,17 @@ namespace DuelServer
             byte type = d[o];
             switch (type)
             {
+                case 1: // MSG_RETRY — o motor recusou a última resposta
+                {
+                    // Sem isto o RETRY é invisível: a tela simplesmente não reage
+                    // e parece que o clique não funcionou. Foi assim que uma
+                    // seleção de ritual com soma errada passou por "não consigo
+                    // usar esta carta".
+                    Log.Err($"[retry] o motor recusou a resposta anterior " +
+                            $"(pergunta pendente: {_pending?.kind ?? "nenhuma"})");
+                    ev.Add(new { type = "retry", question = _pending?.kind });
+                    break;
+                }
                 case 90: // DRAW
                 {
                     byte pl = d[o + 1];

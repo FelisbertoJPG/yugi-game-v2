@@ -33,8 +33,92 @@ namespace DuelServer
             TributeSummon(sa);
             Log.Info("\n=== teste: invocacao ritual ===\n");
             RitualSummon(sa);
+            Log.Info("\n=== teste: monstro em defesa serve de tributo ===\n");
+            TributoEmDefesa(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
             return _fail == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Pelas regras, a posição do monstro não importa para tributá-lo. Este
+        /// teste seta um monstro (defesa virada), põe outro em ataque e confere
+        /// que o RITUAL oferece os dois. Nasceu de um relato de que o de defesa
+        /// não podia ser usado — que acabou sendo problema da interface, não do
+        /// motor, mas a garantia fica aqui.
+        /// </summary>
+        static void TributoEmDefesa(string sa)
+        {
+            var deck = new List<uint>();
+            for (int i = 0; i < 8; i++) deck.Add(BLS_RITUAL);
+            for (int i = 0; i < 8; i++) deck.Add(BLS);
+            while (deck.Count < 40) deck.Add(BATTLE_OX);
+
+            using var duel = new InteractiveDuel(sa, deck.ToArray(), 4321UL, 0x1000000UL, npc: false);
+            var r = duel.Advance();
+
+            // seq do monstro -> posição, alimentado pelos eventos
+            var pos = new Dictionary<int, int>();
+            string etapa = "setar";
+            bool avaliou = false;
+
+            for (int guard = 0; guard < 200 && !r.ended && !avaliou; guard++)
+            {
+                foreach (var e in r.events)
+                {
+                    var t = e.GetType();
+                    string k = t.GetProperty("type")?.GetValue(e) as string;
+                    if (k == "move" && Convert.ToByte(t.GetProperty("controller")?.GetValue(e) ?? 0) == 0
+                        && Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? 0) == LOC_MZONE)
+                        pos[Convert.ToInt32(t.GetProperty("seq")?.GetValue(e) ?? 0)] =
+                            Convert.ToInt32(t.GetProperty("pos")?.GetValue(e) ?? 0);
+                }
+
+                var q = r.question;
+                if (q == null) break;
+
+                if (q.kind == "selectsum")
+                {
+                    var emDefesa = q.choices.Where(c => c.location == LOC_MZONE
+                        && pos.TryGetValue(c.sequence, out int p) && (p == 0x4 || p == 0x8)).ToList();
+                    Log.Info($"  > SELECT_SUM: {q.choices.Count} opcoes, " +
+                             $"{emDefesa.Count} em defesa");
+                    Check("o ritual oferece monstro em defesa como tributo", emDefesa.Count > 0);
+                    avaliou = true;
+                    break;
+                }
+
+                if (q.kind == "idle" && q.player == 0)
+                {
+                    if (etapa == "setar")
+                    {
+                        var ox = q.settable.FirstOrDefault(a => a.code == BATTLE_OX);
+                        if (ox.code == BATTLE_OX) { etapa = "invocar"; r = duel.Respond("setmonster", ox.index); continue; }
+                        r = duel.Respond("endturn", 0); continue;
+                    }
+                    if (etapa == "invocar")
+                    {
+                        var ox = q.summonable.FirstOrDefault(a => a.code == BATTLE_OX);
+                        if (ox.code == BATTLE_OX) { etapa = "ritual"; r = duel.Respond("summon", ox.index); continue; }
+                        r = duel.Respond("endturn", 0); continue;
+                    }
+                    var rit = q.activatable.FirstOrDefault(a => a.code == BLS_RITUAL);
+                    r = rit.code == BLS_RITUAL ? duel.Respond("activate", rit.index)
+                                               : duel.Respond("endturn", 0);
+                    continue;
+                }
+
+                r = q.kind switch
+                {
+                    "place" => duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0),
+                    "battle" => duel.Respond("endbattle", 0),
+                    "selectcard" or "selecttribute" => duel.Respond("select", 0,
+                        q.choices.Take(Math.Max(1, q.selMin)).Select(c => c.index).ToList()),
+                    "selectunselect" => duel.Respond("pick", q.choices[0].index),
+                    _ => duel.Respond("endturn", 0),
+                };
+            }
+
+            Check("cheguei na selecao de tributos do ritual", avaliou);
         }
 
         /// <summary>

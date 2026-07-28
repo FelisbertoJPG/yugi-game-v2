@@ -23,6 +23,7 @@ import { inLista1 } from '/web/js/lista1.js';
 
 const $ = (id) => document.getElementById(id);
 const MAX_RENDER = 240;
+const HOLD_MS = 1500;   // quanto tempo segurar para disparar a ação de "segurar"
 
 // Arte e texto das cartas customizadas (fora do banco oficial).
 const customArt = new Map();   // id -> data URL (arte reduzida)
@@ -83,6 +84,48 @@ function brief(id) {
   return briefCache.get(id);
 }
 
+// ---------------------------------------------------------------- segurar
+
+/**
+ * Segurar a carta por `ms` dispara `onLong`.
+ *
+ * Devolve uma função `foiSegurada()` que o `onclick` consulta: sem isso, soltar
+ * o botão dispararia a ação de clique logo depois da de segurar — no deck isso
+ * significaria adicionar uma cópia e remover outra na mesma interação.
+ *
+ * O arrasto cancela a contagem, senão começar a arrastar viraria "segurar".
+ */
+function wireLongPress(el, ms, onLong) {
+  let timer = null;
+  let disparou = false;
+
+  const parar = () => {
+    clearTimeout(timer);
+    timer = null;
+    el.classList.remove('holding');
+  };
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;            // só o botão esquerdo
+    disparou = false;
+    el.classList.add('holding');
+    timer = setTimeout(() => {
+      disparou = true;
+      parar();
+      onLong();
+    }, ms);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'dragstart']) {
+    el.addEventListener(ev, parar);
+  }
+
+  return () => {
+    const r = disparou;
+    disparou = false;   // consome: vale só para o clique imediatamente seguinte
+    return r;
+  };
+}
+
 // ---------------------------------------------------------------- render deck
 
 function renderDeck() {
@@ -98,17 +141,25 @@ function renderDeck() {
       el.draggable = true;
       el.dataset.id = id;
       el.dataset.zone = zone;
-      el.title = `${c?.name ?? id}\nclique: remover 1 · arraste: reordenar ou devolver`;
+      el.title = `${c?.name ?? id}\nclique: remover 1 · segurar: +1 cópia · `
+               + `arraste: reordenar ou devolver`;
       el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">` +
                      (count > 1 ? `<span class="count">×${count}</span>` : '');
+
+      // Segurar adiciona uma cópia — o oposto do clique, que remove uma.
+      const segurou = wireLongPress(el, HOLD_MS, () => {
+        const cc = brief(id);
+        if (cc) addCard(cc);
+      });
+
       el.onclick = () => {
+        if (segurou()) return;          // acabou de adicionar: não remove em seguida
         if (tryPickCover(id)) return;   // escolhendo moldura: não remove a carta
         deck.remove(id, zone);
         markDirty();
         refresh();
       };
       el.oncontextmenu = (e) => { e.preventDefault(); showDetail(id); };
-      el.onmouseenter = () => showDetail(id);
       wireDragSource(el, id, zone);
       frag.append(el);
     }
@@ -146,16 +197,22 @@ function renderPool() {
     el.dataset.id = c.id;
     el.title = `${c.name}\n${c.tl}` +
       (c.custom ? '\n(carta customizada — sem efeito em duelo)' : '') +
-      (full ? '\n(já tem 3 cópias)' : '\nclique ou arraste para adicionar');
+      (full ? '\n(já tem 3 cópias)' : '\nclique ou arraste para adicionar') +
+      '\nsegurar: ver detalhes';
     el.innerHTML = (c.custom ? '<span class="badge">CST</span>' : '') +
                    `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">` +
                    (copies ? `<span class="count">${copies}</span>` : '');
+
+    // Segurar abre os detalhes. Antes isso era no passar do mouse, o que fazia o
+    // painel aparecer sozinho enquanto se procurava carta — mais atrapalhava.
+    const segurou = wireLongPress(el, HOLD_MS, () => showDetail(c.id));
+
     el.onclick = () => {
+      if (segurou()) return;            // acabou de abrir o detalhe: não adiciona
       if (tryPickCover(c.id)) return;   // escolhendo moldura: não adiciona
       addCard(c);
     };
     el.oncontextmenu = (e) => { e.preventDefault(); showDetail(c.id); };
-    el.onmouseenter = () => showDetail(c.id);
     if (!full) wireDragSource(el, c.id, 'pool');
     frag.append(el);
   }
@@ -812,11 +869,16 @@ $('im-save').onclick = async () => {
   toast(`carta "${saved.name}" adicionada${zone === 'Extra' ? ' (Extra)' : ' ao pool'}`);
 };
 
-$('detail').onmouseleave = () => $('detail').classList.remove('show');
+// O detalhe agora é deliberado (segurar / botão direito), então precisa de uma
+// forma clara de fechar — antes ele sumia sozinho ao tirar o mouse.
+const fecharDetalhe = () => $('detail').classList.remove('show');
+$('d-close').onclick = fecharDetalhe;
+$('detail').onmouseleave = fecharDetalhe;
 
-// Esc sai do modo de escolher a moldura sem alterar nada.
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') cancelPickCover();
+  if (e.key !== 'Escape') return;
+  cancelPickCover();   // sai do modo de escolher a moldura sem alterar nada
+  fecharDetalhe();
 });
 
 setupDropZone($('main-zone'), 'main');

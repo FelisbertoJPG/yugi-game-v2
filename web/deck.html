@@ -100,6 +100,25 @@
   body.picking-cover .thumb { cursor: crosshair; }
   body.picking-cover .thumb:hover { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
 
+  /* ---------- segurar a carta ---------- */
+  /* O anel dourado cresce durante a espera: sem isso não dá para saber se o
+     "segurar" registrou nem quanto falta. */
+  .thumb.holding::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    animation: segurando 1.5s linear forwards;
+  }
+  @keyframes segurando {
+    from { box-shadow: inset 0 0 0 0 var(--gold); }
+    to   { box-shadow: inset 0 0 0 5px var(--gold); }
+  }
+  .thumb { user-select: none; -webkit-user-select: none; }
+
+  .detail .fechar {
+    position: absolute; top: 4px; right: 6px; font-size: 11px;
+    background: none; border: none; color: var(--dim); cursor: pointer; padding: 2px 4px;
+  }
+  .detail .fechar:hover { color: var(--gold); }
+
   /* ---------- arrastar e soltar ---------- */
   .dropzone { min-height: 74px; transition: background .12s, outline-color .12s; }
   .dropzone.over {
@@ -281,6 +300,7 @@
 </div>
 
 <div class="detail" id="detail">
+  <button class="fechar" id="d-close" title="fechar (Esc)">✕</button>
   <img id="d-img" alt="">
   <div style="min-width:0">
     <h3 id="d-name"></h3>

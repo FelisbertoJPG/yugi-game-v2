@@ -206,9 +206,42 @@ namespace DuelServer
             return q.choices.Count > Math.Max(1, q.selMin) || q.selMax > q.selMin;
         }
 
+        /// <summary>
+        /// Quais ações fazem sentido para cada pergunta pendente.
+        ///
+        /// Isto não é preciosismo: os buffers de resposta são apenas bytes, e um
+        /// buffer válido para uma pergunta costuma ser válido — com outro
+        /// significado — para outra. Um "attack" respondido a um SELECT_PLACE
+        /// vira `01 00 00 00`, que o motor lê como `[jogador 1, ...]` e entrega a
+        /// carta ao OPONENTE. Recusar aqui é mais barato que caçar o efeito.
+        /// </summary>
+        static readonly Dictionary<string, string[]> AcoesValidas = new()
+        {
+            ["idle"] = new[] { "summon", "reposition", "setmonster", "setspell",
+                               "activate", "battle", "endturn" },
+            ["place"] = new[] { "place" },
+            ["battle"] = new[] { "attack", "battleactivate", "tomain2", "endbattle" },
+            ["selectcard"] = new[] { "select" },
+            ["selecttribute"] = new[] { "select" },
+            ["selectsum"] = new[] { "select" },
+            ["selectunselect"] = new[] { "pick", "finishselect" },
+            ["position"] = new[] { "position" },
+        };
+
         /// <summary>Aplica a jogada do player e avança de novo.</summary>
         public Result Respond(string action, int arg, IReadOnlyList<int> args = null)
         {
+            string esperada = _pending?.kind;
+            if (esperada != null && AcoesValidas.TryGetValue(esperada, out var ok)
+                && Array.IndexOf(ok, action) < 0)
+            {
+                Log.Err($"[respond] acao '{action}' nao combina com a pergunta " +
+                        $"pendente '{esperada}' — ignorada (esperado: {string.Join("/", ok)})");
+                var recusa = new Result { question = _pending };
+                recusa.events.Add(new { type = "refused", action, expected = esperada });
+                return recusa;
+            }
+
             _s.Respond(action switch
             {
                 "select" => EncodeSelect(args ?? new[] { arg }),  // lista de uma vez

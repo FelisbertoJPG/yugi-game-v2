@@ -31,8 +31,54 @@ namespace DuelServer
         {
             Log.Info("=== teste: Battle Phase ===\n");
             Batalha(sa);
+            Log.Info("\n=== teste: resposta trocada e' recusada ===\n");
+            RespostaTrocada(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
             return _fail == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regressão de um bug real: responder "attack" a uma pergunta de ZONA
+        /// virava os bytes `01 00 00 00`, que o motor lia como
+        /// `[jogador 1, ...]` — e a carta ia parar no campo do OPONENTE, que
+        /// podia até usá-la como tributo. O servidor tem de recusar.
+        /// </summary>
+        static void RespostaTrocada(string sa)
+        {
+            var deck = new List<uint>();
+            for (int i = 0; i < 40; i++) deck.Add(OX);
+
+            using var duel = new InteractiveDuel(sa, deck.ToArray(), 999UL, 0x1000000UL, npc: false);
+            var r = duel.Advance();
+
+            // Anda até o motor pedir uma ZONA.
+            for (int i = 0; i < 40 && r.question?.kind != "place"; i++)
+            {
+                var q = r.question;
+                if (q == null) break;
+                r = q.kind == "idle" && q.summonable.Count > 0
+                    ? duel.Respond("summon", q.summonable[0].index)
+                    : duel.Respond("endturn", 0);
+            }
+
+            Check("cheguei numa pergunta de zona", r.question?.kind == "place",
+                  $"(veio {r.question?.kind})");
+            if (r.question?.kind != "place") return;
+
+            // Responde ERRADO de propósito.
+            var antes = r.question;
+            r = duel.Respond("attack", 0);
+
+            bool recusou = r.events.Any(e =>
+                (e.GetType().GetProperty("type")?.GetValue(e) as string) == "refused");
+            Check("o servidor recusou a acao incompativel", recusou);
+            Check("a pergunta de zona continua pendente", r.question?.kind == "place",
+                  $"(veio {r.question?.kind})");
+
+            // E a resposta certa continua funcionando depois da recusa.
+            r = duel.Respond("place", antes.zones.Count > 0 ? antes.zones[0] : 0);
+            Check("a resposta correta ainda funciona depois da recusa",
+                  r.question?.kind != "place" || r.ended);
         }
 
         static void Batalha(string sa)

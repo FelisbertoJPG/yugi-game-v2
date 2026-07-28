@@ -562,14 +562,21 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk) {
     });
     z.addEventListener('dragend', () => { atacando = null; render(); });
     z.onclick = () => {
-      atacando = { index: atk.act.index, seq: atk.seq, code: cell.code, direct: atk.act.canDirect };
+      // NÃO marcar `atacando` aqui: ele existe só para o arrasto. Deixá-lo
+      // pendurado fazia toda zona do oponente virar alvo de drop para sempre, e
+      // soltar uma carta da mão ali respondia "atacar" a uma pergunta de zona —
+      // que o motor lia como "coloque no campo do jogador 1".
+      atacando = null;
       pendingTarget = null;   // sem alvo definido: o motor vai perguntar
       act('attack', atk.act.index, `atacar com ${nameOf(cell.code)}`);
     };
   }
 
   // --- ataque: zona do oponente como alvo ---
-  if (atk && atk.alvo && atacando) {
+  // Exige estar de fato na Battle Phase: fora dela, uma resposta de ataque seria
+  // lida pelo motor como resposta a outra pergunta.
+  const naBatalha = question && question.kind === 'battle' && question.player === 0;
+  if (atk && atk.alvo && atacando && naBatalha) {
     z.classList.add('target');
     z.addEventListener('dragover', (e) => { e.preventDefault(); z.classList.add('over'); });
     z.addEventListener('dragleave', () => z.classList.remove('over'));

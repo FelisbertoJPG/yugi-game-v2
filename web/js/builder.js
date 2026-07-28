@@ -11,17 +11,50 @@ import {
   listDecks, saveDeck, deleteDeck, getActiveIndex, setActiveIndex,
   downloadYdk, importYdk,
 } from '/web/js/storage.js';
+import {
+  listCustom, saveCustom, parseCardmaker, buildCard, downscaleDataUrl,
+  renderFramedCard, RACES, ATTRIBUTES, MONSTER_KINDS, SUBTYPES, isExtraKind,
+} from '/web/js/customcards.js';
+import {
+  getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt,
+} from '/web/js/npcs.js';
+import { inLista1 } from '/web/js/lista1.js';
 
 const $ = (id) => document.getElementById(id);
-const ART = (id, small = true) =>
-  `https://images.ygoprodeck.com/images/cards${small ? '_small' : ''}/${id}.jpg`;
 const MAX_RENDER = 240;
+
+// Arte e texto das cartas customizadas (fora do banco oficial).
+const customArt = new Map();   // id -> data URL (arte reduzida)
+const customDesc = new Map();  // id -> texto do efeito
+
+/** URL/arte da carta: data URL para customizadas, ygoprodeck para as oficiais. */
+function ART(id, small = true) {
+  const a = customArt.get(Number(id));
+  if (a) return a;
+  return `https://images.ygoprodeck.com/images/cards${small ? '_small' : ''}/${id}.jpg`;
+}
+
+/** Injeta uma carta customizada no índice em memória e nos caches de arte/texto. */
+function injectCustom(card) {
+  db.addCustom(card);
+  if (card.art) customArt.set(card.id, card.art);
+  else customArt.delete(card.id);
+  customDesc.set(card.id, card.desc || '');
+  briefCache.delete(card.id); // se já havia um brief cacheado, força reler do índice
+}
 
 let db = null;         // índice
 let fullDb = null;     // cards.json, carregado sob demanda
 let deck = new Deck();
 let deckIndex = null;  // posição no localStorage; null = ainda não salvo
 let dirty = false;
+
+// Modo NPC: quando ?npc=<id>&deck=<i|new>, o builder edita UM dos decks daquele
+// NPC. `npcMode` guarda o NPC; `npcDeckIndex`, qual deck (null = novo);
+// `npcSignature`, a carta que esse deck dropa.
+let npcMode = null;
+let npcDeckIndex = null;
+let npcSignature = null;
 
 // ---------------------------------------------------------------- utilidades
 
@@ -36,7 +69,8 @@ function toast(msg) {
 
 function markDirty(v = true) {
   dirty = v;
-  $('btn-save').textContent = v ? 'salvar *' : 'salvar';
+  const base = npcMode ? 'salvar NPC' : 'salvar';
+  $('btn-save').textContent = v ? `${base} *` : base;
 }
 
 /** O índice traz só id/nome/stats; para nome de carta no deck usamos o cache. */
@@ -103,12 +137,14 @@ function renderPool() {
     const copies = deck.copies(c.id);
     const full = copies >= RULES.MAX_COPIES;
     const el = document.createElement('div');
-    el.className = 'thumb' + (full ? ' full' : '');
+    el.className = 'thumb' + (full ? ' full' : '') + (c.custom ? ' custom' : '');
     el.draggable = !full;
     el.dataset.id = c.id;
     el.title = `${c.name}\n${c.tl}` +
+      (c.custom ? '\n(carta customizada — sem efeito em duelo)' : '') +
       (full ? '\n(já tem 3 cópias)' : '\nclique ou arraste para adicionar');
-    el.innerHTML = `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">` +
+    el.innerHTML = (c.custom ? '<span class="badge">CST</span>' : '') +
+                   `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">` +
                    (copies ? `<span class="count">${copies}</span>` : '');
     el.onclick = () => addCard(c);
     el.oncontextmenu = (e) => { e.preventDefault(); showDetail(c.id); };
@@ -133,6 +169,50 @@ function addCard(c) {
 function refresh() {
   renderDeck();
   renderPool();   // recalcula os contadores nas miniaturas do pool
+  if (npcMode) updateNpcDrop();
+}
+
+// ---------------------------------------------------------------- modo NPC
+
+/** Ajusta a UI para editar um deck de um NPC. */
+function enterNpcModeUI() {
+  $('npc-bar').hidden = false;
+  $('npc-name').textContent = npcMode.name;
+  // o campo de nome passa a ser o nome DESTE deck do NPC (editável)
+  for (const id of ['deck-select', 'btn-new', 'btn-delete']) $(id).hidden = true;
+  $('npc-back').onclick = () => {
+    if (confirmDiscard()) location.href = '/web/npcs.html';
+  };
+  // salva o deck atual do NPC como um deck SEU (ex.: "joey 1")
+  $('npc-copy').onclick = () => {
+    const n = (npcDeckIndex ?? 0) + 1;
+    const name = `${npcMode.id} ${n}`;
+    saveDeck(new Deck({ name, main: deck.main, extra: deck.extra }), null);
+    toast(`salvo nos seus decks como "${name}"`);
+  };
+}
+
+/** Popula o select "carta que dropa" com as cartas do deck montado. */
+function updateNpcDrop() {
+  const sel = $('npc-drop');
+  const prev = Number(sel.value) || npcSignature;
+  const uniq = [...new Set([...deck.main, ...deck.extra])];
+  if (!uniq.length) {
+    sel.replaceChildren(new Option('(deck vazio)', ''));
+    return;
+  }
+  sel.replaceChildren(...uniq.map((id) => new Option(brief(id)?.name ?? String(id), String(id))));
+  sel.value = uniq.includes(prev) ? String(prev) : String(uniq[0]);
+}
+
+function saveNpcDeckFromUI() {
+  const sig = Number($('npc-drop').value) || npcSignature;
+  const name = $('deck-name').value.trim() || `Deck ${npcMode.name}`;
+  npcDeckIndex = saveNpcDeckAt(npcMode.id, npcDeckIndex, { name, deck, signatureId: sig });
+  npcSignature = sig;
+  markDirty(false);
+  const v = deck.validate();
+  toast(v.valid ? `deck "${name}" salvo` : `salvo (incompleto: ${v.errors[0]})`);
 }
 
 // ---------------------------------------------------------------- arrastar
@@ -250,6 +330,12 @@ async function showDetail(id) {
     ? `${c.at ?? '?'} · ${c.r ?? '?'} · nv ${c.lv ?? '?'} · ATK ${c.atk ?? '?'} / DEF ${c.def ?? '—'}`
     : '';
 
+  // Cartas customizadas: texto e arte vêm da store local, não do cards.json.
+  if (customDesc.has(Number(id))) {
+    $('d-desc').textContent = customDesc.get(Number(id)) || '(sem texto)';
+    return;
+  }
+
   // O texto do efeito só existe no cards.json completo.
   if (!fullDb) {
     $('d-desc').textContent = '(carregando texto…)';
@@ -261,11 +347,36 @@ async function showDetail(id) {
 
 // ---------------------------------------------------------------- filtros
 
+/**
+ * Resolve o filtro de tipo dos 3 selects (só 1 fica ativo por vez).
+ * `sub` null = a categoria inteira (opção "todos"); string = uma variação.
+ */
+function activeTypeFilter() {
+  const mon = $('f-mon').value, sp = $('f-spell').value, tr = $('f-trap').value;
+  if (mon) return { cardType: 'Monster', sub: mon === '*' ? null : mon };
+  if (sp) return { cardType: 'Spell', sub: sp === '*' ? null : sp };
+  if (tr) return { cardType: 'Trap', sub: tr === '*' ? null : tr };
+  return { cardType: undefined, sub: null };
+}
+
+/** A carta bate com a variação escolhida? (deriva do typeLabel). */
+function matchesSub(c, cardType, sub) {
+  const tl = c.tl || '';
+  if (cardType === 'Monster') {
+    if (sub === 'Normal') return /Normal/.test(tl);
+    // "Efeito" = monstro de efeito do Main (exclui Ritual/Extra Deck)
+    if (sub === 'Effect') return /Effect/.test(tl) && !/Ritual|Fusion|Synchro|Xyz|Link/.test(tl);
+    return new RegExp(sub).test(tl); // Ritual/Fusion/Synchro/Xyz/Link/Pendulum
+  }
+  return tl.startsWith(sub); // "Continuous Spell", "Counter Trap", "Field Spell"...
+}
+
 function applyFilters() {
   const num = (id) => ($(id).value === '' ? null : Number($(id).value));
+  const { cardType, sub } = activeTypeFilter();
   poolResults = db.filter({
     name: $('f-name').value || undefined,
-    cardType: $('f-type').value || undefined,
+    cardType,
     attribute: $('f-attr').value || undefined,
     race: $('f-race').value || undefined,
     archetype: $('f-arch').value || undefined,
@@ -273,7 +384,24 @@ function applyFilters() {
     levelMax: num('f-lvmax'),
     atkMin: num('f-atk'),
   });
+  if (sub) poolResults = poolResults.filter((c) => matchesSub(c, cardType, sub));
+  // O filtro por tag é pós-processado: só as customizadas têm tags.
+  const tag = $('f-tag').value;
+  if (tag) poolResults = poolResults.filter((c) => (c.tags ?? []).includes(tag));
+  // Lista 1: restringe ao pool jogável desta fase.
+  if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
   renderPool();
+}
+
+/** Reconstrói o select de tags a partir das cartas customizadas em memória. */
+function refreshTagSelect() {
+  const tags = new Set();
+  for (const c of listCustom()) for (const t of (c.tags ?? [])) tags.add(t);
+  const sel = $('f-tag');
+  const current = sel.value;
+  sel.replaceChildren(new Option('tag: todas', ''));
+  for (const t of [...tags].sort()) sel.append(new Option(t, t));
+  sel.value = [...sel.options].some((o) => o.value === current) ? current : '';
 }
 
 // ---------------------------------------------------------------- decks salvos
@@ -310,6 +438,7 @@ function confirmDiscard() {
 // ---------------------------------------------------------------- eventos
 
 $('btn-save').onclick = () => {
+  if (npcMode) return void saveNpcDeckFromUI();
   deck.name = $('deck-name').value.trim() || 'Novo Deck';
   deckIndex = saveDeck(deck, deckIndex);
   setActiveIndex(deckIndex);
@@ -371,14 +500,228 @@ $('deck-select').onchange = (e) => {
 
 $('deck-name').oninput = () => markDirty();
 
-for (const id of ['f-name', 'f-type', 'f-attr', 'f-race', 'f-arch',
-                  'f-lvmin', 'f-lvmax', 'f-atk']) {
-  $(id).addEventListener('input', applyFilters);
+const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
+const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag',
+                    'f-lvmin', 'f-lvmax', 'f-atk'];
+for (const id of [...FILTER_IDS, 'f-lista1']) $(id).addEventListener('input', applyFilters);
+
+// os 3 selects de tipo são mutuamente exclusivos: ativar um zera os outros
+for (const id of TYPE_IDS) {
+  $(id).addEventListener('change', () => {
+    if ($(id).value) for (const other of TYPE_IDS) if (other !== id) $(other).value = '';
+    applyFilters();
+  });
 }
+
 $('f-clear').onclick = () => {
-  for (const id of ['f-name', 'f-type', 'f-attr', 'f-race', 'f-arch',
-                    'f-lvmin', 'f-lvmax', 'f-atk']) $(id).value = '';
+  for (const id of [...FILTER_IDS, ...TYPE_IDS]) $(id).value = '';
+  $('f-lista1').checked = false;
   applyFilters();
+};
+
+// ---------------------------------------------------------------- importar carta
+
+// Estado do import. `importRawArt` = o desenho cru (para a moldura automática);
+// `importFrame` = imagem renderizada que o usuário subiu (tem prioridade).
+let importRawArt = null;
+let importFrame = null;
+let previewTimer = null;
+
+const fillSelect = (sel, values) =>
+  sel.replaceChildren(...values.map((v) => new Option(v, v)));
+
+// selects estáticos do formulário, populados uma vez
+fillSelect($('im-kind'), MONSTER_KINDS);
+fillSelect($('im-sub'), SUBTYPES);
+fillSelect($('im-attr'), ATTRIBUTES);
+$('race-list').replaceChildren(...RACES.map((r) => new Option(r)));
+
+/** Mostra/esconde os campos conforme a categoria (monstro × magia/armadilha). */
+function syncImportFields() {
+  const monster = $('im-cat').value === 'Monster';
+  for (const id of ['wrap-kind', 'wrap-attr', 'wrap-race', 'wrap-level', 'wrap-atk', 'wrap-def'])
+    $(id).hidden = !monster;
+  $('wrap-sub').hidden = monster;
+  if (monster) $('wrap-def').hidden = $('im-kind').value === 'Link'; // Link não tem DEF
+}
+$('im-cat').addEventListener('change', syncImportFields);
+$('im-kind').addEventListener('change', syncImportFields);
+
+function openImportModal(draft, missing) {
+  $('im-name').value = draft.name || '';
+  $('im-cat').value = draft.cat;
+  $('im-kind').value = draft.kind || 'Effect';
+  $('im-sub').value = draft.subtype || 'Normal';
+  $('im-attr').value = draft.attribute || 'DARK';
+  $('im-race').value = draft.race || '';
+  $('im-level').value = draft.level == null ? '' : draft.level;
+  $('im-atk').value = draft.atk == null ? '' : draft.atk;
+  $('im-def').value = draft.def == null ? '' : draft.def;
+  $('im-desc').value = draft.desc || '';
+  $('im-tags').value = (draft.tags || ['custom', 'sem-efeito']).join(', ');
+  $('im-level').classList.toggle('miss', missing.includes('level'));
+  $('im-err').textContent = missing.includes('level')
+    ? 'O card maker não guarda o nível — preencha antes de salvar.'
+    : '';
+  syncImportFields();
+  updateFrameStatus();
+  updateArtPreview();
+  $('import-back').classList.add('show');
+}
+
+function closeImportModal() {
+  $('import-back').classList.remove('show');
+  importArt = null;
+}
+
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result);
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(file);
+});
+
+const pickFile = (accept) => new Promise((resolve) => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = accept;
+  input.onchange = () => resolve(input.files?.[0] ?? null);
+  input.click();
+});
+
+/** Lê os campos atuais do formulário (para desenhar a moldura automática). */
+function readImportFields() {
+  return {
+    name: $('im-name').value.trim(),
+    cat: $('im-cat').value,
+    kind: $('im-kind').value,
+    subtype: $('im-sub').value,
+    attribute: $('im-attr').value,
+    race: $('im-race').value.trim(),
+    level: $('im-level').value,
+    atk: Number($('im-atk').value || 0),
+    def: Number($('im-def').value || 0),
+    desc: $('im-desc').value.trim(),
+  };
+}
+
+function updateFrameStatus() {
+  $('im-frame-auto').hidden = !importFrame;
+  $('im-frame-status').textContent = importFrame
+    ? 'usando a imagem enviada'
+    : 'moldura automática (pelo tipo)';
+}
+
+/** Atualiza a prévia: imagem enviada, ou a moldura automática desenhada. */
+async function updateArtPreview() {
+  const box = $('im-art');
+  const src = importFrame || await renderFramedCard(readImportFields(), importRawArt);
+  box.replaceChildren(Object.assign(new Image(), { src, alt: '' }));
+}
+
+/** Re-renderiza a moldura automática (com debounce) enquanto se edita o form. */
+const schedulePreview = () => {
+  if (importFrame) return;   // imagem enviada não depende dos campos
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(updateArtPreview, 180);
+};
+
+async function setFrameFromFile(file) {
+  $('im-art').textContent = 'reduzindo imagem…';
+  try {
+    importFrame = await downscaleDataUrl(await fileToDataUrl(file));
+  } catch {
+    importFrame = null;
+    toast('não consegui processar essa imagem');
+  }
+  updateFrameStatus();
+  updateArtPreview();
+}
+
+/** Rascunho em branco para quando se importa só uma imagem, sem .json. */
+function blankDraft() {
+  return {
+    name: '', cat: 'Monster', kind: 'Effect', subtype: 'Normal',
+    attribute: 'DARK', race: '', level: null, atk: 0, def: 0,
+    desc: '', tags: ['custom', 'sem-efeito'],
+  };
+}
+
+async function handleImportFile(file) {
+  const isJson = /\.json$/i.test(file.name) || file.type.includes('json');
+  importRawArt = null;
+  importFrame = null;
+
+  if (isJson) {
+    let json;
+    try { json = JSON.parse(await file.text()); }
+    catch { return void toast('arquivo .json inválido'); }
+    const { draft, missing, art } = parseCardmaker(json);
+    importRawArt = art;   // o desenho cru alimenta a moldura automática
+    openImportModal(draft, missing);
+    return;
+  }
+
+  if (file.type.startsWith('image/')) {   // imagem renderizada, já com moldura
+    importFrame = await downscaleDataUrl(await fileToDataUrl(file));
+    openImportModal(blankDraft(), ['name', 'level', 'race']);
+    return;
+  }
+
+  toast('formato não reconhecido (use .json ou uma imagem)');
+}
+
+$('f-import').onclick = async () => {
+  const f = await pickFile('.json,application/json,image/*');
+  if (f) handleImportFile(f);
+};
+
+$('im-frame-pick').onclick = async () => {
+  const f = await pickFile('image/*');
+  if (f) setFrameFromFile(f);
+};
+$('im-art').onclick = $('im-frame-pick').onclick;   // clicar na prévia = subir moldura
+
+$('im-frame-auto').onclick = () => {
+  importFrame = null;
+  updateFrameStatus();
+  updateArtPreview();
+};
+
+for (const id of ['im-name', 'im-cat', 'im-kind', 'im-sub', 'im-attr', 'im-race',
+                  'im-level', 'im-atk', 'im-def', 'im-desc']) {
+  $(id).addEventListener('input', schedulePreview);
+}
+
+$('im-cancel').onclick = closeImportModal;
+$('import-back').addEventListener('click', (e) => {
+  if (e.target === $('import-back')) closeImportModal();
+});
+
+$('im-save').onclick = async () => {
+  const cat = $('im-cat').value;
+  const err = $('im-err');
+  const fields = { ...readImportFields(), tags: $('im-tags').value };
+
+  if (!fields.name) return void (err.textContent = 'Dê um nome à carta.');
+  if (cat === 'Monster') {
+    if (fields.level === '') {
+      $('im-level').classList.add('miss');
+      return void (err.textContent = 'Informe o nível do monstro (falta no .json).');
+    }
+    if (!fields.race) return void (err.textContent = 'Informe a raça do monstro.');
+  }
+
+  // Moldura: a imagem enviada tem prioridade; senão, desenha a automática.
+  const finalArt = importFrame || await renderFramedCard(fields, importRawArt);
+  const saved = saveCustom(buildCard(fields, finalArt));
+  injectCustom(saved);
+  refreshTagSelect();
+  applyFilters();
+  refresh();
+  closeImportModal();
+  const zone = cat === 'Monster' && isExtraKind(fields.kind) ? 'Extra' : 'pool';
+  toast(`carta "${saved.name}" adicionada${zone === 'Extra' ? ' (Extra)' : ' ao pool'}`);
 };
 
 $('detail').onmouseleave = () => $('detail').classList.remove('show');
@@ -402,6 +745,11 @@ try {
   throw e;
 }
 
+// injeta as cartas customizadas salvas (localStorage) antes de tudo que usa
+// o índice — assim elas aparecem no pool e nos decks que já as referenciam.
+for (const c of listCustom()) injectCustom(c);
+refreshTagSelect();
+
 // popula os selects a partir dos dados reais
 const all = db.filter({});
 const uniq = (fn) => [...new Set(all.map(fn).filter(Boolean))].sort();
@@ -409,11 +757,33 @@ $('f-attr').append(...uniq((c) => c.at).map((v) => new Option(v, v)));
 $('f-race').append(...uniq((c) => c.r).map((v) => new Option(v, v)));
 $('f-arch').append(...uniq((c) => c.a[0]).map((v) => new Option(v, v)));
 
-// carrega o deck ativo, se houver
-const active = getActiveIndex();
-const saved = listDecks();
-if (saved.length) loadDeck(active !== null && saved[active] ? active : 0);
-else { $('deck-name').value = deck.name; refreshDeckSelect(); }
+// modo NPC (?npc=<id>&deck=<i|new>) tem prioridade sobre os decks do jogador
+const params = new URLSearchParams(location.search);
+const npcId = params.get('npc');
+const npc = npcId ? getNpc(npcId) : null;
+if (npc) {
+  npcMode = npc;
+  const st = getNpcState(npcId);
+  const deckParam = params.get('deck');
+  // qual deck: índice explícito, 'new', ou o ativo (novo se o NPC não tem nenhum)
+  if (deckParam === 'new') npcDeckIndex = null;
+  else if (deckParam !== null && deckParam !== '') npcDeckIndex = Number(deckParam);
+  else npcDeckIndex = st.decks.length ? st.activeIndex : null;
+
+  const slot = npcDeckIndex == null ? null : getNpcDeckAt(npcId, npcDeckIndex);
+  deck = slot ? slot.deck : new Deck({ name: `Deck ${st.decks.length + 1}` });
+  deckIndex = null;
+  npcSignature = slot ? slot.signatureId : npc.signatureId;
+  $('deck-name').value = deck.name;
+  enterNpcModeUI();
+  markDirty(false);
+} else {
+  // carrega o deck ativo, se houver
+  const active = getActiveIndex();
+  const saved = listDecks();
+  if (saved.length) loadDeck(active !== null && saved[active] ? active : 0);
+  else { $('deck-name').value = deck.name; refreshDeckSelect(); }
+}
 
 applyFilters();
 refresh();

@@ -1,0 +1,6 @@
+# saídas de build (regeneráveis)
+bin/
+obj/
+
+# o .gitignore da raiz ignora *.csproj (por causa do Unity) — reincluímos o nosso
+!duel-server.csproj

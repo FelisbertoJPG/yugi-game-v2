@@ -92,6 +92,41 @@ export class YgoDB {
   brief(id) { return this.#index.find((c) => c.id === Number(id)) ?? null; }
 
   /**
+   * Injeta uma carta customizada no índice EM MEMÓRIA (não persiste em disco).
+   * Usada pelo Deck Builder para mostrar cartas criadas pelo usuário no pool,
+   * junto das oficiais. `entry` segue a forma do índice, mais `custom`/`tags`.
+   * Reimportar o mesmo id substitui a entrada anterior.
+   */
+  addCustom(entry) {
+    const id = Number(entry.id);
+    this.#index = this.#index.filter((c) => c.id !== id);
+    this.#index.push({
+      id,
+      name: entry.name,
+      t: entry.t,
+      tl: entry.tl,
+      atk: entry.atk ?? null,
+      def: entry.def ?? null,
+      lv: entry.lv ?? null,
+      at: entry.at ?? null,
+      r: entry.r ?? null,
+      a: entry.a ?? [],
+      alt: 0,
+      custom: true,
+      tags: entry.tags ?? [],
+    });
+    return id;
+  }
+
+  /** Remove uma carta customizada do índice em memória. */
+  removeCustom(id) {
+    id = Number(id);
+    const before = this.#index.length;
+    this.#index = this.#index.filter((c) => c.id !== id);
+    return before !== this.#index.length;
+  }
+
+  /**
    * Busca exata por nome. Cartas com arte alternativa compartilham o nome do
    * original; devolvemos sempre a impressão canônica (alias === 0), que é a
    * que tem o script Lua e a que o motor espera receber.

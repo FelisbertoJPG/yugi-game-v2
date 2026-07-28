@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>duel-server</AssemblyName>
+    <RootNamespace>DuelServer</RootNamespace>
+
+    <!-- A ocgcore.dll e a sqlite3.dll sao Windows x64.
+         O processo PRECISA ser 64-bit, senao o DllImport falha com BadImageFormat. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <!-- Copia as bibliotecas nativas para junto do executavel, para o
+       DllImport("ocgcore") / DllImport("sqlite3") encontra-las. -->
+  <ItemGroup>
+    <None Include="native\ocgcore.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ocgcore.dll</Link>
+    </None>
+    <None Include="native\sqlite3.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>sqlite3.dll</Link>
+    </None>
+  </ItemGroup>
+
+</Project>

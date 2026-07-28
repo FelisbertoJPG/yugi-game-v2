@@ -51,6 +51,11 @@
   .filters input[type="text"] { flex: 1; min-width: 130px; }
   .filters input[type="number"] { width: 62px; }
   .filters select { max-width: 140px; }
+  .filters .chk {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--dim); white-space: nowrap;
+  }
+  .filters .chk input { width: auto; }
 
   .pool-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 20px; }
   .pool-grid {
@@ -86,6 +91,51 @@
   .dropzone.reject.over { outline-color: var(--red); background: #e2707a12; }
   .thumb.dragging { opacity: .35; }
   .thumb.drop-before { box-shadow: inset 3px 0 0 var(--gold); }
+
+  /* miniatura de carta customizada: selo no canto */
+  .thumb.custom { outline: 1px solid var(--blue); }
+  .thumb .badge {
+    position: absolute; top: 2px; left: 2px; z-index: 2;
+    font-size: 8px; line-height: 1; padding: 2px 3px; border-radius: 2px;
+    background: var(--blue); color: #04121f; font-weight: bold; letter-spacing: .5px;
+  }
+
+  /* ---------- modal de importar carta ---------- */
+  .modal-back {
+    position: fixed; inset: 0; z-index: 60; display: none;
+    align-items: center; justify-content: center;
+    background: #000a; padding: 16px;
+  }
+  .modal-back.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 2px solid var(--gold);
+    width: min(560px, 100%); max-height: 92vh; overflow: auto;
+    padding: 16px; box-shadow: 0 8px 32px #000c;
+  }
+  .modal h2 { margin: 0 0 4px; font-size: 14px; color: var(--gold); letter-spacing: 1px; }
+  .modal .lead { font-size: 10px; color: var(--dim); margin-bottom: 12px; }
+  .modal .row { display: flex; gap: 10px; }
+  .modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+  .modal label { display: block; font-size: 10px; color: var(--dim); margin: 8px 0 2px; letter-spacing: .5px; }
+  .modal input, .modal select, .modal textarea {
+    width: 100%; padding: 5px 6px; font-size: 12px;
+    background: var(--bg2); color: var(--ink); border: 1px solid var(--line);
+  }
+  .modal textarea { resize: vertical; min-height: 66px; font-family: inherit; }
+  .modal .miss { border-color: var(--red); }
+  .modal .art-preview {
+    width: 120px; flex: none; align-self: flex-start;
+    border: 1px solid var(--line); background: var(--bg2);
+    display: flex; align-items: center; justify-content: center;
+    min-height: 170px; font-size: 10px; color: var(--dim); text-align: center;
+  }
+  .modal .art-preview { cursor: pointer; }
+  .modal .art-preview:hover { border-color: var(--gold); }
+  .modal .art-preview img { width: 100%; display: block; }
+  .modal .err { color: var(--red); font-size: 11px; min-height: 14px; margin-top: 8px; }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .modal .note { font-size: 10px; color: var(--blue); margin-top: 6px; }
+  .mono-only[hidden], [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -104,6 +154,18 @@
 </div>
 
 <div class="hint" id="status">carregando banco de cartas…</div>
+
+<div class="hint" id="npc-bar" hidden
+     style="display:flex; gap:10px; align-items:center; background:#16273a; color:var(--ink); border-bottom:1px solid var(--line)">
+  <span>👤 Montando o deck do NPC: <b id="npc-name" style="color:var(--gold)"></b></span>
+  <span style="flex:1"></span>
+  <label style="display:flex; gap:5px; align-items:center">
+    carta que dropa:
+    <select id="npc-drop" style="max-width:220px; font-size:11px"></select>
+  </label>
+  <button id="npc-copy" title="salvar este deck nos seus decks (ex.: joey 1)">salvar p/ mim</button>
+  <button id="npc-back">← NPCs</button>
+</div>
 
 <div class="workspace">
   <!-- ESQUERDA: o deck -->
@@ -141,19 +203,47 @@
   <div class="col">
     <div class="filters">
       <input type="text" id="f-name" placeholder="buscar por nome…" autocomplete="off">
-      <select id="f-type">
-        <option value="">tipo: todos</option>
-        <option value="Monster">Monstro</option>
-        <option value="Spell">Magia</option>
-        <option value="Trap">Armadilha</option>
+      <select id="f-mon" title="filtrar monstros por tipo">
+        <option value="">monstro…</option>
+        <option value="*">▸ todos os monstros</option>
+        <option value="Normal">Normal</option>
+        <option value="Effect">Efeito</option>
+        <option value="Ritual">Ritual</option>
+        <option value="Fusion">Fusão</option>
+        <option value="Synchro">Sincro</option>
+        <option value="Xyz">Xyz</option>
+        <option value="Link">Link</option>
+        <option value="Pendulum">Pêndulo</option>
+      </select>
+      <select id="f-spell" title="filtrar magias por tipo">
+        <option value="">magia…</option>
+        <option value="*">▸ todas as magias</option>
+        <option value="Normal">Normal</option>
+        <option value="Continuous">Contínua</option>
+        <option value="Equip">Equipamento</option>
+        <option value="Field">Campo</option>
+        <option value="Quick-Play">Rápida</option>
+        <option value="Ritual">Ritual</option>
+      </select>
+      <select id="f-trap" title="filtrar armadilhas por tipo">
+        <option value="">armadilha…</option>
+        <option value="*">▸ todas as armadilhas</option>
+        <option value="Normal">Normal</option>
+        <option value="Continuous">Contínua</option>
+        <option value="Counter">Counter</option>
       </select>
       <select id="f-attr"><option value="">atributo: todos</option></select>
       <select id="f-race"><option value="">raça: todas</option></select>
       <select id="f-arch"><option value="">arquétipo: todos</option></select>
+      <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
       <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
       <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
       <input type="number" id="f-atk" placeholder="ATK⩾" min="0" step="100">
+      <label class="chk" title="só as cartas jogáveis nesta fase: Normais + 7 magia/armadilha">
+        <input type="checkbox" id="f-lista1"> Lista 1
+      </label>
       <button id="f-clear">limpar</button>
+      <button id="f-import" class="btn-primary" title="importar carta do card maker (.json)">＋ carta</button>
     </div>
     <div class="sec-head">
       <span id="pool-count">—</span>
@@ -173,6 +263,87 @@
     <div class="sub" id="d-type"></div>
     <div class="st" id="d-stats"></div>
     <div class="dsc" id="d-desc"></div>
+  </div>
+</div>
+
+<!-- modal: importar carta do card maker -->
+<div class="modal-back" id="import-back">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="im-title">
+    <h2 id="im-title">Importar carta</h2>
+    <div class="lead">
+      Do arquivo <b>.json</b> de um card maker (dados + arte), ou de uma
+      <b>imagem</b> da carta renderizada. Dica: importe o <b>.json</b> e
+      <b>clique na imagem</b> abaixo para trocar pela carta com moldura (PNG/JPG).
+      O efeito <b>não</b> funciona em duelo (precisa de Lua) — a carta nasce com a
+      tag <b>sem-efeito</b>.
+    </div>
+
+    <div class="row">
+      <div class="art-preview" id="im-art" title="clique para usar a imagem da carta (PNG/JPG)">selecione um arquivo</div>
+      <div style="flex:1; min-width:0">
+        <label>Nome</label>
+        <input type="text" id="im-name" maxlength="80">
+
+        <div class="grid">
+          <div>
+            <label>Categoria</label>
+            <select id="im-cat">
+              <option value="Monster">Monstro</option>
+              <option value="Spell">Magia</option>
+              <option value="Trap">Armadilha</option>
+            </select>
+          </div>
+          <div id="wrap-kind">
+            <label>Espécie</label>
+            <select id="im-kind"></select>
+          </div>
+          <div id="wrap-sub" hidden>
+            <label>Subtipo</label>
+            <select id="im-sub"></select>
+          </div>
+          <div id="wrap-attr">
+            <label>Atributo</label>
+            <select id="im-attr"></select>
+          </div>
+          <div id="wrap-race">
+            <label>Raça</label>
+            <input type="text" id="im-race" list="race-list" autocomplete="off">
+            <datalist id="race-list"></datalist>
+          </div>
+          <div id="wrap-level">
+            <label>Nível <span style="color:var(--red)">*</span></label>
+            <input type="number" id="im-level" min="0" max="12" placeholder="falta no .json">
+          </div>
+          <div id="wrap-atk">
+            <label>ATK</label>
+            <input type="number" id="im-atk" min="0" step="50">
+          </div>
+          <div id="wrap-def">
+            <label>DEF</label>
+            <input type="number" id="im-def" min="0" step="50">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <label>Moldura do card (PNG/JPG) — opcional</label>
+    <div class="row" style="align-items:center; gap:8px; margin-top:2px">
+      <button type="button" id="im-frame-pick">escolher imagem…</button>
+      <button type="button" id="im-frame-auto" hidden>voltar p/ automática</button>
+      <span id="im-frame-status" style="font-size:10px; color:var(--blue)">moldura automática (pelo tipo)</span>
+    </div>
+
+    <label>Efeito / texto</label>
+    <textarea id="im-desc"></textarea>
+
+    <label>Tags (separadas por vírgula)</label>
+    <input type="text" id="im-tags" value="custom, sem-efeito">
+
+    <div class="err" id="im-err"></div>
+    <div class="actions">
+      <button id="im-cancel">cancelar</button>
+      <button id="im-save" class="btn-primary">salvar carta</button>
+    </div>
   </div>
 </div>
 

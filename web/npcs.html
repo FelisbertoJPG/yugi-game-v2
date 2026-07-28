@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NPCs — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  .wrap { width: min(880px, 94vw); margin: 0 auto; padding: 18px 0 40px; }
+  .lead { color: var(--dim); font-size: 11px; margin: 4px 0 18px; letter-spacing: .5px; }
+
+  .npc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+  .npc {
+    background: var(--panel); border: 2px solid var(--line); padding: 12px;
+    display: flex; gap: 12px;
+  }
+  .npc .sig {
+    width: 82px; flex: none; aspect-ratio: 59 / 86; background: var(--panel2);
+    border: 1px solid var(--line); object-fit: cover; display: block;
+  }
+  .npc .body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .npc h3 { margin: 0; font-size: 15px; color: var(--gold); }
+  .npc .theme { font-size: 10px; color: var(--blue); letter-spacing: 1px; }
+  .npc .counts { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  .npc .drop { font-size: 10px; color: var(--dim); }
+  .npc .drop b { color: var(--ink); }
+  .npc .deck-pick { font-size: 10px; color: var(--dim); margin-top: 4px; }
+  .npc .deck-pick select { font-size: 11px; max-width: 100%; margin-top: 2px; }
+  .pill { display: inline-block; padding: 1px 7px; font-size: 10px; border: 1px solid; margin-top: 3px; }
+  .pill.ok { color: var(--green); border-color: var(--green); }
+  .pill.err { color: var(--red); border-color: var(--red); }
+  .pill.empty { color: var(--dim); border-color: var(--line); }
+  .npc .acts { margin-top: auto; display: flex; gap: 6px; padding-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>▚ NPCS</h1>
+  <span class="spacer"></span>
+  <button id="btn-home">← home</button>
+</div>
+
+<div class="wrap">
+  <div class="lead">
+    Monte o deck de cada adversário desta fase. Recomendado: use a <b>Lista 1</b> no
+    Deck Builder (Normais + as 7 magia/armadilha). A <b>carta que dropa</b> é a que o
+    NPC entrega ao ser derrotado — você escolhe entre as cartas do deck dele.
+  </div>
+  <div class="npc-grid" id="grid"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { listNpcState, setNpcActiveIndex, deleteNpcDeck } from '/web/js/npcs.js';
+
+const $ = (id) => document.getElementById(id);
+const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+let toastTimer;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
+function render() {
+  const frag = document.createDocumentFragment();
+
+  for (const npc of listNpcState()) {
+    const { decks, activeIndex, active } = npc;
+    const sig = active ? active.signatureId : npc.signatureId;
+
+    let counts, state, pickHtml;
+    if (!active) {
+      counts = 'nenhum deck montado';
+      state = '<span class="pill empty">SEM DECK</span>';
+      pickHtml = '';
+    } else {
+      const d = active.deck;
+      const v = d.validate();
+      counts = `Main <b>${d.main.length}</b> · Extra <b>${d.extra.length}</b>`;
+      state = `<span class="pill ${v.valid ? 'ok' : 'err'}">${v.valid ? 'VÁLIDO' : 'INCOMPLETO'}</span>`;
+      const opts = decks.map((dk) =>
+        `<option value="${dk.index}"${dk.index === activeIndex ? ' selected' : ''}>${dk.name} (${dk.deck.main.length}/${dk.deck.extra.length})</option>`);
+      pickHtml = `<div class="deck-pick">deck ativo (${decks.length}):<br>
+          <select data-pick>${opts.join('')}</select></div>`;
+    }
+
+    const delBtn = decks.length > 1
+      ? '<button data-del class="btn-danger">excluir</button>' : '';
+    const editLabel = active ? 'editar deck ativo' : 'montar 1º deck';
+
+    const card = document.createElement('div');
+    card.className = 'npc';
+    card.innerHTML = `
+      <img class="sig" src="${ART(sig)}" alt="" loading="lazy">
+      <div class="body">
+        <h3>${npc.name}</h3>
+        <div class="theme">${npc.theme}</div>
+        <div class="counts">${counts}</div>
+        <div>${state}</div>
+        <div class="drop">dropa: <b>${sig}</b></div>
+        ${pickHtml}
+        <div class="acts">
+          <button data-edit class="btn-primary">${editLabel}</button>
+          <button data-new>＋ novo deck</button>
+          ${delBtn}
+        </div>
+      </div>`;
+
+    card.querySelector('[data-edit]').onclick = () => {
+      const q = active ? `&deck=${activeIndex}` : '&deck=new';
+      location.href = `/web/deck.html?npc=${npc.id}${q}`;
+    };
+    card.querySelector('[data-new]').onclick = () => {
+      location.href = `/web/deck.html?npc=${npc.id}&deck=new`;
+    };
+    const pick = card.querySelector('[data-pick]');
+    if (pick) pick.onchange = (e) => {
+      setNpcActiveIndex(npc.id, Number(e.target.value));
+      toast(`${npc.name}: deck ativo trocado`);
+      render();
+    };
+    const del = card.querySelector('[data-del]');
+    if (del) del.onclick = () => {
+      if (!confirm(`Excluir o deck ativo de ${npc.name}?`)) return;
+      deleteNpcDeck(npc.id, activeIndex);
+      toast('deck excluído');
+      render();
+    };
+    frag.append(card);
+  }
+  $('grid').replaceChildren(frag);
+}
+
+$('btn-home').onclick = () => (location.href = '/web/index.html');
+render();
+</script>
+</body>
+</html>

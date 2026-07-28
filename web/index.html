@@ -86,6 +86,16 @@
       <span>Navegador de cartas</span>
       <span class="why">13.728 cartas</span>
     </button>
+    <button id="btn-npcs">
+      <span class="k">4</span>
+      <span>Adversários (NPCs)</span>
+      <span class="why">montar os decks dos NPCs</span>
+    </button>
+    <button id="btn-train">
+      <span class="k">5</span>
+      <span>Treino de duelo</span>
+      <span class="why">beta · exige o duel-server rodando</span>
+    </button>
   </div>
 
   <footer id="foot">carregando…</footer>
@@ -139,10 +149,14 @@ function render() {
 
 $('btn-deck').onclick = () => (location.href = '/web/deck.html');
 $('btn-cards').onclick = () => (location.href = '/ygo-data/examples/web-demo.html');
+$('btn-npcs').onclick = () => (location.href = '/web/npcs.html');
+$('btn-train').onclick = () => (location.href = '/web/duel.html');
 
 document.addEventListener('keydown', (e) => {
   if (e.key === '1') $('btn-deck').click();
   if (e.key === '3') $('btn-cards').click();
+  if (e.key === '4') $('btn-npcs').click();
+  if (e.key === '5') $('btn-train').click();
 });
 
 // rodapé com a proveniência dos dados

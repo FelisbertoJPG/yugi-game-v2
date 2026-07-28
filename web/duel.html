@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treino de Duelo — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .status-line { font-size: 11px; }
+  .status-line b { color: var(--gold); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--red); margin-right:5px; }
+  .dot.on { background: var(--green); }
+
+  .arena { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; overflow: auto; }
+  .handrow { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; min-height: 62px; }
+  .handrow.opp { opacity: .8; }
+
+  .rows { display: flex; flex-direction: column; gap: 4px; }
+  .zonerow { display: flex; gap: 6px; justify-content: center; align-items: center; }
+  .pile { display: flex; flex-direction: column; gap: 4px; }
+
+  .zone {
+    width: 58px; aspect-ratio: 59/86; border: 1px solid var(--line);
+    background: #0c141d; display: flex; align-items: center; justify-content: center;
+    position: relative; border-radius: 2px;
+  }
+  .zone .zl { position: absolute; top: 1px; left: 2px; font-size: 7px; color: #3a4756; letter-spacing: .5px; }
+  .zone.mz { border-color: #6b4a1e; }
+  .zone.sz { border-color: #1e5a4a; }
+  .zone.fz { border-color: #4a2e6b; }
+  .zone.free { outline: 2px dashed var(--gold); outline-offset: -2px; cursor: pointer; background: #1a2436; }
+  .zone.free:hover { background: #24324a; }
+  .zone img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .zone .def img { transform: rotate(90deg) scale(.82); }
+
+  .card { width: 54px; aspect-ratio: 59/86; border: 1px solid var(--line); background: #0c141d; position: relative; border-radius: 2px; }
+  .card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card.playable { outline: 2px solid var(--green); outline-offset: -2px; cursor: pointer; }
+  .card.playable:hover { outline-color: var(--gold); }
+  .card.selected { outline: 3px solid var(--gold); outline-offset: -2px; }
+  .back {
+    width:100%; height:100%;
+    background:
+      radial-gradient(circle at 50% 42%, #b8863a 0 18%, #7c5417 19% 34%, #59380d 35% 100%),
+      linear-gradient(135deg,#6b4a1e,#3a260c);
+    border: 1px solid #2a1c08; box-sizing: border-box;
+  }
+  .actbar { display:flex; gap:6px; align-items:center; }
+  .actbar b { color: var(--gold); }
+  .actbar button { font-size: 11px; padding: 3px 10px; }
+
+  .midbar { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 4px; background: var(--panel); border: 1px solid var(--line); }
+  .phase-pill { padding: 1px 7px; border: 1px solid var(--line); font-size: 10px; color: var(--dim); }
+  .phase-pill.on { color: var(--gold); border-color: var(--gold); }
+  .lp { font-size: 12px; color: var(--ink); }
+
+  .pilezone {
+    width: 58px; aspect-ratio: 59/86; border: 1px dashed #3a4756; border-radius: 2px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--dim); cursor: default; background: #0a0f16; position: relative;
+  }
+  .pilezone.has { cursor: pointer; border-style: solid; border-color: #555; color: var(--ink); }
+  .pilezone.has:hover { border-color: var(--gold); }
+  .pilezone .n { font-size: 15px; color: var(--gold); }
+
+  .gv-back { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; background: #000b; padding: 20px; }
+  .gv-back.show { display: flex; }
+  .gv { background: var(--panel); border: 2px solid var(--gold); padding: 12px; width: min(680px, 96vw); max-height: 88vh; overflow: auto; }
+  .gv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .gv-head b { color: var(--gold); flex: 1; }
+  .gv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+  .gv-grid .thumb { width: 100%; }
+
+  .log { height: 96px; overflow: auto; background: #0c1118; border-top: 1px solid var(--line);
+    font-family: ui-monospace, monospace; font-size: 11px; padding: 5px 12px; color: var(--dim); }
+  .log .l { white-space: pre-wrap; }
+  .log .l.big { color: var(--gold); }
+  .prompt { font-size: 12px; color: var(--gold); min-height: 16px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>▚ TREINO</h1>
+  <span class="status-line"><span class="dot" id="dot"></span><span id="conn">—</span></span>
+  <span class="spacer"></span>
+  <span class="status-line">turno: <b id="turn">—</b></span>
+  <select id="deck-sel" title="deck do treino" style="max-width:160px; font-size:11px"></select>
+  <button id="btn-end">encerrar turno</button>
+  <button id="btn-save" class="btn-primary" title="grava a jogada deste turno p/ treinar o NPC">salvar jogada</button>
+  <button id="btn-start">novo duelo</button>
+  <button id="btn-home">← home</button>
+</div>
+
+<div class="hint" id="prompt-bar"><span class="prompt" id="prompt">—</span></div>
+<div class="hint" id="warn" style="color:var(--red)" hidden></div>
+
+<div class="arena">
+  <div class="handrow opp" id="hand-opp"></div>
+
+  <div class="rows" id="opp-field"></div>
+  <div class="midbar" id="mid"></div>
+  <div class="rows" id="you-field"></div>
+
+  <div class="handrow" id="hand-you"></div>
+</div>
+
+<div class="log" id="log"></div>
+
+<div class="gv-back" id="gv-back">
+  <div class="gv">
+    <div class="gv-head"><b id="gv-title">Cemitério</b><button id="gv-close">fechar</button></div>
+    <div class="gv-grid" id="gv-grid"></div>
+  </div>
+</div>
+
+<script type="module">
+import { YgoDB } from '/ygo-data/src/ygodb.js';
+import { getActiveDeck, listDecks, getActiveIndex } from '/web/js/storage.js';
+
+const SRV = 'http://localhost:8770';
+const $ = (id) => document.getElementById(id);
+const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+const PHASES = [[1,'DP'],[2,'SP'],[4,'M1'],[0x80,'BP'],[0x100,'M2'],[0x200,'EP']];
+
+let db = null;
+try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch {}
+const nameOf = (id) => db?.brief(id)?.name ?? String(id);
+
+// estado do duelo no cliente
+let hand = { 0: [], 1: 0 };                 // p0: lista de codes; p1: só contagem
+let field = { 0: fresh(), 1: fresh() };
+let question = null, ended = false, turn = 0, phase = 0, turnNo = 0;
+let lp = { 0: 8000, 1: 8000 };               // pontos de vida
+let selectedHand = null;                      // índice da carta da mão selecionada
+let turnPlays = [];                          // jogadas do turno atual (p/ "salvar jogada")
+let deckName = '';                            // deck em uso
+function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: null, g: [] }; }
+
+function log(msg, big=false){ const e=document.createElement('div'); e.className='l'+(big?' big':''); e.textContent=msg; $('log').append(e); $('log').scrollTop=1e9; }
+
+// ---------- comunicação com o servidor ----------
+async function rpc(path, body) {
+  const r = await fetch(`${SRV}${path}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error('http '+r.status);
+  return r.json();
+}
+
+function chosenDeck() {
+  const decks = listDecks();
+  const i = Number($('deck-sel').value);
+  return decks[i] || getActiveDeck();
+}
+
+async function start() {
+  const deck = chosenDeck();
+  const ids = deck ? deck.main : [];
+  if (!ids.length) { warn('Nenhum deck com cartas. Monte/selecione um deck no Deck Builder.'); return; }
+  deckName = deck.name;
+  hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
+  lp = { 0: 8000, 1: 8000 };
+  ended = false; turnNo = 0; turnPlays = []; selectedHand = null;
+  $('log').replaceChildren();
+  try {
+    const j = await rpc('/start', { deck: ids });   // seed aleatória no servidor
+    conn(true);
+    log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)`, true);
+    apply(j);
+  } catch (e) { conn(false); warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).'); }
+}
+
+async function act(action, arg, label) {
+  if (ended) return;
+  turnPlays.push({ action, arg, label, turn: turnNo });
+  try { apply(await rpc('/respond', { action, arg })); }
+  catch (e) { conn(false); warn('perdi a conexão com o servidor.'); }
+}
+
+// ---------- aplicar a resposta do servidor ----------
+function apply(j) {
+  try {
+    $('warn').hidden = true;
+    for (const ev of j.events || []) handle(ev);
+    question = j.question || null;
+    ended = !!j.ended;
+    render();
+  } catch (e) {
+    console.error('[apply]', e, j);
+    warn('ERRO na tela: ' + (e && e.message ? e.message : e) + ' — abra o console (F12) e/ou dê "novo duelo".');
+  }
+}
+
+function handle(ev) {
+  switch (ev.type) {
+    case 'draw':
+      if (ev.player === 0) { for (const c of ev.cards) hand[0].push(c.code); }
+      else hand[1] += ev.cards.length;
+      log(`compra: jogador ${ev.player} +${ev.cards.length}`);
+      break;
+    case 'turn': turn = ev.player; turnNo++; if (ev.player === 0) turnPlays = []; log(`— turno ${turnNo} (jogador ${ev.player}) —`, true); break;
+    case 'phase': phase = ev.phase; break;
+    case 'summoning': log(`invocando ${nameOf(ev.code)}`); break;
+    case 'move': {
+      // limpa a zona de origem (carta que sai p/ cemitério, mão, etc.)
+      const src = field[ev.fromCtrl];
+      if (src) {
+        if (ev.fromLoc === 4) src.m[ev.fromSeq] = null;
+        else if (ev.fromLoc === 8) { if (ev.fromSeq === 5) src.f = null; else src.s[ev.fromSeq] = null; }
+        else if (ev.fromLoc === 0x100) src.f = null;
+      }
+      // coloca no destino
+      const f = field[ev.controller] || (field[ev.controller] = fresh());
+      const card = { code: ev.code, pos: ev.pos };
+      if (ev.loc === 4) f.m[ev.seq] = card;
+      else if (ev.loc === 8) { if (ev.seq === 5) f.f = card; else f.s[ev.seq] = card; } // seq 5 = zona de campo
+      else if (ev.loc === 0x100) f.f = card;
+      else if (ev.loc === 0x10) f.g.push(ev.code); // 0x10 = LOCATION_GRAVE
+      if (ev.fromLoc === 2) { // saiu da mão
+        if (ev.fromCtrl === 0) { const i = hand[0].indexOf(ev.code); if (i>=0) hand[0].splice(i,1); }
+        else if (hand[1] > 0) hand[1]--;
+      }
+      break;
+    }
+    case 'lp': {
+      lp[ev.player] = ev.lp;
+      const who = ev.player === 0 ? 'você' : 'oponente';
+      log(`${ev.delta < 0 ? '−' : '+'}${Math.abs(ev.delta)} LP ${who} → ${ev.lp}`);
+      break;
+    }
+    case 'end': {
+      const win = lp[0] <= 0 ? 'oponente venceu' : lp[1] <= 0 ? 'você venceu!' : 'duelo encerrado';
+      log(`=== ${win} ===`, true);
+      break;
+    }
+  }
+}
+
+// ---------- render ----------
+function zoneEl(cell, cls, label, onClick) {
+  const z = document.createElement('div');
+  z.className = 'zone ' + cls;
+  z.innerHTML = `<span class="zl">${label}</span>`;
+  if (cell) {
+    const facedown = (cell.pos & 0xa) !== 0;   // POS_FACEDOWN_*
+    const el = document.createElement(facedown ? 'div' : 'img');
+    if (facedown) { el.className = 'back'; el.style.width = '100%'; el.style.height = '100%'; el.title = nameOf(cell.code) + ' (virada)'; }
+    else { el.src = ART(cell.code); el.title = nameOf(cell.code); }
+    // só MONSTRO em defesa deita (horizontal); magia/armadilha fica sempre vertical
+    if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
+    z.append(el);
+  } else if (onClick) { z.classList.add('free'); z.onclick = onClick; }
+  return z;
+}
+
+function fieldRows(player, isYou) {
+  const wrap = document.createElement('div'); wrap.className = 'rows';
+  const f = field[player];
+  const placing = question && question.kind === 'place' && isYou;
+  const freeM = placing && question.zoneType === 'm' ? new Set(question.zones) : new Set();
+  const freeS = placing && question.zoneType === 's' ? new Set(question.zones) : new Set();
+
+  const mrow = document.createElement('div'); mrow.className = 'zonerow';
+  const srow = document.createElement('div'); srow.className = 'zonerow';
+  mrow.append(zoneEl(f.f, 'fz', 'F'));
+  for (let i = 0; i < 5; i++)
+    mrow.append(zoneEl(f.m[i], 'mz', 'M'+i, freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null));
+  mrow.append(pileEl(player, 'GY', f.g));   // cemitério à direita dos monstros
+  const spacer = document.createElement('div'); spacer.style.width = '58px'; srow.append(spacer);
+  for (let i = 0; i < 5; i++)
+    srow.append(zoneEl(f.s[i], 'sz', 'S'+i, freeS.has(i) ? () => act('place', i, `colocar na zona S${i}`) : null));
+  const spacer2 = document.createElement('div'); spacer2.style.width = '58px'; srow.append(spacer2);
+
+  // você (embaixo): monstros na linha de cima (perto do centro), magias embaixo.
+  // oponente (em cima): espelhado.
+  if (isYou) { wrap.append(mrow, srow); } else { wrap.append(srow, mrow); }
+  return wrap;
+}
+
+// Mapeia cada carta da mão (por posição) ao índice dentro de uma lista do motor,
+// casando por código e respeitando duplicatas (ordem da mão).
+function mapList(list) {
+  const m = new Array(hand[0].length).fill(-1);
+  const used = new Set();
+  for (const a of list || []) {
+    for (let h = 0; h < hand[0].length; h++) {
+      if (!used.has(h) && m[h] < 0 && hand[0][h] === a.code) { m[h] = a.index; used.add(h); break; }
+    }
+  }
+  return m;
+}
+
+// As ações possíveis para a carta da mão na posição h (o motor decide o que
+// pode: invocar/setar/utilizar — ver requisitos 3 e 4).
+function actionsFor(h) {
+  if (!question || question.kind !== 'idle' || question.player !== 0) return [];
+  const out = [];
+  if (MAPS.summon[h] >= 0)     out.push({ action: 'summon',     arg: MAPS.summon[h],     label: 'Invocar' });
+  if (MAPS.activate[h] >= 0)   out.push({ action: 'activate',   arg: MAPS.activate[h],   label: 'Utilizar' });
+  if (MAPS.setmonster[h] >= 0) out.push({ action: 'setmonster', arg: MAPS.setmonster[h], label: 'Setar' });
+  if (MAPS.setspell[h] >= 0)   out.push({ action: 'setspell',   arg: MAPS.setspell[h],   label: 'Setar' });
+  return out;
+}
+
+let MAPS = { summon: [], setmonster: [], setspell: [], activate: [] };
+function rebuildMaps() {
+  MAPS = {
+    summon: mapList(question && question.summonable),
+    setmonster: mapList(question && question.settable),
+    setspell: mapList(question && question.settableST),
+    activate: mapList(question && question.activatable),
+  };
+}
+
+function toggleSelect(h) {
+  selectedHand = (selectedHand === h) ? null : h;   // clicar de novo desmarca
+  render();
+}
+
+function doAction(a) {
+  const code = hand[0][selectedHand];
+  selectedHand = null;
+  act(a.action, a.arg, `${a.label} ${nameOf(code)}`);
+}
+
+function render() {
+  $('turn').textContent = turn === 0 ? 'VOCÊ' : 'oponente';
+  $('opp-field').replaceChildren(fieldRows(1, false));
+  $('you-field').replaceChildren(fieldRows(0, true));
+
+  // LP + fases na barra central
+  const lpEl = (p) => {
+    const s = document.createElement('span'); s.className = 'lp';
+    s.innerHTML = `<b style="color:${p === 0 ? 'var(--blue)' : 'var(--red)'}">${p === 0 ? 'VOCÊ' : 'OPP'}</b> ${lp[p]}`;
+    return s;
+  };
+  $('mid').replaceChildren(
+    lpEl(1),
+    ...PHASES.map(([v, n]) => { const s = document.createElement('span'); s.className = 'phase-pill' + (v === phase ? ' on' : ''); s.textContent = n; return s; }),
+    lpEl(0),
+  );
+
+  // mão do oponente (verso)
+  const oh = document.createElement('div'); oh.style.display='contents';
+  $('hand-opp').replaceChildren(...Array.from({length: hand[1]}, () => {
+    const c=document.createElement('div'); c.className='card'; c.innerHTML='<div class="back"></div>'; return c;
+  }));
+
+  // sua mão (selecionável quando há ação disponível)
+  rebuildMaps();
+  if (selectedHand != null && actionsFor(selectedHand).length === 0) selectedHand = null;
+  $('hand-you').replaceChildren(...hand[0].map((code, h) => {
+    const c = document.createElement('div'); c.className = 'card';
+    c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}" alt="">`;
+    if (actionsFor(h).length) { c.classList.add('playable'); c.onclick = () => toggleSelect(h); }
+    if (h === selectedHand) c.classList.add('selected');
+    c.oncontextmenu = (e) => e.preventDefault();
+    return c;
+  }));
+
+  const yourIdle = question && question.kind === 'idle' && question.player === 0;
+  const yourPlace = question && question.kind === 'place' && question.player === 0;
+  $('btn-end').disabled = !(yourIdle && question.canEnd) || ended;
+
+  // barra de ação (quando há carta selecionada) ou prompt normal
+  const bar = $('prompt-bar');
+  if (selectedHand != null) {
+    const div = document.createElement('div'); div.className = 'actbar';
+    div.append(Object.assign(document.createElement('b'), { textContent: nameOf(hand[0][selectedHand]) + ':' }));
+    for (const a of actionsFor(selectedHand)) {
+      const b = document.createElement('button'); b.textContent = a.label; b.onclick = () => doAction(a); div.append(b);
+    }
+    const x = document.createElement('button'); x.textContent = 'cancelar'; x.onclick = () => { selectedHand = null; render(); };
+    div.append(x);
+    bar.replaceChildren(div);
+  } else {
+    const unsupported = question && question.kind === 'unsupported';
+    if (unsupported) warn(`O motor pediu uma ação que o treino ainda não suporta (msg ${question.rawType} — ex.: escolher tributo/alvo). Dê "novo duelo".`);
+    bar.replaceChildren(Object.assign(document.createElement('span'), {
+      className: 'prompt',
+      textContent: ended ? 'duelo encerrado.'
+        : unsupported ? `⚠ ação não suportada ainda (msg ${question.rawType}) — comece um novo duelo.`
+        : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
+        : yourIdle ? 'Sua vez: clique uma carta (verde) para ver as opções, ou encerre o turno.'
+        : 'aguarde…'
+    }));
+  }
+}
+
+function pileEl(player, label, cards) {
+  const d = document.createElement('div');
+  d.className = 'pilezone' + (cards.length ? ' has' : '');
+  d.innerHTML = `<span class="n">${cards.length}</span>${label}`;
+  if (cards.length) d.onclick = () => openGrave(player);
+  return d;
+}
+
+function openGrave(player) {
+  const cards = field[player].g;
+  $('gv-title').textContent = `Cemitério — ${player === 0 ? 'você' : 'oponente'} (${cards.length} cartas)`;
+  $('gv-grid').replaceChildren(...cards.map((code) => {
+    const t = document.createElement('div'); t.className = 'thumb'; t.title = nameOf(code);
+    t.innerHTML = `<img src="${ART(code)}" alt="">`; return t;
+  }));
+  $('gv-back').classList.add('show');
+}
+
+function populateDecks() {
+  const decks = listDecks();
+  const sel = $('deck-sel');
+  sel.replaceChildren(...decks.map((d, i) => new Option(`${d.name} (${d.main.length})`, String(i))));
+  if (!decks.length) sel.append(new Option('(nenhum deck salvo)', ''));
+  const active = getActiveIndex();
+  sel.value = (active != null && decks[active]) ? String(active) : (decks.length ? '0' : '');
+}
+
+function snapshotField() {
+  const side = (p) => ({
+    m: field[p].m.map((c) => c ? c.code : null),
+    s: field[p].s.map((c) => c ? c.code : null),
+    f: field[p].f ? field[p].f.code : null,
+    g: [...field[p].g],
+  });
+  return { you: side(0), opp: side(1) };
+}
+
+function conn(ok){ $('dot').classList.toggle('on', ok); $('conn').textContent = ok?'conectado':'desconectado'; }
+function warn(m){ $('warn').hidden=false; $('warn').textContent=m; }
+// qualquer erro de JS agora aparece na barra vermelha (nunca mais trava em silêncio)
+window.addEventListener('error', (e) => warn('ERRO JS: ' + e.message + ' @ linha ' + e.lineno));
+window.addEventListener('unhandledrejection', (e) => warn('ERRO async: ' + ((e.reason && e.reason.message) || e.reason)));
+
+// ---------- salvar jogada (memória p/ NPC) ----------
+// Snapshot do momento: turno, sua mão, a mão/campo do oponente, o campo, e a
+// sequência de ações que você fez neste turno. É a matéria-prima do "treinar NPC".
+function savePlays() {
+  if (!turnPlays.length) return log('nenhuma jogada neste turno pra salvar.');
+  const snap = {
+    at: new Date().toISOString(),
+    deck: deckName,
+    turn: turnNo,
+    phase,
+    myHand: hand[0].map((c) => ({ code: c, name: nameOf(c) })),
+    oppHandCount: hand[1],
+    field: snapshotField(),
+    plays: turnPlays,
+  };
+  let all = [];
+  try { all = JSON.parse(localStorage.getItem('ygo:plays') || '[]'); } catch {}
+  all.push(snap);
+  localStorage.setItem('ygo:plays', JSON.stringify(all));
+  log(`✔ jogada do turno ${turnNo} salva (${turnPlays.length} ações, ${snap.myHand.length} na mão). Total: ${all.length}.`, true);
+}
+
+$('btn-start').onclick = start;
+$('btn-end').onclick = () => act('endturn', 0, 'encerrar turno');
+$('btn-save').onclick = savePlays;
+$('btn-home').onclick = () => (location.href = '/web/index.html');
+$('deck-sel').onchange = start;                 // trocar de deck começa novo duelo
+$('gv-close').onclick = () => $('gv-back').classList.remove('show');
+$('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $('gv-back').classList.remove('show'); });
+
+populateDecks();
+start();
+</script>
+</body>
+</html>

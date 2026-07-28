@@ -10,9 +10,35 @@
 Mini-RPG de Yu-Gi-Oh com duelo **fiel às regras** (o motor é o `ocgcore` + os
 scripts Lua oficiais). O duelo roda num **servidor C# (.NET 8)** que expõe o motor
 via HTTP local; o front web (`web/duel.html`) desenha o estado e manda as jogadas.
-Não existe IA — o oponente no treino fica **desligado** (auto-passa o turno). O
-objetivo do "treino" é (a) validar a mecânica e (b) **gravar as jogadas do jogador**
+O objetivo do "treino" é (a) validar a mecânica e (b) **gravar as jogadas do jogador**
 pra virar a "memória"/script dos NPCs depois.
+
+## 1.1. NPC do Teste de Batalha
+
+O oponente **joga** (`web/js/`… não: `duel-server/src/NpcBrain.cs`). Regras, em
+ordem de prioridade — são exatamente as especificadas, nada além:
+
+1. **Pote da Ganância antes de tudo.** Se dá para ativar, ativa antes de invocar.
+2. **Nível maior tem precedência.** Se dá para invocar com tributo, é essa a jogada.
+3. **Sob ameaça, defende.** Se o oponente tem em campo um monstro com ATK maior
+   que tudo na mão do NPC, ele SETA o monstro de maior DEF.
+4. **Senão, ataca.** Invoca o de maior ATK (Nv 1–4) em ataque.
+5. Sem jogada possível, encerra o turno.
+
+Detalhes que importam:
+- **"Pôr em defesa" = Set.** Pelas regras oficiais a Invocação Normal é sempre em
+  ataque com a face para cima; a única forma legal de pôr um monstro em defesa no
+  próprio turno é setá-lo. Por isso a regra 3 vira `setmonster`.
+- O NPC só enxerga monstros **com a face para cima** (`FaceUpMonsters`) — ele não
+  lê o ATK de uma carta setada, que não teria como conhecer.
+- Cada jogada vira um evento `{type:"npc", action, why}`, que o front mostra no
+  log com o motivo. É assim que se confere se ele está seguindo as regras.
+- `POST /start {"npc": false}` volta ao oponente desligado (auto-passa), que é o
+  modo de treinar sozinho.
+
+Teste: `duel-server.exe --test-npc` — 10 checagens, sendo 6 da decisão isolada
+(cada regra em situação controlada) e 4 de um duelo real onde o NPC usa os Potes,
+invoca por ATK, faz invocação com tributo e seta em defesa quando ameaçado.
 
 ## 2. Como rodar
 

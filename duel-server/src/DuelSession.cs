@@ -29,6 +29,9 @@ namespace DuelServer
         /// <summary>Ponteiro nativo do duelo (uso interno: harness de diagnóstico).</summary>
         internal IntPtr Handle => _duel;
 
+        /// <summary>Banco de cartas — a IA do NPC consulta ATK/DEF/nível por aqui.</summary>
+        public DatabaseManager Cards => _db;
+
         public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0)
         {
             _db = new DatabaseManager(streamingAssets);

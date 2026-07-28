@@ -44,7 +44,7 @@ namespace DuelServer
         static void RitualSummon(string sa)
         {
             var deck = RitualDeck();
-            using var duel = new InteractiveDuel(sa, deck, 24680UL, 0x1000000UL);
+            using var duel = new InteractiveDuel(sa, deck, 24680UL, 0x1000000UL, npc: false);
 
             var r = duel.Advance();
             int guard = 0;
@@ -152,7 +152,10 @@ namespace DuelServer
         static void TributeSummon(string sa)
         {
             var deck = BuildDeck();
-            using var duel = new InteractiveDuel(sa, deck, 987654321UL, 0x1000000UL);
+            // NPC desligado de propósito: este teste é sobre a mecânica de
+            // invocação. Com o oponente jogando, o tabuleiro muda e a pergunta de
+            // tributo às vezes se resolve sozinha — ruído para o que se mede aqui.
+            using var duel = new InteractiveDuel(sa, deck, 987654321UL, 0x1000000UL, npc: false);
 
             var r = duel.Advance();
             int guard = 0;

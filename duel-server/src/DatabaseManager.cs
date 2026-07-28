@@ -55,6 +55,52 @@ public class DatabaseManager
         }
     }
 
+    /// <summary>Stats de uma carta, para a IA do NPC decidir a jogada.</summary>
+    public readonly struct CardStats
+    {
+        public readonly uint Code, Type, RawLevel;
+        public readonly int Atk, Def;
+        public CardStats(uint code, uint type, uint rawLevel, int atk, int def)
+        { Code = code; Type = type; RawLevel = rawLevel; Atk = atk; Def = def; }
+
+        public bool IsMonster => (Type & 0x1) != 0;
+        public bool IsSpell => (Type & 0x2) != 0;
+        /// <summary>O campo `level` empacota escalas de Pêndulo nos bits altos.</summary>
+        public int Level => (int)(RawLevel & 0xff);
+        /// <summary>ATK "?" é gravado como -2; para decidir jogada vale 0.</summary>
+        public int AtkValue => Atk == -2 ? 0 : Atk;
+        public int DefValue => Def == -2 ? 0 : Def;
+    }
+
+    private readonly System.Collections.Generic.Dictionary<uint, CardStats> _statsCache = new();
+
+    /// <summary>Consulta stats (com cache) — a IA pergunta a mesma carta muitas vezes.</summary>
+    public CardStats Stats(uint code)
+    {
+        if (_statsCache.TryGetValue(code, out var hit)) return hit;
+
+        var s = new CardStats(code, 0, 0, 0, 0);
+        if (db != IntPtr.Zero)
+        {
+            string query = $"SELECT type, level, atk, def FROM datas WHERE id = {code}";
+            if (sqlite3_prepare_v2(db, query, -1, out IntPtr stmt, IntPtr.Zero) == 0)
+            {
+                if (sqlite3_step(stmt) == 100)
+                {
+                    s = new CardStats(
+                        code,
+                        (uint)sqlite3_column_int(stmt, 0),
+                        (uint)sqlite3_column_int(stmt, 1),
+                        sqlite3_column_int(stmt, 2),
+                        sqlite3_column_int(stmt, 3));
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
+        _statsCache[code] = s;
+        return s;
+    }
+
     public void CardReaderCallback(IntPtr payload, uint code, IntPtr dataPtr)
     {
         OCG_CardData cardData = new OCG_CardData();

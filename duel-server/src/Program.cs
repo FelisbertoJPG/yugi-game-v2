@@ -81,6 +81,10 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-summons") >= 0)
                 return TestSummons.Run(streamingAssets);
 
+            // Teste das regras do NPC do Teste de Batalha.
+            if (Array.IndexOf(args, "--test-npc") >= 0)
+                return TestNpc.Run(streamingAssets);
+
             // Harness de diagnóstico do protocolo (console).
             if (Array.IndexOf(args, "--selfplay") >= 0)
             {

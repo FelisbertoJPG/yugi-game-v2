@@ -286,6 +286,11 @@ function apply(j) {
 
 function handle(ev) {
   switch (ev.type) {
+    // O NPC anuncia a jogada e o motivo — é como dá para conferir se ele está
+    // seguindo as regras sem abrir o log do servidor.
+    case 'npc':
+      log(`🤖 NPC: ${ev.action} — ${ev.why}`, true);
+      return;
     case 'draw':
       if (ev.player === 0) { for (const c of ev.cards) hand[0].push(c.code); }
       else hand[1] += ev.cards.length;

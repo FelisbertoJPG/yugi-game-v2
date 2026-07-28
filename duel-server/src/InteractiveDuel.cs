@@ -24,6 +24,17 @@ namespace DuelServer
         Question _pending;
         readonly int[] _lp = { 8000, 8000 }; // pontos de vida dos 2 jogadores
 
+        // Campo: monstros na zona de monstro, por (jogador, sequência).
+        // Alimentado pelo MSG_MOVE — é o que a IA do NPC usa para "ver" a mesa.
+        readonly Dictionary<(int player, int seq), (uint code, int pos)> _board = new();
+
+        const byte LOCATION_MZONE = 0x4;
+        const int POS_FACEUP = 0x1 | 0x4;   // ataque OU defesa com a face para cima
+
+        readonly NpcBrain _npc;
+        readonly bool _npcEnabled;
+        List<object> _events;   // para o NPC registrar o que fez
+
         public sealed class Question
         {
             public string kind;                  // idle | place | battle | position | chain | unknown
@@ -61,15 +72,33 @@ namespace DuelServer
             public bool ended;
         }
 
-        public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed, ulong flags = 0)
+        public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed,
+                               ulong flags = 0, bool npc = true, uint[] npcDeck = null)
         {
-            _s = new DuelSession(streamingAssets, deck, deck, seed, flags);
+            _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags);
+            _npcEnabled = npc;
+            _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"));
+        }
+
+        /// <summary>
+        /// Monstros com a face para cima de um jogador. Só face para cima de
+        /// propósito: o NPC não deve "ler" o ATK de uma carta setada, que ele não
+        /// teria como conhecer.
+        /// </summary>
+        IReadOnlyList<uint> FaceUpMonsters(int player)
+        {
+            var list = new List<uint>();
+            foreach (var kv in _board)
+                if (kv.Key.player == player && (kv.Value.pos & POS_FACEUP) != 0)
+                    list.Add(kv.Value.code);
+            return list;
         }
 
         /// <summary>Avança até a sua vez de decidir (ou o fim). Resolve oponente/correntes.</summary>
         public Result Advance()
         {
             var r = new Result();
+            _events = r.events;   // o NPC anexa aqui o que decidiu
             for (int guard = 0; guard < 5000; guard++)
             {
                 int status = YgoCoreAPI.OCG_DuelProcess(_s.Handle);
@@ -118,8 +147,36 @@ namespace DuelServer
                 r.question = q;   // idle / place / battle do player 0 -> devolve pro front
                 return r;
             }
-            r.events.Add(new { type = "end", reason = "guard" }); r.ended = true;
+            // Estourar o guard significa laço fechado: o motor pede algo que
+            // respondemos sempre igual e ele nunca avança. Dizer QUAL pergunta
+            // ficou pendente é a diferença entre depurar em minutos ou em horas.
+            string travou = _pending == null ? "null" : $"{_pending.kind} p{_pending.player} raw={_pending.rawType}";
+            Log.Err($"[guard] laco fechado — pergunta pendente: {travou}");
+            r.events.Add(new { type = "end", reason = "guard", stuck = travou });
+            r.ended = true;
             return r;
+        }
+
+        /// <summary>
+        /// Turno do NPC. Com a IA desligada ele só passa o turno (comportamento
+        /// antigo, útil para treinar sozinho); ligada, joga pelas regras do
+        /// NpcBrain e registra a jogada como evento para o front mostrar.
+        /// </summary>
+        byte[] NpcIdle(Question q)
+        {
+            if (!_npcEnabled) return I32(7);
+
+            var play = _npc.Decide(q, q.player);
+            _events?.Add(new { type = "npc", action = play.Action, why = play.Why });
+            Log.Info($"[npc] {play.Action} -> {play.Why}");
+
+            return play.Action switch
+            {
+                "activate" => I32((play.Index << 16) | 5),
+                "summon" => I32(play.Index << 16),
+                "setmonster" => I32((play.Index << 16) | 3),
+                _ => I32(7),   // encerra o turno
+            };
         }
 
         /// <summary>Há mais candidatos do que o necessário? Só então vale perguntar.</summary>
@@ -162,9 +219,20 @@ namespace DuelServer
         {
             switch (q.kind)
             {
-                case "idle": _s.Respond(I32(7)); break;           // oponente encerra o turno
+                case "idle": _s.Respond(NpcIdle(q)); break;
                 case "battle": _s.Respond(I32(3)); break;         // encerra battle
-                case "place": _s.Respond(new byte[] { (byte)q.player, 0x4, (byte)(q.zones.Count > 0 ? q.zones[0] : 0) }); break;
+                case "place":
+                    // A localização TEM de acompanhar o tipo de zona pedido: uma
+                    // magia vai para a zona de magia (0x8), não para a de monstro.
+                    // Fixar 0x4 aqui fazia o motor recusar em laço fechado quando o
+                    // NPC ativava o Pote da Ganância.
+                    _s.Respond(new byte[]
+                    {
+                        (byte)q.player,
+                        (byte)(q.zoneType == "s" ? 0x8 : 0x4),
+                        (byte)(q.zones.Count > 0 ? q.zones[0] : 0),
+                    });
+                    break;
                 case "position": _s.Respond(I32(0x1)); break;
                 case "selectcard":
                 case "selecttribute": _s.Respond(AutoSelect(q)); break;
@@ -228,6 +296,10 @@ namespace DuelServer
                     byte pc = d[p++], pl = d[p++]; int ps = BitConverter.ToInt32(d, p); p += 4; int ppo = BitConverter.ToInt32(d, p); p += 4;
                     byte cc = d[p++], cl = d[p++]; int cs = BitConverter.ToInt32(d, p); p += 4; int cpo = BitConverter.ToInt32(d, p); p += 4;
                     ev.Add(new { type = "move", code, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
+
+                    // Mantém o modelo de campo em dia para a IA enxergar a mesa.
+                    if (pl == LOCATION_MZONE) _board.Remove((pc, ps));
+                    if (cl == LOCATION_MZONE) _board[(cc, cs)] = (code, cpo);
                     break;
                 }
                 case 91: LpChange(d, o, -1, ev); break; // MSG_DAMAGE: perde LP

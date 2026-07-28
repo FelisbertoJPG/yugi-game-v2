@@ -106,10 +106,18 @@ namespace DuelServer
                 ? (ulong)f.GetInt64()
                 : 0x1000000UL;
 
+            // NPC ligado por padrão. `npc:false` volta ao oponente desligado
+            // (auto-passa), que é o modo de treinar sozinho.
+            bool npc = !body.TryGetProperty("npc", out var n) || n.ValueKind != JsonValueKind.False;
+
+            // Deck do adversário; sem ele, usa o mesmo do jogador.
+            uint[] npcDeck = ReadDeck(body, "npcDeck");
+            if (npcDeck.Length == 0) npcDeck = null;
+
             lock (_lock)
             {
                 _duel?.Dispose();
-                _duel = new InteractiveDuel(_sa, deck, seed, flags);
+                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck);
                 return _duel.Advance();
             }
         }
@@ -135,9 +143,9 @@ namespace DuelServer
             }
         }
 
-        static uint[] ReadDeck(JsonElement body)
+        static uint[] ReadDeck(JsonElement body, string prop = "deck")
         {
-            if (!body.TryGetProperty("deck", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            if (!body.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array)
                 return Array.Empty<uint>();
             var list = new List<uint>();
             foreach (var e in arr.EnumerateArray())

@@ -180,18 +180,28 @@ internal static class Program
             exe = FindDuelServerExe()
                   ?? throw new Exception("compilou, mas nao achei o duel-server.exe");
         }
-        Info($"iniciando: {Path.GetFileName(exe)} --serve");
+        // Mostrar qual build subiu evita perder tempo achando que o código novo
+        // não funciona quando na verdade nem foi ele que rodou.
+        var quando = File.GetLastWriteTime(exe);
+        string cfg = exe.Contains("Release", StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
+        Info($"iniciando: duel-server.exe --serve  [{cfg}, compilado {quando:dd/MM HH:mm}]");
         return Spawn(exe, "--serve", Path.GetDirectoryName(exe));
     }
 
-    /// <summary>Procura o exe compilado, preferindo Release e o mais recente.</summary>
+    /// <summary>
+    /// Procura o exe compilado, sempre o MAIS RECENTE.
+    ///
+    /// Não preferir Release: uma versão antiga desta função priorizava Release e
+    /// acabou subindo um binário de horas antes, sem as mudanças recém-compiladas
+    /// em Debug — o comportamento novo simplesmente não aparecia, sem nenhum erro
+    /// visível. Num ciclo de desenvolvimento o que importa é o build mais novo.
+    /// </summary>
     static string FindDuelServerExe()
     {
         string bin = Path.Combine(_root, "duel-server", "bin");
         if (!Directory.Exists(bin)) return null;
         return Directory.EnumerateFiles(bin, "duel-server.exe", SearchOption.AllDirectories)
-            .OrderByDescending(f => f.Contains("Release", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(File.GetLastWriteTimeUtc)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
     }
 

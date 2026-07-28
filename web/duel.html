@@ -404,12 +404,15 @@ function zoneEl(cell, cls, label, onClick, drop) {
   z.className = 'zone ' + cls;
   z.innerHTML = `<span class="zl">${label}</span>`;
 
-  // Alvo de arrasto: só marca as zonas vazias que aceitam o TIPO da carta.
-  if (!cell && dragging) {
-    const tipos = dropTargets(dragging.h);
-    const aceita = drop && tipos[drop.type];
+  // Zona vazia com uma carta em jogo (arrastada ou clicada): marca se aceita o
+  // TIPO dela. Aceita tanto soltar quanto clicar.
+  const ativa = activeHand();
+  if (!cell && ativa != null && drop) {
+    const aceita = dropTargets(ativa)[drop.type];
     z.classList.add(aceita ? 'drop-ok' : 'drop-no');
     if (aceita) {
+      z.style.cursor = 'pointer';
+      z.onclick = () => dropOn(drop.type, drop.index);
       z.addEventListener('dragover', (e) => { e.preventDefault(); z.classList.add('over'); });
       z.addEventListener('dragleave', () => z.classList.remove('over'));
       z.addEventListener('drop', (e) => {
@@ -521,8 +524,19 @@ function cardKind(code) {
   return /\bField\b/.test(b.tl || '') ? 'f' : 's';
 }
 
+/**
+ * Qual carta está "em jogo" agora: a que está sendo arrastada ou, se não houver
+ * arrasto, a que foi clicada. Assim as zonas acendem nos dois casos e dá para
+ * jogar sem arrastar — clique na carta, clique na zona.
+ */
+function activeHand() {
+  if (dragging) return dragging.h;
+  return selectedHand;
+}
+
 /** As zonas que aceitam esta carta, respeitando o tipo. */
 function dropTargets(h) {
+  if (h == null) return { m: false, s: false, f: false };
   const acts = actionsFor(h);
   if (!acts.length) return { m: false, s: false, f: false };
   const kind = cardKind(hand[0][h]);
@@ -538,7 +552,14 @@ function dropTargets(h) {
 function startDrag(h, el) {
   dragging = { h, code: hand[0][h], kind: cardKind(hand[0][h]) };
   el.classList.add('dragging');
-  render();
+
+  // NÃO chamar render() aqui: ele reconstrói a mão e destruiria justamente o
+  // elemento que está sendo arrastado, o que faz o navegador cancelar o arrasto.
+  // Só o campo precisa ser redesenhado (para acender as zonas válidas), e ainda
+  // assim num setTimeout, já com o arrasto iniciado.
+  setTimeout(() => {
+    if (dragging) $('you-field').replaceChildren(fieldRows(0, true));
+  }, 0);
 }
 
 function endDrag() {
@@ -547,13 +568,15 @@ function endDrag() {
   render();
 }
 
-/** Soltou numa zona: guarda o destino e pergunta a posição. */
+/** Escolheu a zona (soltando ou clicando): guarda o destino e pergunta a posição. */
 function dropOn(type, index) {
-  if (!dragging) return;
-  const h = dragging.h;
+  const h = activeHand();
+  if (h == null) return;
+  // A zona de campo é, para o motor, a sequência 5 do grupo de magia.
   pendingZone = { type: type === 'f' ? 's' : type, index: type === 'f' ? 5 : index };
   const acts = actionsFor(h);
   dragging = null;
+  selectedHand = null;
   abrirPopupPosicao(h, acts, type, index);
 }
 
@@ -656,6 +679,10 @@ function render() {
   if (selectedHand != null) {
     const div = document.createElement('div'); div.className = 'actbar';
     div.append(Object.assign(document.createElement('b'), { textContent: nameOf(hand[0][selectedHand]) + ':' }));
+    div.append(Object.assign(document.createElement('span'), {
+      className: 'muted',
+      textContent: 'clique numa zona verde para escolher onde, ou use:',
+    }));
     for (const a of actionsFor(selectedHand)) {
       const b = document.createElement('button'); b.textContent = a.label; b.onclick = () => doAction(a); div.append(b);
     }
@@ -671,7 +698,7 @@ function render() {
         : unsupported ? `⚠ ação não suportada ainda (msg ${question.rawType}) — comece um novo duelo.`
         : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
         : dragging ? 'Solte a carta numa zona verde.'
-        : yourIdle ? 'Sua vez: arraste a carta até a zona, ou clique nela para ver as opções.'
+        : yourIdle ? 'Sua vez: arraste a carta até a zona — ou clique na carta e depois na zona.'
         : 'aguarde…'
     }));
   }

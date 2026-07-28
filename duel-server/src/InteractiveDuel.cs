@@ -382,7 +382,9 @@ namespace DuelServer
             uint flag = BitConverter.ToUInt32(d, o + 3);
             var freeM = new List<int>(); var freeS = new List<int>();
             for (int z = 0; z < 5; z++) if ((flag & (1u << z)) == 0) freeM.Add(z);
-            for (int z = 0; z < 5; z++) if ((flag & (1u << (8 + z))) == 0) freeS.Add(z);
+            // 6 e não 5: a sequência 5 do grupo de magia é a ZONA DE CAMPO.
+            // Sem ela, Magia de Campo não tem onde ser colocada.
+            for (int z = 0; z < 6; z++) if ((flag & (1u << (8 + z))) == 0) freeS.Add(z);
             if (freeM.Count > 0) { q.zoneType = "m"; q.zones = freeM; _placeLoc = 0x4; }
             else { q.zoneType = "s"; q.zones = freeS; _placeLoc = 0x8; }
             return q;

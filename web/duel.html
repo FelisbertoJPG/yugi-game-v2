@@ -102,6 +102,33 @@
   .sel-card:hover { border-color: var(--blue); }
   .sel-card.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
   .sel-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ---------- arrastar da mão para a zona ---------- */
+  .card.draggable { cursor: grab; }
+  .card.dragging { opacity: .35; }
+  /* zona que aceita a carta sendo arrastada */
+  .zone.drop-ok { outline: 2px dashed var(--green); outline-offset: -2px; background: #14261c; }
+  .zone.drop-ok.over { outline-style: solid; background: #1d3a28; }
+  /* zona do tipo errado: deixa explícito que não é ali */
+  .zone.drop-no { opacity: .45; }
+
+  /* ---------- popup de posição (ataque / setar) ---------- */
+  #pos-overlay {
+    position: fixed; inset: 0; background: #000c; z-index: 70;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #pos-overlay[hidden] { display: none; }
+  .pos-box {
+    background: var(--panel); border: 2px solid var(--gold);
+    padding: 18px 22px; display: flex; gap: 18px; align-items: center;
+    min-width: min(460px, 92vw);
+  }
+  .pos-box img { width: 96px; border: 1px solid var(--line); display: block; }
+  .pos-info { flex: 1; }
+  .pos-info h3 { margin: 0 0 2px; color: var(--gold); font-size: 15px; }
+  .pos-info .sub { font-size: 11px; color: var(--dim); margin-bottom: 12px; }
+  .pos-acts { display: flex; flex-direction: column; gap: 7px; }
+  .pos-acts button { padding: 9px 14px; font-size: 13px; text-align: left; }
 </style>
 </head>
 <body>
@@ -129,6 +156,17 @@
     <div class="sel-acts">
       <button id="sel-ok" class="btn-primary">confirmar</button>
       <button id="sel-finish">encerrar seleção</button>
+    </div>
+  </div>
+</div>
+
+<div id="pos-overlay" hidden>
+  <div class="pos-box">
+    <img id="pos-art" alt="">
+    <div class="pos-info">
+      <h3 id="pos-name"></h3>
+      <div class="sub" id="pos-where"></div>
+      <div class="pos-acts" id="pos-acts"></div>
     </div>
   </div>
 </div>
@@ -170,6 +208,7 @@ let hand = { 0: [], 1: 0 };                 // p0: lista de codes; p1: só conta
 let field = { 0: fresh(), 1: fresh() };
 let question = null, ended = false, turn = 0, phase = 0, turnNo = 0;
 let lp = { 0: 8000, 1: 8000 };               // pontos de vida
+let deckCount = { 0: 0, 1: 0 };              // cartas restantes no deck de cada um
 let selectedHand = null;                      // índice da carta da mão selecionada
 let turnPlays = [];                          // jogadas do turno atual (p/ "salvar jogada")
 let deckName = '';                            // deck em uso
@@ -197,7 +236,10 @@ async function start() {
   deckName = deck.name;
   hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
   lp = { 0: 8000, 1: 8000 };
+  // Sem deck próprio para o NPC, os dois usam o mesmo — mesma contagem inicial.
+  deckCount = { 0: ids.length, 1: ids.length };
   ended = false; turnNo = 0; turnPlays = []; selectedHand = null;
+  dragging = null; pendingZone = null; fecharPopupPosicao();
   $('log').replaceChildren();
   try {
     const j = await rpc('/start', { deck: ids });   // seed aleatória no servidor
@@ -276,6 +318,23 @@ function apply(j) {
     question = j.question || null;
     ended = !!j.ended;
     picked.clear();
+
+    // Zona já escolhida no arrasto: responde o SELECT_PLACE sem perguntar de novo.
+    // O destino vale para UMA pergunta só — se a próxima não for de zona (há
+    // cartas que o motor coloca sozinho), ele é descartado, senão sobraria
+    // pendurado e cairia na carta seguinte.
+    if (pendingZone) {
+      const alvo = pendingZone;
+      pendingZone = null;
+      if (question && question.kind === 'place' && question.player === 0) {
+        if (question.zoneType === alvo.type && (question.zones || []).includes(alvo.index)) {
+          act('place', alvo.index, `colocar na zona ${alvo.type.toUpperCase()}${alvo.index}`);
+          return;
+        }
+        log('a zona arrastada não está mais livre — escolha uma destacada.');
+      }
+    }
+
     render();
     renderSelection();
   } catch (e) {
@@ -294,6 +353,7 @@ function handle(ev) {
     case 'draw':
       if (ev.player === 0) { for (const c of ev.cards) hand[0].push(c.code); }
       else hand[1] += ev.cards.length;
+      deckCount[ev.player] = Math.max(0, deckCount[ev.player] - ev.cards.length);
       log(`compra: jogador ${ev.player} +${ev.cards.length}`);
       break;
     case 'turn': turn = ev.player; turnNo++; if (ev.player === 0) turnPlays = []; log(`— turno ${turnNo} (jogador ${ev.player}) —`, true); break;
@@ -318,6 +378,10 @@ function handle(ev) {
         if (ev.fromCtrl === 0) { const i = hand[0].indexOf(ev.code); if (i>=0) hand[0].splice(i,1); }
         else if (hand[1] > 0) hand[1]--;
       }
+      // Saiu do deck por efeito (não pela compra, que já vem no MSG_DRAW).
+      if (ev.fromLoc === 1) {
+        deckCount[ev.fromCtrl] = Math.max(0, deckCount[ev.fromCtrl] - 1);
+      }
       break;
     }
     case 'lp': {
@@ -335,10 +399,27 @@ function handle(ev) {
 }
 
 // ---------- render ----------
-function zoneEl(cell, cls, label, onClick) {
+function zoneEl(cell, cls, label, onClick, drop) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
   z.innerHTML = `<span class="zl">${label}</span>`;
+
+  // Alvo de arrasto: só marca as zonas vazias que aceitam o TIPO da carta.
+  if (!cell && dragging) {
+    const tipos = dropTargets(dragging.h);
+    const aceita = drop && tipos[drop.type];
+    z.classList.add(aceita ? 'drop-ok' : 'drop-no');
+    if (aceita) {
+      z.addEventListener('dragover', (e) => { e.preventDefault(); z.classList.add('over'); });
+      z.addEventListener('dragleave', () => z.classList.remove('over'));
+      z.addEventListener('drop', (e) => {
+        e.preventDefault();
+        z.classList.remove('over');
+        dropOn(drop.type, drop.index);
+      });
+    }
+  }
+
   if (cell) {
     const facedown = (cell.pos & 0xa) !== 0;   // POS_FACEDOWN_*
     const el = document.createElement(facedown ? 'div' : 'img');
@@ -360,14 +441,19 @@ function fieldRows(player, isYou) {
 
   const mrow = document.createElement('div'); mrow.className = 'zonerow';
   const srow = document.createElement('div'); srow.className = 'zonerow';
-  mrow.append(zoneEl(f.f, 'fz', 'F'));
+  mrow.append(zoneEl(f.f, 'fz', 'F', null, isYou ? { type: 'f', index: 5 } : null));
   for (let i = 0; i < 5; i++)
-    mrow.append(zoneEl(f.m[i], 'mz', 'M'+i, freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null));
+    mrow.append(zoneEl(f.m[i], 'mz', 'M'+i,
+      freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null,
+      isYou ? { type: 'm', index: i } : null));
   mrow.append(pileEl(player, 'GY', f.g));   // cemitério à direita dos monstros
   const spacer = document.createElement('div'); spacer.style.width = '58px'; srow.append(spacer);
   for (let i = 0; i < 5; i++)
-    srow.append(zoneEl(f.s[i], 'sz', 'S'+i, freeS.has(i) ? () => act('place', i, `colocar na zona S${i}`) : null));
-  const spacer2 = document.createElement('div'); spacer2.style.width = '58px'; srow.append(spacer2);
+    srow.append(zoneEl(f.s[i], 'sz', 'S'+i,
+      freeS.has(i) ? () => act('place', i, `colocar na zona S${i}`) : null,
+      isYou ? { type: 's', index: i } : null));
+  // Deck logo abaixo do cemitério, que é onde ele fica de verdade na mesa.
+  srow.append(deckEl(player));
 
   // você (embaixo): monstros na linha de cima (perto do centro), magias embaixo.
   // oponente (em cima): espelhado.
@@ -421,6 +507,98 @@ function doAction(a) {
   act(a.action, a.arg, `${a.label} ${nameOf(code)}`);
 }
 
+// ---------- arrastar da mão para a zona ----------
+// O motor pede a zona DEPOIS da ação (idle -> SELECT_PLACE). Como o arrasto já
+// diz onde a carta vai, guardamos a zona e respondemos o SELECT_PLACE sozinhos.
+let dragging = null;      // { h, code, kind }
+let pendingZone = null;   // { type: 'm'|'s', index }
+
+/** Onde a carta pode ser jogada: monstro, magia/armadilha ou campo. */
+function cardKind(code) {
+  const b = db?.brief(code);
+  if (!b) return 'm';
+  if (b.t === 'M') return 'm';
+  return /\bField\b/.test(b.tl || '') ? 'f' : 's';
+}
+
+/** As zonas que aceitam esta carta, respeitando o tipo. */
+function dropTargets(h) {
+  const acts = actionsFor(h);
+  if (!acts.length) return { m: false, s: false, f: false };
+  const kind = cardKind(hand[0][h]);
+  const podeMonstro = acts.some((a) => a.action === 'summon' || a.action === 'setmonster');
+  const podeMagia = acts.some((a) => a.action === 'activate' || a.action === 'setspell');
+  return {
+    m: kind === 'm' && podeMonstro,
+    s: kind === 's' && podeMagia,
+    f: kind === 'f' && podeMagia,
+  };
+}
+
+function startDrag(h, el) {
+  dragging = { h, code: hand[0][h], kind: cardKind(hand[0][h]) };
+  el.classList.add('dragging');
+  render();
+}
+
+function endDrag() {
+  dragging = null;
+  document.querySelectorAll('.zone.over').forEach((z) => z.classList.remove('over'));
+  render();
+}
+
+/** Soltou numa zona: guarda o destino e pergunta a posição. */
+function dropOn(type, index) {
+  if (!dragging) return;
+  const h = dragging.h;
+  pendingZone = { type: type === 'f' ? 's' : type, index: type === 'f' ? 5 : index };
+  const acts = actionsFor(h);
+  dragging = null;
+  abrirPopupPosicao(h, acts, type, index);
+}
+
+/**
+ * Popup de posição. Para monstro são [Posição de Ataque] e [Setar]; para
+ * magia/armadilha, [Utilizar] e [Setar] — a mesma escolha, outro vocabulário.
+ */
+function abrirPopupPosicao(h, acts, type, index) {
+  const code = hand[0][h];
+  const LABEL = {
+    summon: 'Posição de Ataque',
+    setmonster: 'Setar (defesa, virada)',
+    activate: 'Utilizar',
+    setspell: 'Setar (virada)',
+  };
+  const zonaTxt = type === 'f' ? 'Zona de Campo'
+    : type === 'm' ? `Zona de Monstro ${index + 1}`
+    : `Zona de Magia/Armadilha ${index + 1}`;
+
+  $('pos-art').src = ART(code);
+  $('pos-name').textContent = nameOf(code);
+  $('pos-where').textContent = `→ ${zonaTxt}`;
+
+  const frag = document.createDocumentFragment();
+  for (const a of acts) {
+    const b = document.createElement('button');
+    b.className = a.action === 'summon' || a.action === 'activate' ? 'btn-primary' : '';
+    b.textContent = LABEL[a.action] ?? a.label;
+    b.onclick = () => {
+      fecharPopupPosicao();
+      act(a.action, a.arg, `${LABEL[a.action] ?? a.label} ${nameOf(code)} em ${zonaTxt}`);
+    };
+    frag.append(b);
+  }
+  const x = document.createElement('button');
+  x.textContent = 'cancelar';
+  x.onclick = () => { pendingZone = null; fecharPopupPosicao(); render(); };
+  frag.append(x);
+
+  $('pos-acts').replaceChildren(frag);
+  $('pos-overlay').hidden = false;
+}
+
+function fecharPopupPosicao() { $('pos-overlay').hidden = true; }
+
 function render() {
   $('turn').textContent = turn === 0 ? 'VOCÊ' : 'oponente';
   $('opp-field').replaceChildren(fieldRows(1, false));
@@ -449,9 +627,22 @@ function render() {
   if (selectedHand != null && actionsFor(selectedHand).length === 0) selectedHand = null;
   $('hand-you').replaceChildren(...hand[0].map((code, h) => {
     const c = document.createElement('div'); c.className = 'card';
-    c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}" alt="">`;
-    if (actionsFor(h).length) { c.classList.add('playable'); c.onclick = () => toggleSelect(h); }
+    c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}" alt="" draggable="false">`;
+    if (actionsFor(h).length) {
+      c.classList.add('playable', 'draggable');
+      c.onclick = () => toggleSelect(h);
+      // Arrastar é o caminho novo; o clique continua funcionando para quem
+      // preferir a barra de ações.
+      c.draggable = true;
+      c.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(code));  // exigido pelo Firefox
+        startDrag(h, c);
+      });
+      c.addEventListener('dragend', endDrag);
+    }
     if (h === selectedHand) c.classList.add('selected');
+    if (dragging && dragging.h === h) c.classList.add('dragging');
     c.oncontextmenu = (e) => e.preventDefault();
     return c;
   }));
@@ -479,7 +670,8 @@ function render() {
       textContent: ended ? 'duelo encerrado.'
         : unsupported ? `⚠ ação não suportada ainda (msg ${question.rawType}) — comece um novo duelo.`
         : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
-        : yourIdle ? 'Sua vez: clique uma carta (verde) para ver as opções, ou encerre o turno.'
+        : dragging ? 'Solte a carta numa zona verde.'
+        : yourIdle ? 'Sua vez: arraste a carta até a zona, ou clique nela para ver as opções.'
         : 'aguarde…'
     }));
   }
@@ -490,6 +682,22 @@ function pileEl(player, label, cards) {
   d.className = 'pilezone' + (cards.length ? ' has' : '');
   d.innerHTML = `<span class="n">${cards.length}</span>${label}`;
   if (cards.length) d.onclick = () => openGrave(player);
+  return d;
+}
+
+/** Pilha do deck: quantas cartas ainda restam para comprar. */
+function deckEl(player) {
+  const n = deckCount[player];
+  const d = document.createElement('div');
+  d.className = 'pilezone';
+  d.title = `Deck de ${player === 0 ? 'você' : 'oponente'}: ${n} carta(s)`;
+  if (n > 0) {
+    d.style.borderStyle = 'solid';
+    d.style.borderColor = '#6b4a1e';
+    d.innerHTML = `<span class="n">${n}</span>DECK`;
+  } else {
+    d.innerHTML = `<span class="n" style="color:var(--red)">0</span>DECK`;
+  }
   return d;
 }
 

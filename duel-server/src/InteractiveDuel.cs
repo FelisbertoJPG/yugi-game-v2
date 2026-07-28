@@ -48,6 +48,7 @@ namespace DuelServer
             // e é assim que a regra "só vira no turno seguinte" se aplica sozinha.
             public List<Act> repositionable = new();
             public bool canBattle, canEnd;
+            public bool canMain2;                // battle: dá para ir à Main Phase 2
             public List<int> zones = new();      // place: zonas livres
             public string zoneType = "m";        // "m" = monstro, "s" = magia/armadilha
             public List<Act> attackers = new();  // battle
@@ -67,6 +68,7 @@ namespace DuelServer
         {
             public uint code; public int index;
             public byte controller, location; public int sequence;
+            public bool canDirect;   // battlecmd: pode atacar direto (campo vazio)
         }
 
         /// <summary>Carta oferecida num SELECT_CARD / SELECT_TRIBUTE.</summary>
@@ -234,8 +236,10 @@ namespace DuelServer
             "battle" => I32(6),                       // idle, ir pra Battle Phase
             "endturn" => I32(7),                      // idle, End Phase
             "place" => new byte[] { HUMAN, _placeLoc, (byte)arg }, // zona escolhida
-            "attack" => I32(arg << 16),               // battlecmd, comando 0 = atacar
-            "battleactivate" => I32((arg << 16) | 1), // battlecmd, comando 1 = ativar
+            // ⚠ No battlecmd a lista de ATIVÁVEIS vem antes da de atacantes, então
+            // ativar é o comando 0 e atacar é o 1 — o contrário do que parece.
+            "battleactivate" => I32(arg << 16),       // battlecmd, comando 0 = ativar
+            "attack" => I32((arg << 16) | 1),         // battlecmd, comando 1 = atacar
             "tomain2" => I32(2),                      // battlecmd, comando 2 = ir pra Main2
             "endbattle" => I32(3),                    // battlecmd, comando 3 = End Phase
             _ => I32(-1),
@@ -343,6 +347,37 @@ namespace DuelServer
                     });
                     if (loc == LOCATION_MZONE && _board.TryGetValue((ctrl, seq), out var antes))
                         _board[(ctrl, seq)] = (antes.code, atual);
+                    break;
+                }
+                case 110: // MSG_ATTACK — quem ataca quem
+                {
+                    // atacante{ctrl(1)loc(1)seq(4)pos(4)} + alvo{...}
+                    ev.Add(new
+                    {
+                        type = "attack",
+                        atkCtrl = d[o + 1], atkLoc = d[o + 2],
+                        atkSeq = BitConverter.ToInt32(d, o + 3),
+                        defCtrl = d[o + 11], defLoc = d[o + 12],
+                        defSeq = BitConverter.ToInt32(d, o + 13),
+                        direct = d[o + 12] == 0,   // sem localização = ataque direto
+                    });
+                    break;
+                }
+                case 111: // MSG_BATTLE — o resultado do combate
+                {
+                    // Cada lado: loc(10) + atk(4) + def(4) + destruido(1) = 19 bytes.
+                    // O motor já resolveu tudo; aqui é só para a tela contar o que houve.
+                    int a = o + 1, b = a + 19;
+                    ev.Add(new
+                    {
+                        type = "battle",
+                        atkAtk = BitConverter.ToInt32(d, a + 10),
+                        atkDef = BitConverter.ToInt32(d, a + 14),
+                        atkDestroyed = d[a + 18] != 0,
+                        defAtk = BitConverter.ToInt32(d, b + 10),
+                        defDef = BitConverter.ToInt32(d, b + 14),
+                        defDestroyed = d[b + 18] != 0,
+                    });
                     break;
                 }
                 case 91: LpChange(d, o, -1, ev); break; // MSG_DAMAGE: perde LP
@@ -773,12 +808,56 @@ namespace DuelServer
             return EncodeSelect(idx);
         }
 
+        /// <summary>
+        /// SELECT_BATTLECMD (10): `type(1) player(1)` + lista de ATIVÁVEIS
+        /// (19 bytes cada, igual ao idle) + lista de ATACANTES (8 bytes:
+        /// `code(4) ctrl(1) loc(1) seq(1) podeAtacarDireto(1)`) + 2 flags
+        /// (pode ir pra Main 2, pode ir pra End Phase).
+        ///
+        /// Medido com `--probe-battle`. A verificação do cursor no fim é a mesma
+        /// rede de segurança do idle: se sobrar diferente de 2, algum tamanho
+        /// mudou e as listas saíram corrompidas.
+        /// </summary>
         Question ParseBattle(byte[] d, int o, int mlen)
         {
+            int limit = o + mlen;
             var q = new Question { kind = "battle", player = d[o + 1] };
             int p = o + 2;
-            q.attackers = ReadActs(d, ref p, o + mlen);
+
+            q.activatable = ReadActsDesc(d, ref p, limit);
+            q.attackers = ReadAttackers(d, ref p, limit);
+
+            int sobra = limit - p;
+            if (sobra != 2)
+            {
+                Log.Err($"[battlecmd] desalinhado: sobraram {sobra} bytes (esperado 2). " +
+                        $"ativ={q.activatable.Count} atk={q.attackers.Count}");
+            }
+            q.canMain2 = d[limit - 2] != 0;
+            q.canEnd = d[limit - 1] != 0;
             return q;
+        }
+
+        /// <summary>Atacantes: entrada de 8 bytes, com a flag de ataque direto.</summary>
+        static List<Act> ReadAttackers(byte[] d, ref int p, int limit)
+        {
+            var list = new List<Act>();
+            if (p + 4 > limit) return list;
+            int n = (int)BitConverter.ToUInt32(d, p); p += 4;
+            for (int i = 0; i < n && p + 8 <= limit; i++)
+            {
+                list.Add(new Act
+                {
+                    code = BitConverter.ToUInt32(d, p),
+                    index = i,
+                    controller = d[p + 4],
+                    location = d[p + 5],
+                    sequence = d[p + 6],
+                    canDirect = d[p + 7] != 0,
+                });
+                p += 8;
+            }
+            return list;
         }
 
         static byte[] I32(int v) => BitConverter.GetBytes(v);

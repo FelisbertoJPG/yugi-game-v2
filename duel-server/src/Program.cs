@@ -85,6 +85,10 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-npc") >= 0)
                 return TestNpc.Run(streamingAssets);
 
+            // Teste de aceitacao da Battle Phase.
+            if (Array.IndexOf(args, "--test-battle") >= 0)
+                return TestBattle.Run(streamingAssets);
+
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)
             {
@@ -96,6 +100,13 @@ namespace DuelServer
             if (Array.IndexOf(args, "--probe-pos") >= 0)
             {
                 ProbePos.Run(streamingAssets);
+                return 0;
+            }
+
+            // Sonda da Battle Phase.
+            if (Array.IndexOf(args, "--probe-battle") >= 0)
+            {
+                ProbeBattle.Run(streamingAssets);
                 return 0;
             }
 

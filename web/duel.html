@@ -60,6 +60,18 @@
   .zone.actionable { outline: 2px solid var(--green); outline-offset: -2px; cursor: pointer; }
   .zone.actionable:hover { outline-color: var(--gold); }
 
+  /* ---------- ataque ---------- */
+  .zone.attacker { outline: 2px solid var(--red); outline-offset: -2px; cursor: grab; }
+  .zone.attacker:hover { outline-color: var(--gold); }
+  .zone .sword {
+    position: absolute; top: -6px; right: -4px; z-index: 3;
+    font-size: 15px; line-height: 1; text-shadow: 0 0 3px #000, 0 0 6px #000;
+    pointer-events: none;
+  }
+  .zone.target { outline: 2px dashed var(--red); outline-offset: -2px; cursor: crosshair; }
+  .zone.target.over { outline-style: solid; background: #3a1a1e; }
+  .zone.attacking { opacity: .45; }
+
   /* ---------- aviso de fase ---------- */
   /* Entra deslizando, segura um instante e sai. Não intercepta clique. */
   #phase-toast {
@@ -403,6 +415,22 @@ function apply(j) {
     picked.clear();
     selectedField = null;   // a pergunta mudou: a seleção de campo não vale mais
 
+    // Alvo já escolhido no arrasto: responde o SELECT_CARD do ataque sem abrir o
+    // modal. Vale para UMA pergunta só, senão sobraria pendurado para a próxima.
+    if (pendingTarget) {
+      const alvo = pendingTarget;
+      pendingTarget = null;
+      if (question && question.kind === 'selectcard' && question.player === 0) {
+        const i = (question.choices || []).findIndex(
+          (c) => c.location === alvo.loc && c.sequence === alvo.seq);
+        if (i >= 0) {
+          act('select', 0, 'alvo do ataque', [question.choices[i].index]);
+          return;
+        }
+        log('o alvo arrastado não está entre as opções — escolha na janela.');
+      }
+    }
+
     // Zona já escolhida no arrasto: responde o SELECT_PLACE sem perguntar de novo.
     // O destino vale para UMA pergunta só — se a próxima não for de zona (há
     // cartas que o motor coloca sozinho), ele é descartado, senão sobraria
@@ -454,6 +482,15 @@ function handle(ev) {
       break;
     }
     case 'summoning': log(`invocando ${nameOf(ev.code)}`); break;
+    case 'attack':
+      log(ev.direct ? '⚔ ataque direto!' : '⚔ ataque declarado');
+      break;
+    case 'battle': {
+      // O motor já resolveu; aqui é só contar o que houve.
+      const quem = (a, d) => `${a}${d ? ' (destruído)' : ''}`;
+      log(`⚔ ${quem(ev.atkAtk, ev.atkDestroyed)} vs ${quem(ev.defAtk, ev.defDestroyed)}`, true);
+      break;
+    }
     case 'pos': {
       // Mudança de posição: a carta continua na zona, só muda a orientação.
       const f = field[ev.controller];
@@ -504,10 +541,49 @@ function handle(ev) {
 }
 
 // ---------- render ----------
-function zoneEl(cell, cls, label, onClick, drop, campoOpts) {
+function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
   z.innerHTML = `<span class="zl">${label}</span>`;
+
+  // --- ataque: meu monstro que pode atacar ---
+  if (cell && atk && atk.meu) {
+    z.classList.add('attacker');
+    z.insertAdjacentHTML('beforeend', '<span class="sword" title="pode atacar">⚔️</span>');
+    if (atacando && atacando.seq === atk.seq) z.classList.add('attacking');
+    z.draggable = true;
+    z.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(cell.code));
+      atacando = { index: atk.act.index, seq: atk.seq, code: cell.code, direct: atk.act.canDirect };
+      // Só o campo do oponente precisa mudar; redesenhar tudo agora cancelaria
+      // o arrasto, como já aconteceu com a mão.
+      setTimeout(() => { if (atacando) $('opp-field').replaceChildren(fieldRows(1, false)); }, 0);
+    });
+    z.addEventListener('dragend', () => { atacando = null; render(); });
+    z.onclick = () => {
+      atacando = { index: atk.act.index, seq: atk.seq, code: cell.code, direct: atk.act.canDirect };
+      pendingTarget = null;   // sem alvo definido: o motor vai perguntar
+      act('attack', atk.act.index, `atacar com ${nameOf(cell.code)}`);
+    };
+  }
+
+  // --- ataque: zona do oponente como alvo ---
+  if (atk && atk.alvo && atacando) {
+    z.classList.add('target');
+    z.addEventListener('dragover', (e) => { e.preventDefault(); z.classList.add('over'); });
+    z.addEventListener('dragleave', () => z.classList.remove('over'));
+    z.addEventListener('drop', (e) => {
+      e.preventDefault();
+      z.classList.remove('over');
+      const a = atacando;
+      atacando = null;
+      if (!a) return;
+      // Guarda o alvo: o motor pergunta em seguida, num SELECT_CARD.
+      pendingTarget = cell ? { loc: atk.loc, seq: atk.seq } : null;
+      act('attack', a.index, `atacar com ${nameOf(a.code)}`);
+    });
+  }
 
   // Ações disponíveis para a carta que já está nesta zona.
   if (cell && campoOpts) {
@@ -592,6 +668,23 @@ function acoesDeCampo(player) {
 }
 
 let selectedField = null;   // { loc, seq, code } da carta de campo selecionada
+let atacando = null;        // atacante arrastado/selecionado: { index, seq, code, direct }
+let pendingTarget = null;   // alvo escolhido no arrasto, aplicado no SELECT_CARD
+
+/**
+ * Monstros meus que podem atacar agora, por sequência de zona. Quem decide é o
+ * motor: monstro invocado neste turno, em defesa, ou que já atacou, simplesmente
+ * não vem na lista.
+ */
+function atacantes() {
+  const m = new Map();
+  if (question && question.kind === 'battle' && question.player === 0) {
+    for (const a of question.attackers || []) {
+      if (a.controller === 0 && a.location === 4) m.set(a.sequence, a);
+    }
+  }
+  return m;
+}
 
 function fieldRows(player, isYou) {
   const wrap = document.createElement('div'); wrap.className = 'rows';
@@ -604,13 +697,18 @@ function fieldRows(player, isYou) {
   const mrow = document.createElement('div'); mrow.className = 'zonerow';
   const srow = document.createElement('div'); srow.className = 'zonerow';
   const co = (loc, seq) => (isYou ? { loc, seq, acoes: campo } : null);
+  const atk = atacantes();
+  // Meu monstro que pode atacar, ou zona do oponente servindo de alvo.
+  const ai = (i) => isYou
+    ? (atk.has(i) ? { meu: true, seq: i, act: atk.get(i) } : null)
+    : { alvo: true, loc: 4, seq: i };
 
   mrow.append(zoneEl(f.f, 'fz', 'F', null,
     isYou ? { type: 'f', index: 5 } : null, co(8, 5)));
   for (let i = 0; i < 5; i++)
     mrow.append(zoneEl(f.m[i], 'mz', 'M'+i,
       freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null,
-      isYou ? { type: 'm', index: i } : null, co(4, i)));
+      isYou ? { type: 'm', index: i } : null, co(4, i), ai(i)));
   mrow.append(pileEl(player, 'GY', f.g));   // cemitério à direita dos monstros
   const spacer = document.createElement('div'); spacer.style.width = '58px'; srow.append(spacer);
   for (let i = 0; i < 5; i++)
@@ -901,7 +999,7 @@ function botoesDeFase() {
   let proxima = null;
   if (idle && question.canBattle) proxima = { rotulo: '▶ Battle Phase', acao: 'battle' };
   else if (idle && question.canEnd) proxima = { rotulo: '▶ End Phase', acao: 'endturn' };
-  else if (batalha) proxima = { rotulo: '▶ Main Phase 2', acao: 'tomain2' };
+  else if (batalha && question.canMain2) proxima = { rotulo: '▶ Main Phase 2', acao: 'tomain2' };
 
   const b1 = document.createElement('button');
   b1.textContent = proxima ? proxima.rotulo : '▶ próxima fase';

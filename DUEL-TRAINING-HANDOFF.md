@@ -154,9 +154,10 @@ resposta `[int32 tipo][uint32 quantidade][índices…]`.
 
 Mensagem dos três: `type(1) player(1) cancelable(1) min(4) max(4) count(4)` +
 entradas. Entrada = 10 bytes no SELECT_CARD, **11** no SELECT_TRIBUTE (o byte
-extra é quantos tributos a carta vale) e **18** no SELECT_SUM (`code(4) +
-info_location(10) + sum_param(4)`). Deduza o tamanho pelo comprimento da
-mensagem em vez de assumir.
+extra é quantos tributos a carta vale), **14** no SELECT_CARD de alvo de ataque
+(as 10 usuais + posição) e **18** no SELECT_SUM (`code(4) + info_location(10) +
+sum_param(4)`). **Deduza o tamanho pelo comprimento da mensagem** em vez de
+assumir — ele varia com o contexto, como a lista acima mostra.
 
 **SELECT_UNSELECT_CARD (26):** o seletor incremental do core novo — é ele que o
 tributo usa de fato. Escolhe-se UMA carta por vez e o motor repergunta.
@@ -174,6 +175,21 @@ info_location(10) + sum_param(4)`), e o `sum_param` é o nível que a carta soma
 Quem escolhe os tributos é o **jogador**: a pergunta vai para o front com o nível
 de cada carta e um contador de "somados / alvo". Só resolvemos sozinho quando há
 uma única combinação possível — aí perguntar seria uma etapa sem decisão.
+
+**SELECT_BATTLECMD (10):** `type(1) player(1)` + lista de **ativáveis** (19 bytes,
+igual ao idle) + lista de **atacantes** (**8 bytes**: `code(4) ctrl(1) loc(1)
+seq(1) podeAtacarDireto(1)`) + **2 flags** (pode Main 2, pode End).
+⚠️ Como a lista de ativáveis vem primeiro, **ativar é o comando 0 e ATACAR é o 1**
+— o contrário do que a intuição sugere. Atacar com `0` dá RETRY silencioso.
+
+Fluxo do ataque: `attack (índice<<16|1)` → o motor pede o **alvo** num
+`SELECT_CARD (15)` (entradas de **14 bytes** aqui: as 10 usuais + posição) →
+responde-se com o formato normal de seleção → o combate resolve.
+
+**MSG_ATTACK (110):** atacante`{ctrl(1)loc(1)seq(4)pos(4)}` + alvo`{...}`.
+**MSG_BATTLE (111):** por lado, `loc(10) atk(4) def(4) destruido(1)` = 19 bytes.
+Traz ATK/DEF dos dois e quem morreu — o motor já resolveu tudo, isto é só relato.
+Dano, destruição e ida ao cemitério vêm de graça (MSG_DAMAGE + MSG_MOVE).
 
 **SELECT_CHAIN (16):** resposta `int32 -1` (não encadear).
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).
@@ -216,11 +232,11 @@ PHASE_MAIN1=0x4, BATTLE=0x80, END=0x200.
 
 ## 6. O que FALTA / bugs conhecidos (prioridade)
 
-1. **Battle Phase / atacar / dano de batalha (W3)** — o grande passo. Precisa: ir
-   pra Battle (idle cmd 6, confirmar), `SELECT_BATTLECMD (10)` (escolher atacante,
-   formato a decifrar), `MSG_ATTACK`, resolução de dano (o LP já é rastreado), e
-   `MSG_WIN` (achar o id) → tela de vitória.
-2. **`SELECT_YESNO/EFFECTYN/OPTION` (12/13/14)** — hoje "não suportado"; quando
+1. **Replicar a batalha para o NPC** — hoje ele invoca e defende, mas nunca ataca.
+   A decisão vai no `NpcBrain`, na mesma forma das outras regras.
+2. **Tela de vitória** — falta achar o id do `MSG_WIN`; hoje o fim é detectado
+   pelo status END e o vencedor é inferido pelos LP.
+3. **`SELECT_YESNO/EFFECTYN/OPTION` (12/13/14)** — hoje "não suportado"; quando
    aparecer (efeitos opcionais), tratar.
 3. **Ativar magia/armadilha JÁ SETADA no campo** (hoje só ativa da mão).
 4. **Usar as jogadas gravadas (`ygo:plays`) como script de IA dos NPCs** — o objetivo

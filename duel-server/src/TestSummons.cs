@@ -20,7 +20,7 @@ namespace DuelServer
         const uint CELTIC = 91152256;        // Nv4
         const uint GAIA = 6368038;           // Nv7 -> 2 tributos
         const uint SKULL = 70781052;         // Nv6 -> 1 tributo
-        const byte LOC_GRAVE = 0x10, LOC_MZONE = 0x4;
+        const byte LOC_GRAVE = 0x10, LOC_MZONE = 0x4, LOC_HAND = 0x2;
 
         static int _pass, _fail;
 
@@ -50,6 +50,7 @@ namespace DuelServer
             int guard = 0;
             bool activated = false, summonedBls = false;
             var unsupported = 0;
+            var tributed = new List<uint>();   // monstros que foram ao cemitério
 
             while (!r.ended && guard++ < 300 && !summonedBls)
             {
@@ -59,7 +60,14 @@ namespace DuelServer
                     if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
                     uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
                     byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                    byte from = Convert.ToByte(t.GetProperty("fromLoc")?.GetValue(e) ?? (byte)0);
                     if (code == BLS && loc == LOC_MZONE) summonedBls = true;
+                    // Tributo de ritual pode vir do campo OU DA MÃO — a regra
+                    // permite as duas origens, e o motor usa isso. Filtrar só o
+                    // campo faz parecer que nenhum tributo aconteceu.
+                    if (loc == LOC_GRAVE && (from == LOC_MZONE || from == LOC_HAND)
+                        && code != BLS_RITUAL && code != BLS)
+                        tributed.Add(code);
                 }
                 if (summonedBls) break;
 
@@ -114,6 +122,15 @@ namespace DuelServer
             Check("a magia de ritual pode ser ativada", activated);
             Check("Black Luster Soldier foi invocado por ritual", summonedBls,
                   unsupported != 0 ? $"(travou no tipo {unsupported})" : "");
+
+            // A regra do ritual: os tributos têm de somar o nível do monstro (8).
+            // Quem verifica isso é o script Lua da carta — nós não escrevemos
+            // nenhuma linha sobre soma de níveis; só respondemos o que o motor pede.
+            Log.Info($"  tributados: [{string.Join(", ", tributed)}] ({tributed.Count} monstros)");
+            Check("o ritual consumiu tributos", tributed.Count > 0,
+                  $"(foram {tributed.Count})");
+            Check("os tributos somam o nivel 8 do Black Luster Soldier",
+                  tributed.Count * 4 == 8, $"(monstros Nv4; vieram {tributed.Count})");
         }
 
         static uint[] RitualDeck()

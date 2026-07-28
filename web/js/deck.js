@@ -128,11 +128,27 @@ export class Deck {
   }
 
   /**
-   * Exporta no formato .ydk do ygopro — é o que o ocgcore consome quando o
-   * motor de duelo entrar, então vale manter compatibilidade desde já.
+   * Exporta no formato .ydk do ygopro — é o que o ocgcore consome, então vale
+   * manter compatibilidade.
+   *
+   * O .ydk só tem campo para os ids das cartas. Metadados nossos (nome do deck,
+   * de qual NPC é, qual carta ele dropa) vão como comentários `#chave valor`:
+   * qualquer parser de .ydk ignora linhas que começam com `#`, então o arquivo
+   * continua válido para o YGOPro/EDOPro, e nós conseguimos ler de volta.
    */
-  toYdk() {
-    const lines = ['#created by yugi-game-v2', '#main'];
+  toYdk(meta = {}) {
+    const lines = ['#created by yugi-game-v2'];
+
+    // `main` e `extra` são marcadores estruturais do formato — não podem virar
+    // metadado, senão o arquivo fica ambíguo.
+    const all = { name: this.name, ...meta };
+    for (const [k, v] of Object.entries(all)) {
+      if (RESERVED_YDK_KEYS.has(k.toLowerCase())) continue;
+      if (v === null || v === undefined || v === '') continue;
+      lines.push(`#${k} ${String(v).replace(/[\r\n]+/g, ' ')}`);
+    }
+
+    lines.push('#main');
     lines.push(...this.main);
     lines.push('#extra');
     lines.push(...this.extra);
@@ -140,24 +156,43 @@ export class Deck {
     return lines.join('\n') + '\n';
   }
 
-  /** Lê um .ydk. Ignora comentários e linhas que não são id numérico. */
+  /**
+   * Lê um .ydk. Ignora o que não for id numérico e recupera os metadados
+   * `#chave valor` em `deck.meta`. Um .ydk de outra ferramenta simplesmente
+   * volta com `meta` vazio.
+   */
   static fromYdk(text, name = 'Deck importado') {
     const deck = new Deck({ name });
+    deck.meta = {};
     let zone = null;
+
     for (const raw of String(text).split(/\r?\n/)) {
       const line = raw.trim();
       if (!line) continue;
       if (line.startsWith('#main')) { zone = 'main'; continue; }
       if (line.startsWith('#extra')) { zone = 'extra'; continue; }
       if (line.startsWith('!side')) { zone = null; continue; }
-      if (line.startsWith('#')) continue;          // outros comentários
+
+      if (line.startsWith('#')) {
+        const m = /^#([a-z][\w-]*)\s+(.+)$/i.exec(line);
+        if (m && !RESERVED_YDK_KEYS.has(m[1].toLowerCase())) {
+          deck.meta[m[1].toLowerCase()] = m[2].trim();
+        }
+        continue;                                   // demais comentários
+      }
+
       if (!zone) continue;                          // side deck: descartado
       const id = Number(line);
       if (Number.isInteger(id) && id > 0) deck[zone].push(id);
     }
+
+    if (deck.meta.name) deck.name = deck.meta.name;
     return deck;
   }
 }
+
+/** Chaves que o formato .ydk usa como estrutura — não servem de metadado. */
+const RESERVED_YDK_KEYS = new Set(['main', 'extra', 'side', 'created']);
 
 function countBy(arr) {
   const m = new Map();

@@ -33,6 +33,7 @@ Python 3 só é necessário para regenerar o banco de cartas (`npm run data:buil
 |---|---|
 | **`web/`** | O jogo: Home, Deck Builder, NPCs e o treino de duelo. HTML/CSS/JS puro, sem framework. |
 | **`duel-server/`** | Servidor .NET que hospeda o `ocgcore` e expõe o duelo por HTTP. |
+| **`decks/`** | Decks em `.ydk`, versionados no git — os dos NPCs e os seus. Ver [`decks/README.md`](decks/README.md). |
 | **`launcher/`** | Fonte dos dois executáveis de liga/desliga. Um só `Program.cs` gera ambos. |
 | **`ygo-data/`** | Banco local de dados — 13.728 cartas decodificadas e 12.702 scripts Lua, extraídos do `cards.cdb` e prontos para consumo web. |
 | **`duel_academy/`** | Protótipo Unity que provou a integração com o `ocgcore.dll`: cria duelo, carrega os scripts Lua, compra cartas e responde ao motor. Fonte de onde os dados foram extraídos. |
@@ -52,9 +53,11 @@ motor de regras na web.
   estilo Master Duel, com filtros por nome, tipo, atributo, raça, arquétipo,
   nível e ATK. Adicionar e remover por clique **ou** arrastando.
   Sem banlist, por decisão de projeto.
-- **Persistência** em `localStorage` (vários decks, um ativo) com export/import
-  em **`.ydk`** — o formato do ygopro, que é o que o `ocgcore` vai consumir
-  quando o motor entrar.
+- **Persistência** em `.ydk` — o formato do ygopro, o mesmo que o `ocgcore` lê.
+  Os decks dos NPCs ficam em `decks/npc/` e os seus podem ir para `decks/player/`
+  com "salvar no projeto": versionados no git, então acompanham o repositório
+  para outra máquina. O `localStorage` guarda só o rascunho e as preferências
+  locais (qual deck está ativo).
 - **Banco de dados** completo e validado (ver `ygo-data/README.md`).
 - **Integração com o `ocgcore`** provada no protótipo Unity: o motor cria o duelo,
   carrega os Lua, distribui as cartas, emite mensagens e aceita respostas.

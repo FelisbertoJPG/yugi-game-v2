@@ -140,6 +140,24 @@ PHASE_MAIN1=0x4, BATTLE=0x80, END=0x200.
 7. **Cartas customizadas do usuário** (Kuriboh etc.) — precisam de Lua manual
    (Estágio 2, ver `continue.md`); as cartas da **Lista 1** são reais e já funcionam.
 
+## 6.1. Onde os decks moram (mudou)
+
+Decks agora são **arquivos `.ydk` em `decks/`**, versionados no git — não mais
+localStorage. `decks/npc/<npcId>/*.ydk` para os adversários, `decks/player/*.ydk`
+para os seus. Metadados nossos (nome, npc, carta que dropa) vão em comentários
+`#chave valor`, que qualquer parser de `.ydk` ignora — o arquivo segue válido no
+EDOPro.
+
+A gravação é feita pelo servidor de desenvolvimento (`/__decks/save`, só
+localhost, só `.ydk` dentro de `decks/`). Sem ele no ar, o Deck Builder baixa o
+arquivo para você mover na mão. `web/js/projectdecks.js` é a camada cliente;
+`web/js/npcs.js` hidrata um cache em memória com `loadNpcDecks()` no boot, para
+os consumidores seguirem síncronos.
+
+No `localStorage` restaram só preferências locais: qual deck de cada NPC está
+ativo, e os decks do jogador em edição. Decks antigos que ficaram presos no
+navegador aparecem na página de NPCs com um botão **"migrar para o projeto"**.
+
 ## 7. Onde mexer
 
 - Novo tipo de pergunta do motor não tratado → aparece como "unsupported" no front.

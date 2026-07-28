@@ -124,11 +124,19 @@ console.log('\n=== formato .ydk (o que o ocgcore vai ler) ===');
 t('exporta com as seções corretas', () => {
   const d = new Deck({ name: 'T', main: [1, 1, 2], extra: [9] });
   const lines = d.toYdk().trim().split('\n');
-  assert.equal(lines[1], '#main');
-  assert.deepEqual(lines.slice(2, 5), ['1', '1', '2']);
-  assert.equal(lines[5], '#extra');
-  assert.equal(lines[6], '9');
-  assert.equal(lines[7], '!side');
+  const i = lines.indexOf('#main');
+  assert.ok(i > 0, 'precisa ter a seção #main');
+  assert.deepEqual(lines.slice(i + 1, i + 4), ['1', '1', '2']);
+  assert.equal(lines[i + 4], '#extra');
+  assert.equal(lines[i + 5], '9');
+  assert.equal(lines[i + 6], '!side');
+});
+t('ids ficam antes de qualquer metadado', () => {
+  // Se um metadado escapasse para depois do #main, viraria "id" invalido.
+  const d = new Deck({ name: 'T', main: [1], extra: [] });
+  const lines = d.toYdk({ npc: 'yugi' }).trim().split('\n');
+  const i = lines.indexOf('#main');
+  assert.ok(lines.slice(0, i).every((l) => l.startsWith('#')));
 });
 t('ida e volta preserva o deck', () => {
   const d = new Deck({ name: 'X', main: [10, 10, 11], extra: [20] });
@@ -146,6 +154,35 @@ t('importa .ydk real do ygopro e descarta o side', () => {
 t('ignora lixo e linhas vazias', () => {
   const d = Deck.fromYdk('#main\n\n  123  \nabc\n0\n#extra\n');
   assert.deepEqual(d.main, [123]);
+});
+
+console.log('\n=== metadados no .ydk (decks de NPC no projeto) ===');
+t('grava e recupera os metadados', () => {
+  const d = new Deck({ name: 'Yugi Chaos', main: [1], extra: [] });
+  const back = Deck.fromYdk(d.toYdk({ npc: 'yugi', signature: 46986414 }));
+  assert.equal(back.meta.npc, 'yugi');
+  assert.equal(back.meta.signature, '46986414');
+  assert.equal(back.name, 'Yugi Chaos', 'o nome volta do metadado');
+});
+t('metadado nao contamina as cartas', () => {
+  const d = new Deck({ name: 'X', main: [10, 20], extra: [] });
+  const back = Deck.fromYdk(d.toYdk({ npc: 'yugi', signature: 999 }));
+  assert.deepEqual(back.main, [10, 20], 'signature nao pode virar carta');
+});
+t('nao deixa metadado sobrescrever marcador do formato', () => {
+  const d = new Deck({ name: 'X', main: [5], extra: [] });
+  const ydk = d.toYdk({ main: 'invasor', extra: 'invasor', side: 'invasor' });
+  assert.equal((ydk.match(/^#main$/gm) ?? []).length, 1);
+  assert.deepEqual(Deck.fromYdk(ydk).main, [5]);
+});
+t('.ydk de outra ferramenta volta com meta vazio', () => {
+  const d = Deck.fromYdk('#created by ygopro\n#main\n89631139\n#extra\n!side\n');
+  assert.deepEqual(d.meta, {});
+  assert.deepEqual(d.main, [89631139]);
+});
+t('metadado com acento/espaco sobrevive', () => {
+  const d = new Deck({ name: 'Deck do Yugi — Caos', main: [1], extra: [] });
+  assert.equal(Deck.fromYdk(d.toYdk()).name, 'Deck do Yugi — Caos');
 });
 
 console.log(`\n${pass} passaram, ${fail} falharam\n`);

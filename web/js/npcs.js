@@ -6,11 +6,19 @@
  * cada vez mais fortes para o mesmo NPC e escolher qual fica ativo — o ativo é o
  * que ele leva pro duelo. Cada deck tem sua própria "carta que dropa" (signature).
  *
- * Persistência: localStorage, igual às cartas customizadas. Estrutura por NPC:
- *   { decks: [ { name, main:[], extra:[], signatureId, updatedAt } ], activeIndex }
+ * PERSISTÊNCIA: os decks de NPC são conteúdo do jogo, então moram em arquivos
+ * `.ydk` dentro de `decks/npc/<npcId>/` e viajam no git. O localStorage guarda
+ * apenas qual deck está ativo (preferência local, não conteúdo) e serve de
+ * reserva quando o servidor de desenvolvimento não está no ar para gravar.
+ *
+ * A leitura do disco é assíncrona, mas os consumidores continuam síncronos:
+ * chame `loadNpcDecks()` uma vez no boot para hidratar o cache em memória.
  */
 
 import { Deck } from './deck.js';
+import {
+  listProjectDecks, saveProjectDeck, deleteProjectDeck, npcDeckPath, canWrite,
+} from './projectdecks.js';
 
 /** Os 3 NPCs fixos desta fase. `signatureId` é o drop padrão de um deck novo. */
 export const NPCS = [
@@ -19,66 +27,98 @@ export const NPCS = [
   { id: 'yugi', name: 'Yugi Muto', theme: 'Dark Magician', signatureId: 46986414 },
 ];
 
-const KEY = 'ygo:npcDecks';
+const KEY = 'ygo:npcDecks';       // legado: decks que ficaram só no navegador
+const KEY_ACTIVE = 'ygo:npcActive';  // preferência local de qual deck está ativo
 
-function readAll() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw === null ? {} : JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function writeAll(obj) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(obj));
-    return true;
-  } catch (e) {
-    console.error('[npcs] falha ao gravar', e);
-    return false;
-  }
-}
+/**
+ * Cache em memória, hidratado por `loadNpcDecks()`.
+ * `{ [npcId]: [{ name, main, extra, signatureId, updatedAt, path }] }`
+ */
+let cache = {};
+let loaded = false;
+let writable = false;
 
 export function getNpc(id) {
   return NPCS.find((n) => n.id === id) ?? null;
 }
 
-/**
- * Normaliza o registro de um NPC para o formato { decks:[], activeIndex }.
- * Migra o formato antigo (deck único achatado) sem perder nada.
- */
-function normalize(rec, npc) {
-  if (rec && Array.isArray(rec.decks)) {
-    return { decks: rec.decks, activeIndex: Math.min(rec.activeIndex ?? 0, Math.max(0, rec.decks.length - 1)) };
-  }
-  // formato antigo: { main, extra, signatureId, activeDeckName? }
-  if (rec && (rec.main || rec.extra)) {
-    return {
-      decks: [{
-        name: 'Deck 1',
-        main: rec.main ?? [],
-        extra: rec.extra ?? [],
-        signatureId: rec.signatureId ?? npc.signatureId,
-        updatedAt: rec.updatedAt ?? null,
-      }],
-      activeIndex: 0,
-    };
-  }
-  return { decks: [], activeIndex: 0 };
+/** Já dá para gravar no projeto (servidor de desenvolvimento no ar)? */
+export const canPersistToProject = () => writable;
+export const isLoaded = () => loaded;
+
+function readJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : JSON.parse(raw);
+  } catch { return fallback; }
 }
 
-/** Estado normalizado do NPC (com migração aplicada). */
+function writeJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (e) { console.error('[npcs] falha ao gravar', key, e); return false; }
+}
+
+/** Decks que ficaram no localStorage antes de existir a pasta decks/. */
+function legacyDecks(npcId) {
+  const rec = readJson(KEY, {})[npcId];
+  if (!rec) return [];
+  if (Array.isArray(rec.decks)) return rec.decks;
+  if (rec.main || rec.extra) {
+    return [{
+      name: 'Deck 1', main: rec.main ?? [], extra: rec.extra ?? [],
+      signatureId: rec.signatureId, updatedAt: rec.updatedAt ?? null,
+    }];
+  }
+  return [];
+}
+
+/**
+ * Carrega os decks dos NPCs a partir de `decks/npc/`. Chame uma vez no boot,
+ * antes de renderizar. Decks legados do localStorage entram como reserva
+ * apenas quando o NPC ainda não tem nada versionado no projeto.
+ */
+export async function loadNpcDecks() {
+  writable = await canWrite();
+  const all = await listProjectDecks();
+
+  cache = {};
+  for (const npc of NPCS) cache[npc.id] = [];
+
+  for (const { path, meta, deck } of all) {
+    const m = /^npc\/([^/]+)\//.exec(path);
+    if (!m) continue;                       // decks de jogador ficam de fora
+    const npcId = m[1];
+    if (!cache[npcId]) continue;            // pasta de um NPC que não existe mais
+    cache[npcId].push({
+      name: meta.name || deck.name,
+      main: deck.main,
+      extra: deck.extra,
+      signatureId: Number(meta.signature) || getNpc(npcId)?.signatureId,
+      updatedAt: meta.updated ?? null,
+      path,
+    });
+  }
+
+  for (const npc of NPCS) {
+    cache[npc.id].sort((a, b) => a.name.localeCompare(b.name));
+    if (!cache[npc.id].length) {
+      // nada no projeto: aproveita o que houver no navegador, sem path (ainda
+      // não versionado) — a UI mostra isso e oferece migrar.
+      cache[npc.id] = legacyDecks(npc.id).map((d) => ({ ...d, path: null }));
+    }
+  }
+
+  loaded = true;
+  return cache;
+}
+
+/** Estado do NPC: os decks em cache + qual está ativo. */
 export function getNpcState(id) {
   const npc = getNpc(id);
   if (!npc) return null;
-  return normalize(readAll()[id], npc);
-}
-
-function persist(id, state) {
-  const all = readAll();
-  all[id] = state;
-  return writeAll(all);
+  const decks = cache[id] ?? [];
+  const active = readJson(KEY_ACTIVE, {})[id] ?? 0;
+  return { decks, activeIndex: Math.min(active, Math.max(0, decks.length - 1)) };
 }
 
 const toDeck = (npc, d) =>
@@ -92,6 +132,8 @@ export function getNpcDecks(id) {
   return st.decks.map((d, i) => ({
     index: i, name: d.name, deck: toDeck(npc, d),
     signatureId: d.signatureId ?? npc.signatureId, updatedAt: d.updatedAt ?? null,
+    // `path` null = o deck ainda não está versionado no projeto (só no navegador).
+    path: d.path ?? null,
   }));
 }
 
@@ -108,47 +150,88 @@ export function getNpcActiveDeck(id) {
 }
 
 /**
- * Cria/atualiza um deck do NPC. `index` null (ou fora do range) cria um novo.
- * Deixa o deck salvo como o ativo. @returns {number} o índice usado.
+ * Cria/atualiza um deck do NPC, gravando o `.ydk` em `decks/npc/<id>/`.
+ * `index` null (ou fora do range) cria um novo. Deixa o deck salvo como ativo.
+ *
+ * Assíncrono porque escreve em arquivo. Se o servidor de desenvolvimento não
+ * estiver no ar, o `.ydk` é baixado e o resultado indica isso — o deck NÃO
+ * entra no projeto sozinho nesse caso.
+ *
+ * @returns {Promise<{index:number, path?:string, downloaded?:boolean, error?:string}>}
  */
-export function saveNpcDeckAt(id, index, { name, deck, signatureId }) {
+export async function saveNpcDeckAt(id, index, { name, deck, signatureId }) {
   const npc = getNpc(id);
-  if (!npc) return -1;
-  const st = getNpcState(id);
+  if (!npc) return { index: -1, error: 'NPC inexistente' };
+
+  const list = cache[id] ?? (cache[id] = []);
+  const finalName = (name || '').trim() || `Deck ${list.length + 1}`;
+  const sig = Number(signatureId) || npc.signatureId;
   const entry = {
-    name: (name || '').trim() || `Deck ${st.decks.length + 1}`,
+    name: finalName,
     main: [...deck.main],
     extra: [...deck.extra],
-    signatureId: Number(signatureId) || npc.signatureId,
+    signatureId: sig,
     updatedAt: new Date().toISOString(),
+    path: null,
   };
-  let i = index;
-  if (i == null || i < 0 || i >= st.decks.length) {
-    st.decks.push(entry);
-    i = st.decks.length - 1;
-  } else {
-    st.decks[i] = entry;
+
+  const old = (index != null && index >= 0 && index < list.length) ? list[index] : null;
+  const path = npcDeckPath(id, finalName);
+
+  const r = await saveProjectDeck(path, deck, {
+    name: finalName, npc: id, signature: sig, updated: entry.updatedAt,
+  });
+  entry.path = r.ok ? r.path : null;
+
+  // Renomear muda o arquivo: apaga o antigo para não ficarem dois.
+  if (r.ok && old?.path && old.path !== entry.path) {
+    await deleteProjectDeck(old.path);
   }
-  st.activeIndex = i;
-  persist(id, st);
-  return i;
+
+  let i = index;
+  if (i == null || i < 0 || i >= list.length) { list.push(entry); i = list.length - 1; }
+  else list[i] = entry;
+
+  setNpcActiveIndex(id, i);
+  return { index: i, path: entry.path, downloaded: r.downloaded, error: r.error };
 }
 
-/** Remove um deck do NPC (mantém a lista consistente). */
-export function deleteNpcDeck(id, index) {
+/** Remove um deck do NPC, apagando o arquivo do projeto. */
+export async function deleteNpcDeck(id, index) {
+  const list = cache[id] ?? [];
+  if (index < 0 || index >= list.length) return false;
+  const [removed] = list.splice(index, 1);
+  if (removed?.path) await deleteProjectDeck(removed.path);
   const st = getNpcState(id);
-  if (!st || index < 0 || index >= st.decks.length) return false;
-  st.decks.splice(index, 1);
-  st.activeIndex = Math.max(0, Math.min(st.activeIndex, st.decks.length - 1));
-  return persist(id, st);
+  setNpcActiveIndex(id, Math.max(0, Math.min(st.activeIndex, list.length - 1)));
+  return true;
 }
 
-/** Define qual deck do NPC fica ativo. */
+/** Define qual deck do NPC fica ativo. Preferência local — não vai para o git. */
 export function setNpcActiveIndex(id, index) {
-  const st = getNpcState(id);
-  if (!st || index < 0 || index >= st.decks.length) return false;
-  st.activeIndex = index;
-  return persist(id, st);
+  const all = readJson(KEY_ACTIVE, {});
+  all[id] = Math.max(0, index);
+  return writeJson(KEY_ACTIVE, all);
+}
+
+/**
+ * Sobe para o projeto os decks que ainda estão só no localStorage.
+ * @returns {Promise<{migrated:number, failed:number}>}
+ */
+export async function migrateLegacyToProject() {
+  let migrated = 0, failed = 0;
+  for (const npc of NPCS) {
+    const list = cache[npc.id] ?? [];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].path) continue;                       // já está no projeto
+      const d = new Deck({ name: list[i].name, main: list[i].main, extra: list[i].extra });
+      const r = await saveNpcDeckAt(npc.id, i, {
+        name: list[i].name, deck: d, signatureId: list[i].signatureId,
+      });
+      if (r.path) migrated++; else failed++;
+    }
+  }
+  return { migrated, failed };
 }
 
 /** Lista os 3 NPCs com seus decks e o ativo resolvidos (para a página /npcs). */

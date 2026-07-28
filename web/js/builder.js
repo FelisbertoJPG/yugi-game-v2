@@ -16,8 +16,9 @@ import {
   renderFramedCard, RACES, ATTRIBUTES, MONSTER_KINDS, SUBTYPES, isExtraKind,
 } from '/web/js/customcards.js';
 import {
-  getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt,
+  getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks,
 } from '/web/js/npcs.js';
+import { saveProjectDeck, playerDeckPath } from '/web/js/projectdecks.js';
 import { inLista1 } from '/web/js/lista1.js';
 
 const $ = (id) => document.getElementById(id);
@@ -178,8 +179,9 @@ function refresh() {
 function enterNpcModeUI() {
   $('npc-bar').hidden = false;
   $('npc-name').textContent = npcMode.name;
-  // o campo de nome passa a ser o nome DESTE deck do NPC (editável)
-  for (const id of ['deck-select', 'btn-new', 'btn-delete']) $(id).hidden = true;
+  // o campo de nome passa a ser o nome DESTE deck do NPC (editável).
+  // 'btn-project' sai porque no modo NPC o próprio salvar já grava em decks/npc/.
+  for (const id of ['deck-select', 'btn-new', 'btn-delete', 'btn-project']) $(id).hidden = true;
   $('npc-back').onclick = () => {
     if (confirmDiscard()) location.href = '/web/npcs.html';
   };
@@ -205,14 +207,27 @@ function updateNpcDrop() {
   sel.value = uniq.includes(prev) ? String(prev) : String(uniq[0]);
 }
 
-function saveNpcDeckFromUI() {
+async function saveNpcDeckFromUI() {
   const sig = Number($('npc-drop').value) || npcSignature;
   const name = $('deck-name').value.trim() || `Deck ${npcMode.name}`;
-  npcDeckIndex = saveNpcDeckAt(npcMode.id, npcDeckIndex, { name, deck, signatureId: sig });
+
+  const r = await saveNpcDeckAt(npcMode.id, npcDeckIndex, { name, deck, signatureId: sig });
+  if (r.index < 0) return void toast(r.error ?? 'falha ao salvar');
+  npcDeckIndex = r.index;
   npcSignature = sig;
   markDirty(false);
+
   const v = deck.validate();
-  toast(v.valid ? `deck "${name}" salvo` : `salvo (incompleto: ${v.errors[0]})`);
+  const aviso = v.valid ? '' : ` (incompleto: ${v.errors[0]})`;
+  if (r.path) {
+    toast(`salvo em decks/${r.path}${aviso}`);
+  } else if (r.downloaded) {
+    // Sem servidor de desenvolvimento não dá para escrever no projeto; o .ydk
+    // foi baixado e precisa ser colocado em decks/ na mão.
+    toast('servidor fora do ar — .ydk baixado, mova para decks/npc/');
+  } else {
+    toast(`salvo${aviso}`);
+  }
 }
 
 // ---------------------------------------------------------------- arrastar
@@ -473,6 +488,21 @@ $('btn-export').onclick = () => {
   deck.name = $('deck-name').value.trim() || 'deck';
   downloadYdk(deck);
   toast('.ydk exportado');
+};
+
+// Grava o deck em decks/player/ — diferente de "salvar", que é localStorage e
+// fica preso a este navegador. O que vai para o projeto viaja no git.
+$('btn-project').onclick = async () => {
+  deck.name = $('deck-name').value.trim() || 'deck';
+  const path = playerDeckPath(deck.name);
+  const r = await saveProjectDeck(path, deck, { updated: new Date().toISOString() });
+  if (r.ok) {
+    toast(`salvo em decks/${r.path} — dê commit para levar para outra máquina`);
+  } else if (r.downloaded) {
+    toast('servidor fora do ar — .ydk baixado, mova para decks/player/');
+  } else {
+    toast(`falhou: ${r.error}`);
+  }
 };
 
 $('btn-import').onclick = async () => {
@@ -763,6 +793,9 @@ const npcId = params.get('npc');
 const npc = npcId ? getNpc(npcId) : null;
 if (npc) {
   npcMode = npc;
+  // Os decks dos NPCs vivem em arquivos (decks/npc/), então precisam ser
+  // carregados do disco antes de qualquer leitura do estado.
+  await loadNpcDecks();
   const st = getNpcState(npcId);
   const deckParam = params.get('deck');
   // qual deck: índice explícito, 'new', ou o ativo (novo se o NPC não tem nenhum)

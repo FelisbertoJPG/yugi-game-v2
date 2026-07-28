@@ -53,7 +53,10 @@
 <div class="toast" id="toast"></div>
 
 <script type="module">
-import { listNpcState, setNpcActiveIndex, deleteNpcDeck } from '/web/js/npcs.js';
+import {
+  listNpcState, setNpcActiveIndex, deleteNpcDeck,
+  loadNpcDecks, canPersistToProject, migrateLegacyToProject,
+} from '/web/js/npcs.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -124,18 +127,61 @@ function render() {
       render();
     };
     const del = card.querySelector('[data-del]');
-    if (del) del.onclick = () => {
+    if (del) del.onclick = async () => {
       if (!confirm(`Excluir o deck ativo de ${npc.name}?`)) return;
-      deleteNpcDeck(npc.id, activeIndex);
+      await deleteNpcDeck(npc.id, activeIndex);
       toast('deck excluído');
       render();
     };
     frag.append(card);
   }
   $('grid').replaceChildren(frag);
+  renderOrigin();
+}
+
+/** Deixa explícito onde os decks estão guardados — e avisa se ainda for local. */
+function renderOrigin() {
+  let bar = $('origin');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'origin';
+    bar.className = 'banner';
+    bar.style.margin = '0 0 14px';
+    $('grid').before(bar);
+  }
+  const soltos = listNpcState()
+    .flatMap((n) => n.decks.filter((d) => !d.path).map(() => n.name));
+
+  if (!canPersistToProject()) {
+    bar.className = 'banner err';
+    bar.textContent = 'Servidor de desenvolvimento fora do ar — os decks não podem '
+      + 'ser gravados no projeto. Rode `npm run dev` (ou o duel-academy.exe).';
+    return;
+  }
+  if (soltos.length) {
+    bar.className = 'banner err';
+    bar.replaceChildren(
+      document.createTextNode(`${soltos.length} deck(s) ainda só no navegador, fora do git. `));
+    const b = document.createElement('button');
+    b.textContent = 'migrar para o projeto';
+    b.style.marginLeft = '8px';
+    b.onclick = async () => {
+      b.disabled = true;
+      const { migrated, failed } = await migrateLegacyToProject();
+      toast(`migrados: ${migrated}${failed ? `, falharam: ${failed}` : ''}`);
+      await loadNpcDecks();
+      render();
+    };
+    bar.append(b);
+    return;
+  }
+  bar.className = 'banner ok';
+  bar.textContent = 'Decks salvos em decks/npc/ — versionados no git.';
 }
 
 $('btn-home').onclick = () => (location.href = '/web/index.html');
+
+await loadNpcDecks();
 render();
 </script>
 </body>

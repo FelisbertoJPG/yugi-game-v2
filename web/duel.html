@@ -72,6 +72,17 @@
   .zone.target.over { outline-style: solid; background: #3a1a1e; }
   .zone.attacking { opacity: .45; }
 
+  /* soltar SOBRE um monstro = tributá-lo */
+  .zone.drop-tribute { outline: 2px dashed #c98b2e; outline-offset: -2px; }
+  .zone.drop-tribute.over { outline-style: solid; background: #3a2a12; }
+
+  /* carta oferecida numa seleção (tributo, alvo, ritual) */
+  .zone.selectable {
+    outline: 3px solid var(--gold); outline-offset: -3px; cursor: pointer;
+    animation: pisca 1s ease-in-out infinite;
+  }
+  @keyframes pisca { 50% { outline-color: #6b5220; } }
+
   /* ---------- aviso de fase ---------- */
   /* Entra deslizando, segura um instante e sai. Não intercepta clique. */
   #phase-toast {
@@ -415,6 +426,21 @@ function apply(j) {
     picked.clear();
     selectedField = null;   // a pergunta mudou: a seleção de campo não vale mais
 
+    // Tributo já indicado pelo arrasto: escolhe sozinho o monstro sobre o qual a
+    // carta foi solta. Se o motor pedir mais de um, o resto fica com o jogador.
+    if (pendingTribute != null && question && question.player === 0
+        && ['selecttribute', 'selectunselect'].includes(question.kind)) {
+      const alvo = pendingTribute;
+      pendingTribute = null;
+      const c = (question.choices || []).find((x) => x.location === 4 && x.sequence === alvo);
+      if (c) {
+        act(question.kind === 'selectunselect' ? 'pick' : 'select',
+            c.index, 'tributo escolhido no arrasto',
+            question.kind === 'selectunselect' ? undefined : [c.index]);
+        return;
+      }
+    }
+
     // Alvo já escolhido no arrasto: responde o SELECT_CARD do ataque sem abrir o
     // modal. Vale para UMA pergunta só, senão sobraria pendurado para a próxima.
     if (pendingTarget) {
@@ -541,10 +567,29 @@ function handle(ev) {
 }
 
 // ---------- render ----------
-function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk) {
+let SELECIONAVEIS = new Map();   // recalculado a cada render
+
+function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
   z.innerHTML = `<span class="zl">${label}</span>`;
+  // A arte vem primeiro: as ramificações abaixo podem sair da função cedo
+  // (durante uma seleção, por exemplo) e a carta precisa aparecer de qualquer jeito.
+  if (cell) {
+    const facedown = (cell.pos & 0xa) !== 0;   // POS_FACEDOWN_*
+    const el = document.createElement(facedown ? 'div' : 'img');
+    if (facedown) { el.className = 'back'; el.style.width = '100%'; el.style.height = '100%'; }
+    else el.src = ART(cell.code);
+    // só MONSTRO em defesa deita; magia/armadilha fica sempre vertical
+    if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
+    el.title = nameOf(cell.code) + (facedown ? ' (virada)' : '\nsegurar: ver detalhes');
+    z.append(el);
+    // Carta virada não revela nada: ver o detalhe dela seria trapaça.
+    if (!facedown) {
+      wireLongPress(z, HOLD_MS, () => showCardDetail(cell.code));
+      z.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(cell.code); };
+    }
+  }
 
   // --- ataque: meu monstro que pode atacar ---
   if (cell && atk && atk.meu) {
@@ -592,6 +637,21 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk) {
     });
   }
 
+  // Durante uma seleção, a zona vira candidata clicável — e nada mais.
+  if (cell && selKey) {
+    const c = SELECIONAVEIS.get(selKey);
+    if (c) {
+      z.classList.add('selectable');
+      z.title = `${nameOf(cell.code)} — clique para escolher`;
+      z.onclick = () => {
+        const q = question;
+        if (q.kind === 'selectunselect') act('pick', c.index, `escolher ${nameOf(cell.code)}`);
+        else act('select', 0, `escolher ${nameOf(cell.code)}`, [c.index]);
+      };
+      return z;   // nesta pergunta a zona não faz mais nada
+    }
+  }
+
   // Ações disponíveis para a carta que já está nesta zona.
   if (cell && campoOpts) {
     const chave = `${campoOpts.loc}:${campoOpts.seq}`;
@@ -616,39 +676,35 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk) {
     }
   }
 
-  // Zona vazia com uma carta em jogo (arrastada ou clicada): marca se aceita o
-  // TIPO dela. Aceita tanto soltar quanto clicar.
+  // Zona com uma carta em jogo (arrastada ou clicada): marca se aceita o TIPO
+  // dela. Aceita tanto soltar quanto clicar.
   const ativa = activeHand();
-  if (!cell && ativa != null && drop) {
-    const aceita = dropTargets(ativa)[drop.type];
-    z.classList.add(aceita ? 'drop-ok' : 'drop-no');
+  if (ativa != null && drop) {
+    const codigoAtivo = hand[0][ativa];
+    // Zona ocupada só aceita quem exige tributo — e o gesto significa
+    // "tributa este monstro".
+    const sobreMonstro = !!cell && drop.type === 'm' && exigeTributo(codigoAtivo);
+    const aceita = dropTargets(ativa)[drop.type] && (!cell || sobreMonstro);
+
     if (aceita) {
+      z.classList.add(sobreMonstro ? 'drop-tribute' : 'drop-ok');
       z.style.cursor = 'pointer';
-      z.onclick = () => dropOn(drop.type, drop.index);
+      if (sobreMonstro) z.title = `tributar ${nameOf(cell.code)} para invocar`;
+      const escolher = () => dropOn(drop.type, drop.index, sobreMonstro ? drop.index : null);
+      z.onclick = escolher;
       z.addEventListener('dragover', (e) => { e.preventDefault(); z.classList.add('over'); });
       z.addEventListener('dragleave', () => z.classList.remove('over'));
       z.addEventListener('drop', (e) => {
         e.preventDefault();
         z.classList.remove('over');
-        dropOn(drop.type, drop.index);
+        escolher();
       });
+    } else if (!cell) {
+      z.classList.add('drop-no');
     }
   }
 
-  if (cell) {
-    const facedown = (cell.pos & 0xa) !== 0;   // POS_FACEDOWN_*
-    const el = document.createElement(facedown ? 'div' : 'img');
-    if (facedown) { el.className = 'back'; el.style.width = '100%'; el.style.height = '100%'; el.title = nameOf(cell.code) + ' (virada)'; }
-    else { el.src = ART(cell.code); el.title = nameOf(cell.code) + '\nsegurar: ver detalhes'; }
-    // só MONSTRO em defesa deita (horizontal); magia/armadilha fica sempre vertical
-    if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
-    z.append(el);
-    // Carta virada não revela nada: ver o detalhe dela seria trapaça.
-    if (!facedown) {
-      wireLongPress(z, HOLD_MS, () => showCardDetail(cell.code));
-      z.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(cell.code); };
-    }
-  } else if (onClick) { z.classList.add('free'); z.onclick = onClick; }
+  if (!cell && onClick) { z.classList.add('free'); z.onclick = onClick; }
   return z;
 }
 
@@ -683,6 +739,25 @@ let pendingTarget = null;   // alvo escolhido no arrasto, aplicado no SELECT_CAR
  * motor: monstro invocado neste turno, em defesa, ou que já atacou, simplesmente
  * não vem na lista.
  */
+/**
+ * Cartas do campo que a pergunta de seleção está oferecendo, por posição.
+ *
+ * Serve ao pedido de "separar as ações em partes": enquanto o motor pede uma
+ * escolha, o tabuleiro para de oferecer invocação/posição/ataque e passa a
+ * mostrar apenas o que está em jogo naquela escolha — e dá para clicar direto
+ * na carta, em vez de caçá-la na janela.
+ */
+function selecionaveisNoCampo() {
+  const m = new Map();
+  const q = question;
+  if (!q || q.player !== 0) return m;
+  if (!['selectcard', 'selecttribute', 'selectunselect', 'selectsum'].includes(q.kind)) return m;
+  for (const c of q.choices || []) {
+    if (c.location === 4 || c.location === 8) m.set(`${c.controller}:${c.location}:${c.sequence}`, c);
+  }
+  return m;
+}
+
 function atacantes() {
   const m = new Map();
   if (question && question.kind === 'battle' && question.player === 0) {
@@ -710,18 +785,20 @@ function fieldRows(player, isYou) {
     ? (atk.has(i) ? { meu: true, seq: i, act: atk.get(i) } : null)
     : { alvo: true, loc: 4, seq: i };
 
+  const sk = (loc, seq) => `${player}:${loc}:${seq}`;
+
   mrow.append(zoneEl(f.f, 'fz', 'F', null,
-    isYou ? { type: 'f', index: 5 } : null, co(8, 5)));
+    isYou ? { type: 'f', index: 5 } : null, co(8, 5), null, sk(8, 5)));
   for (let i = 0; i < 5; i++)
     mrow.append(zoneEl(f.m[i], 'mz', 'M'+i,
       freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null,
-      isYou ? { type: 'm', index: i } : null, co(4, i), ai(i)));
+      isYou ? { type: 'm', index: i } : null, co(4, i), ai(i), sk(4, i)));
   mrow.append(pileEl(player, 'GY', f.g));   // cemitério à direita dos monstros
   const spacer = document.createElement('div'); spacer.style.width = '58px'; srow.append(spacer);
   for (let i = 0; i < 5; i++)
     srow.append(zoneEl(f.s[i], 'sz', 'S'+i,
       freeS.has(i) ? () => act('place', i, `colocar na zona S${i}`) : null,
-      isYou ? { type: 's', index: i } : null, co(8, i)));
+      isYou ? { type: 's', index: i } : null, co(8, i), null, sk(8, i)));
   // Deck logo abaixo do cemitério, que é onde ele fica de verdade na mesa.
   srow.append(deckEl(player));
 
@@ -782,6 +859,7 @@ function doAction(a) {
 // diz onde a carta vai, guardamos a zona e respondemos o SELECT_PLACE sozinhos.
 let dragging = null;      // { h, code, kind }
 let pendingZone = null;   // { type: 'm'|'s', index }
+let pendingTribute = null; // sequência do monstro que o arrasto escolheu tributar
 
 /** Onde a carta pode ser jogada: monstro, magia/armadilha ou campo. */
 function cardKind(code) {
@@ -790,6 +868,16 @@ function cardKind(code) {
   if (b.t === 'M') return 'm';
   return /\bField\b/.test(b.tl || '') ? 'f' : 's';
 }
+
+/** Nível da carta (0 quando não for monstro ou não estiver no índice). */
+const nivelDe = (code) => db?.brief(code)?.lv ?? 0;
+
+/**
+ * Precisa de tributo? Só esses podem ser soltos SOBRE um monstro — é o gesto de
+ * "tributa este aqui". Sem isso, com as 5 zonas ocupadas não sobrava nenhum
+ * alvo de arrasto e a invocação por tributo ficava inacessível pelo arrasto.
+ */
+const exigeTributo = (code) => nivelDe(code) >= 5;
 
 /**
  * Qual carta está "em jogo" agora: a que está sendo arrastada ou, se não houver
@@ -835,12 +923,17 @@ function endDrag() {
   render();
 }
 
-/** Escolheu a zona (soltando ou clicando): guarda o destino e pergunta a posição. */
-function dropOn(type, index) {
+/**
+ * Escolheu a zona (soltando ou clicando): guarda o destino e pergunta a posição.
+ * `tributoSeq` vem preenchido quando a carta foi solta SOBRE um monstro — nesse
+ * caso o gesto também diz qual monstro tributar.
+ */
+function dropOn(type, index, tributoSeq = null) {
   const h = activeHand();
   if (h == null) return;
   // A zona de campo é, para o motor, a sequência 5 do grupo de magia.
   pendingZone = { type: type === 'f' ? 's' : type, index: type === 'f' ? 5 : index };
+  pendingTribute = tributoSeq;
   const acts = actionsFor(h);
   dragging = null;
   selectedHand = null;
@@ -890,6 +983,7 @@ function abrirPopupPosicao(h, acts, type, index) {
 function fecharPopupPosicao() { $('pos-overlay').hidden = true; }
 
 function render() {
+  SELECIONAVEIS = selecionaveisNoCampo();
   $('turn').textContent = turn === 0 ? 'VOCÊ' : 'oponente';
   $('opp-field').replaceChildren(fieldRows(1, false));
   $('you-field').replaceChildren(fieldRows(0, true));

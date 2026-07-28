@@ -27,10 +27,25 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     let rel = decodeURIComponent(url.pathname);
+
+    // Encerramento limpo, pedido pelo launcher. Só aceita da própria máquina —
+    // é servidor de desenvolvimento, mas derrubar processo é coisa que não se
+    // deixa aberta para a rede.
+    if (rel === '/__shutdown') {
+      const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
+        .includes(req.socket.remoteAddress);
+      if (!local) return void res.writeHead(403).end('403');
+      res.writeHead(200, { 'content-type': 'text/plain' }).end('bye');
+      console.log('  encerrando a pedido do launcher...');
+      server.close(() => process.exit(0));
+      // Rede de segurança: se alguma conexão ficar pendurada, sai mesmo assim.
+      setTimeout(() => process.exit(0), 1500).unref();
+      return;
+    }
 
     // Redireciona de verdade em vez de servir o arquivo em '/': se o documento
     // ficasse na raiz, os caminhos relativos dele resolveriam contra '/' e
@@ -52,6 +67,13 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end('404');
   }
-}).listen(PORT, () => {
+});
+
+server.listen(PORT, () => {
   console.log(`\n  yugi-game-v2 em http://localhost:${PORT}\n`);
 });
+
+// Também responde a um Ctrl+C / término pedido pelo terminal.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => server.close(() => process.exit(0)));
+}

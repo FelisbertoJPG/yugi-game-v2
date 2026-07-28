@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "node tools/serve.mjs",
     "data:build": "python ygo-data/tools/build.py",
-    "data:check": "node ygo-data/examples/node-demo.mjs"
+    "data:check": "node ygo-data/examples/node-demo.mjs",
+    "launcher:build": "dotnet publish launcher -c Release -o . -v q --nologo && dotnet publish launcher/stop -c Release -o . -v q --nologo",
+    "stop": "duel-academy-stop.exe"
   },
   "engines": {
     "node": ">=18"

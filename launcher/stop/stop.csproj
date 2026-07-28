@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Segundo executavel a partir do MESMO Program.cs: o "desliga".
+       A unica diferenca e' o STOP_MODE, que faz o Main entrar direto no
+       encerramento sem precisar de argumento. Assim nao existe codigo
+       duplicado entre o liga e o desliga. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>duel-academy-stop</AssemblyName>
+    <RootNamespace>Launcher</RootNamespace>
+
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <DefineConstants>$(DefineConstants);STOP_MODE</DefineConstants>
+
+    <!-- Nao usar o glob padrao: o fonte mora na pasta de cima. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Program.cs" />
+  </ItemGroup>
+
+</Project>

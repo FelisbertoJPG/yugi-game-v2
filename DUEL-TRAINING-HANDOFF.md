@@ -16,6 +16,12 @@ pra virar a "memória"/script dos NPCs depois.
 
 ## 2. Como rodar
 
+**Atalho (Windows):** duplo clique em `duel-academy.exe` na raiz — sobe os dois
+servidores, confere 200 OK em cada um, abre a página e fecha sozinho.
+`duel-academy-stop.exe` encerra tudo de forma limpa. Se os exes não existirem,
+`npm run launcher:build`. Fonte em `launcher/` (um `Program.cs` gera os dois).
+
+Na mão:
 ```bash
 # 1) front estático (raiz do repo)
 npm run dev                       # http://localhost:8080
@@ -27,8 +33,12 @@ dotnet run -- --serve             # http://localhost:8770
 # abrir: http://localhost:8080/web/duel.html  (ou Home → opção 5 "Treino de duelo")
 ```
 Requisitos: .NET SDK 8, Node >=18, **Windows x64** (a `ocgcore.dll`/`sqlite3.dll` são
-nativas Win-x64, ficam em `duel-server/native/`). Matar o servidor:
-`Get-Process duel-server | Stop-Process`.
+nativas Win-x64, ficam em `duel-server/native/`).
+
+**Encerramento limpo:** `POST /shutdown` no duel-server (libera a memória nativa do
+ocgcore via `Dispose` antes de sair) e `POST /__shutdown` no front (só aceita de
+localhost). É o que o `duel-academy-stop.exe` usa; o kill por PID é só o último
+recurso, se o servidor não responder em 8s.
 
 Modos do exe: sem args = demo no console; `--serve` = servidor web; `--selfplay` =
 harness de diagnóstico que joga sozinho e despeja as mensagens do motor (foi assim

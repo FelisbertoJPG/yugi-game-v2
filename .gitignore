@@ -5,7 +5,10 @@ node_modules/
 # Handoff local — instrucoes de retomada, nao vao para o GitHub
 continue.md
 
-# Unity — o duel_academy/.gitignore ja cobre a subpasta, isto e' rede de seguranca
+# Unity — o duel_academy/.gitignore ja cobre a subpasta, isto e' rede de seguranca.
+# NAO adicione *.csproj / *.sln aqui: o repositorio tem projetos .NET de verdade
+# (duel-server, launcher) cujos .csproj precisam ser versionados. Os .csproj
+# gerados pelo Unity ja sao ignorados pelo duel_academy/.gitignore.
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
@@ -14,11 +17,21 @@ continue.md
 [Ll]ogs/
 [Uu]serSettings/
 [Mm]emoryCaptures/
-*.csproj
-*.sln
 *.unityproj
 *.pidb
 *.booproj
+
+# .NET — saidas de build, regeneraveis
+launcher/bin/
+launcher/obj/
+launcher/stop/bin/
+launcher/stop/obj/
+
+# Launcher publicado na raiz: artefato de build, refeito com `npm run launcher:build`
+duel-academy.exe
+duel-academy.pdb
+duel-academy-stop.exe
+duel-academy-stop.pdb
 
 # SO / editor
 .DS_Store

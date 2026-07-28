@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>duel-academy</AssemblyName>
+    <RootNamespace>Launcher</RootNamespace>
+
+    <!-- Mesma plataforma do duel-server, por coerencia. O launcher em si nao
+         toca nas DLLs nativas, mas e' bom nao ter surpresa de bitness. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- Framework-dependent: o exe fica com ~150 KB em vez de ~70 MB.
+         Exige o runtime .NET 8 instalado, que e' pre-requisito do duel-server
+         de qualquer forma. -->
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- A subpasta stop/ e' um projeto separado (o "desliga") que reaproveita o
+       Program.cs daqui. Sem este Remove, o glob padrao puxaria os fontes que o
+       SDK gera dentro de stop/obj/ e a compilacao quebraria com tipos duplicados. -->
+  <ItemGroup>
+    <Compile Remove="stop\**" />
+    <None Remove="stop\**" />
+  </ItemGroup>
+
+</Project>

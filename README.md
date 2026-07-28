@@ -5,18 +5,35 @@ motor **ygopro-core (edo9300)**. Front web em estilo retrô de jogo de navegador
 
 ## Como rodar
 
+Jeito fácil, sem linha de comando (Windows) — dois executáveis na raiz:
+
+| Duplo clique em | O que faz |
+|---|---|
+| **`duel-academy.exe`** | sobe o front (8080), sobe o duel-server (8770), confere cada um com 200 OK, abre a página e fecha sozinho |
+| **`duel-academy-stop.exe`** | encerra os dois de forma limpa e confirma que as portas caíram |
+
+Se ainda não existirem, gere com `npm run launcher:build` (precisa do SDK .NET).
+O launcher compila o `duel-server` sozinho na primeira vez, é idempotente (não
+sobe servidor duplicado) e deixa os servidores rodando ocultos depois de sair.
+
+Na mão:
+
 ```bash
-npm run dev        # http://localhost:8080
+npm run dev                            # front em http://localhost:8080
+cd duel-server && dotnet run -- --serve # duel-server em http://localhost:8770
 ```
 
-Sem `npm install` — o projeto tem **zero dependências**. Só precisa de Node >= 18.
-Python 3 é necessário apenas para regenerar o banco de cartas (`npm run data:build`).
+Sem `npm install` — o front tem **zero dependências**. Precisa de Node >= 18;
+o duelo precisa de .NET 8 e **Windows x64** (as DLLs nativas do ocgcore).
+Python 3 só é necessário para regenerar o banco de cartas (`npm run data:build`).
 
 ## Estrutura
 
 | Pasta | O que é |
 |---|---|
-| **`web/`** | O jogo: Home e Deck Builder. HTML/CSS/JS puro, sem framework. |
+| **`web/`** | O jogo: Home, Deck Builder, NPCs e o treino de duelo. HTML/CSS/JS puro, sem framework. |
+| **`duel-server/`** | Servidor .NET que hospeda o `ocgcore` e expõe o duelo por HTTP. |
+| **`launcher/`** | Fonte dos dois executáveis de liga/desliga. Um só `Program.cs` gera ambos. |
 | **`ygo-data/`** | Banco local de dados — 13.728 cartas decodificadas e 12.702 scripts Lua, extraídos do `cards.cdb` e prontos para consumo web. |
 | **`duel_academy/`** | Protótipo Unity que provou a integração com o `ocgcore.dll`: cria duelo, carrega os scripts Lua, compra cartas e responde ao motor. Fonte de onde os dados foram extraídos. |
 | **`tools/`** | Servidor estático de desenvolvimento. Andaime, não faz parte do produto. |

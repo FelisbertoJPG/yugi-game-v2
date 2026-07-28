@@ -21,6 +21,7 @@ namespace DuelServer
         static readonly object _lock = new();
         static InteractiveDuel _duel;
         static string _sa;
+        static volatile bool _shutdown;
 
         public static void Run(string streamingAssets, string url = "http://localhost:8770/")
         {
@@ -36,15 +37,25 @@ namespace DuelServer
             }
 
             Log.Info($"Servidor de duelo (treino W2) em {url}");
-            Log.Info("  POST /start · POST /respond · GET /health · Ctrl+C para sair");
+            Log.Info("  POST /start · POST /respond · GET /health · POST /shutdown · Ctrl+C para sair");
 
-            while (true)
+            while (!_shutdown)
             {
                 HttpListenerContext ctx;
                 try { ctx = listener.GetContext(); } catch { break; }
                 try { Handle(ctx); }
                 catch (Exception e) { Log.Err($"[web] {e.Message}"); try { ctx.Response.Abort(); } catch { } }
             }
+
+            // Encerramento limpo: libera a memoria nativa do ocgcore antes de sair.
+            // Um kill do processo pularia isto — funciona, mas deixa o duelo vivo
+            // ate o SO recolher, e nao e' o que queremos quando da' pra pedir bonito.
+            lock (_lock)
+            {
+                if (_duel != null) { _duel.Dispose(); _duel = null; Log.Info("duelo ativo liberado."); }
+            }
+            try { listener.Stop(); listener.Close(); } catch { }
+            Log.Info("servidor de duelo encerrado.");
         }
 
         static void Handle(HttpListenerContext ctx)
@@ -57,6 +68,15 @@ namespace DuelServer
             string path = req.Url?.AbsolutePath ?? "/";
             if (req.HttpMethod == "OPTIONS") { res.StatusCode = 204; res.Close(); return; }
             if (path == "/health") { WriteText(res, "ok"); return; }
+
+            // Encerramento a pedido do launcher. Responde primeiro, so' entao sai
+            // do laco — assim quem pediu recebe o 200 em vez de uma conexao morta.
+            if (path == "/shutdown")
+            {
+                WriteText(res, "bye");
+                _shutdown = true;
+                return;
+            }
 
             if (path == "/start" && req.HttpMethod == "POST")
             {

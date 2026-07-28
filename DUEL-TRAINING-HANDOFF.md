@@ -20,15 +20,22 @@ ordem de prioridade — são exatamente as especificadas, nada além:
 
 1. **Pote da Ganância antes de tudo.** Se dá para ativar, ativa antes de invocar.
 2. **Nível maior tem precedência.** Se dá para invocar com tributo, é essa a jogada.
-3. **Sob ameaça, defende.** Se o oponente tem em campo um monstro com ATK maior
-   que tudo na mão do NPC, ele SETA o monstro de maior DEF.
-4. **Senão, ataca.** Invoca o de maior ATK (Nv 1–4) em ataque.
+3. **Statline da própria carta decide o modo.** Só vai para ataque quem tem
+   **ATK > DEF**. Um 1200/2000 é parede: mesmo podendo vencer o que está em campo,
+   rende mais setado do que atacando.
+4. **Depois, o campo.** Se a ameaça do oponente supera o melhor *atacante*
+   disponível, seta o de maior DEF em vez de entregar o monstro.
 5. Sem jogada possível, encerra o turno.
+
+A ordem das duas comparações importa: **primeiro o statline da carta, depois o
+campo**. É o que faz o NPC setar um Aqua Madoor (1200/2000) contra um 1100 em vez
+de invocá-lo em ataque — ele venceria a batalha, mas 2000 de defesa segura muito
+mais do que 1200 de ataque.
 
 Detalhes que importam:
 - **"Pôr em defesa" = Set.** Pelas regras oficiais a Invocação Normal é sempre em
   ataque com a face para cima; a única forma legal de pôr um monstro em defesa no
-  próprio turno é setá-lo. Por isso a regra 3 vira `setmonster`.
+  próprio turno é setá-lo. Por isso as regras de defesa viram `setmonster`.
 - O NPC só enxerga monstros **com a face para cima** (`FaceUpMonsters`) — ele não
   lê o ATK de uma carta setada, que não teria como conhecer.
 - Cada jogada vira um evento `{type:"npc", action, why}`, que o front mostra no
@@ -36,9 +43,17 @@ Detalhes que importam:
 - `POST /start {"npc": false}` volta ao oponente desligado (auto-passa), que é o
   modo de treinar sozinho.
 
-Teste: `duel-server.exe --test-npc` — 10 checagens, sendo 6 da decisão isolada
-(cada regra em situação controlada) e 4 de um duelo real onde o NPC usa os Potes,
+Teste: `npm run duel:test` (ou `duel-server.exe --test-npc`) — 15 checagens, sendo
+11 da decisão isolada (cada regra em situação controlada, incluindo o caso da
+parede que venceria atacando) e 4 de um duelo real onde o NPC usa os Potes,
 invoca por ATK, faz invocação com tributo e seta em defesa quando ameaçado.
+
+> **Compile com o servidor parado.** O `.exe` fica travado enquanto roda e o
+> `dotnet build` falha — mas o teste seguinte roda o binário ANTIGO e parece que
+> a mudança não funcionou. Use `npm run duel:build` / `npm run duel:test`, que
+> derrubam o servidor antes. Pelo mesmo motivo o launcher agora escolhe o build
+> **mais recente** (antes preferia Release, e subia um binário de horas atrás) e
+> imprime a data do que subiu.
 
 ## 2. Como rodar
 

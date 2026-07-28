@@ -47,6 +47,19 @@ namespace DuelServer
             { Action = action; Index = index; Why = why; }
         }
 
+        /// <summary>Uma carta candidata, já com os stats resolvidos.</summary>
+        readonly struct Cand
+        {
+            public readonly InteractiveDuel.Act Act;
+            public readonly DatabaseManager.CardStats St;
+            public readonly bool Ok;
+            public Cand(InteractiveDuel.Act act, DatabaseManager.CardStats st)
+            { Act = act; St = st; Ok = true; }
+
+            /// <summary>Statline ofensivo: só vale a pena em ataque se ATK &gt; DEF.</summary>
+            public bool Ofensivo => St.AtkValue > St.DefValue;
+        }
+
         /// <summary>Decide a jogada a partir de um SELECT_IDLECMD do NPC.</summary>
         public Play Decide(InteractiveDuel.Question q, int me)
         {
@@ -59,54 +72,94 @@ namespace DuelServer
                     return new Play("activate", a.index, "Pote da Ganancia primeiro (regra 4)");
             }
 
-            // Separa a mão invocável por nível.
-            var baixos = new List<(InteractiveDuel.Act act, DatabaseManager.CardStats st)>();
-            var altos = new List<(InteractiveDuel.Act act, DatabaseManager.CardStats st)>();
-            foreach (var a in q.summonable)
-            {
-                var st = _cards.Stats(a.code);
-                if (!st.IsMonster) continue;
-                (st.Level >= 5 ? altos : baixos).Add((a, st));
-            }
+            var invocaveis = Monstros(q.summonable);
+            var setaveis = Monstros(q.settable);
+            int ameaca = MaiorAtkEmCampo(foe);
 
             // --- regra 3: nível maior tem precedência --------------------
-            if (altos.Count > 0)
-            {
-                var melhor = altos.OrderByDescending(x => x.st.AtkValue).First();
-                return new Play("summon", melhor.act.index,
-                    $"nivel {melhor.st.Level} disponivel com tributo (regra 3) — " +
-                    $"{melhor.act.code} ATK {melhor.st.AtkValue}");
-            }
+            // A comparação de statline vale aqui também: um Nv7 parede (DEF alta)
+            // deve ir setado, não em ataque.
+            var jogadaAlta = Escolher(
+                invocaveis.Where(c => c.St.Level >= 5).ToList(),
+                setaveis.Where(c => c.St.Level >= 5).ToList(),
+                ameaca, "regra 3, nivel maior");
+            if (jogadaAlta.HasValue) return jogadaAlta.Value;
 
-            // --- regra 2: ameaça em campo -> setar o de maior DEF --------
-            int ameaca = MaiorAtkEmCampo(foe);
-            int meuMelhorAtk = baixos.Count > 0 ? baixos.Max(x => x.st.AtkValue) : -1;
-
-            if (ameaca > meuMelhorAtk && q.settable.Count > 0)
-            {
-                var defensor = q.settable
-                    .Select(a => (act: a, st: _cards.Stats(a.code)))
-                    .Where(x => x.st.IsMonster)
-                    .OrderByDescending(x => x.st.DefValue)
-                    .FirstOrDefault();
-
-                if (defensor.st.IsMonster)
-                {
-                    return new Play("setmonster", defensor.act.index,
-                        $"oponente tem ATK {ameaca} > minha mao ({meuMelhorAtk}) — " +
-                        $"setando DEF {defensor.st.DefValue} (regra 2)");
-                }
-            }
-
-            // --- regra 1: maior ATK em ataque ---------------------------
-            if (baixos.Count > 0)
-            {
-                var melhor = baixos.OrderByDescending(x => x.st.AtkValue).First();
-                return new Play("summon", melhor.act.index,
-                    $"maior ATK da mao: {melhor.act.code} ATK {melhor.st.AtkValue} (regra 1)");
-            }
+            // --- regras 1 e 2: monstros de Nv 1-4 -----------------------
+            var jogadaBaixa = Escolher(
+                invocaveis.Where(c => c.St.Level <= 4).ToList(),
+                setaveis.Where(c => c.St.Level <= 4).ToList(),
+                ameaca, "regras 1/2");
+            if (jogadaBaixa.HasValue) return jogadaBaixa.Value;
 
             return new Play("endturn", 0, "nada a fazer");
+        }
+
+        /// <summary>
+        /// O coração da decisão, em duas etapas — nesta ordem:
+        ///
+        ///   1. **Statline da própria carta.** Só entra em ataque quem tem
+        ///      ATK &gt; DEF. Um 1200/2000 é uma parede: mesmo podendo vencer o
+        ///      que está em campo, rende mais setado do que atacando.
+        ///   2. **Situação do campo.** Se a ameaça do oponente supera o melhor
+        ///      atacante disponível, seta o de maior DEF em vez de entregar o
+        ///      monstro.
+        ///
+        /// Devolve null quando não há monstro nenhum nesta faixa de nível.
+        /// </summary>
+        Play? Escolher(List<Cand> invocaveis, List<Cand> setaveis, int ameaca, string tag)
+        {
+            // etapa 1: só é atacante quem tem o statline para isso
+            var atacante = invocaveis
+                .Where(c => c.Ofensivo)
+                .OrderByDescending(c => c.St.AtkValue)
+                .FirstOrDefault();
+
+            var defensor = setaveis
+                .OrderByDescending(c => c.St.DefValue)
+                .FirstOrDefault();
+
+            int meuAtk = atacante.Ok ? atacante.St.AtkValue : -1;
+
+            // etapa 2: campo. Ameaça maior que meu melhor atacante -> defende.
+            if (defensor.Ok && ameaca > meuAtk)
+            {
+                string motivo = atacante.Ok
+                    ? $"oponente tem ATK {ameaca} > meu melhor atacante ({meuAtk})"
+                    : $"oponente tem ATK {ameaca} e nao tenho atacante";
+                return new Play("setmonster", defensor.Act.index,
+                    $"{motivo} — setando {defensor.Act.code} " +
+                    $"(ATK {defensor.St.AtkValue}/DEF {defensor.St.DefValue}) [{tag}]");
+            }
+
+            if (atacante.Ok)
+            {
+                return new Play("summon", atacante.Act.index,
+                    $"ATK {atacante.St.AtkValue} > DEF {atacante.St.DefValue}, vale atacar" +
+                    (ameaca >= 0 ? $" (campo tem {ameaca})" : "") +
+                    $" — {atacante.Act.code} [{tag}]");
+            }
+
+            // Nenhum monstro com statline de ataque: os que tenho são paredes.
+            if (defensor.Ok)
+            {
+                return new Play("setmonster", defensor.Act.index,
+                    $"DEF {defensor.St.DefValue} >= ATK {defensor.St.AtkValue}, " +
+                    $"melhor setado — {defensor.Act.code} [{tag}]");
+            }
+
+            return null;
+        }
+
+        List<Cand> Monstros(List<InteractiveDuel.Act> lista)
+        {
+            var outp = new List<Cand>();
+            foreach (var a in lista)
+            {
+                var st = _cards.Stats(a.code);
+                if (st.IsMonster) outp.Add(new Cand(a, st));
+            }
+            return outp;
         }
 
         /// <summary>Maior ATK entre os monstros do jogador indicado.</summary>

@@ -20,6 +20,8 @@ namespace DuelServer
         const uint CELTIC = 91152256;        // 1400 / 1200
         const uint GAIA = 6368038;           // Nv7 2300 / 2100
         const uint POT = 55144522;           // Pote da Ganancia
+        const uint AQUA_MADOOR = 85639257;   // 1200 / 2000  <- o caso do exemplo
+        const uint GIANT_SOLDIER = 13039848; // 1300 / 2000
 
         static int _pass, _fail;
 
@@ -71,10 +73,11 @@ namespace DuelServer
                 return q;
             }
 
-            // regra 1
+            // regra 1 — a mão precisa ser setável também, senão o statline
+            // defensivo da Mystical Elf não teria como virar Set.
             campo.Clear();
             var p = brain.Decide(Idle(new[] { CELTIC, BATTLE_OX, MYSTICAL_ELF }), 1);
-            Check("regra 1: invoca o de maior ATK (Battle Ox 1700)",
+            Check("regra 1: invoca o de maior ATK entre os ofensivos (Battle Ox 1700)",
                   p.Action == "summon" && p.Index == 1, $"(veio {p.Action} idx {p.Index})");
 
             // regra 2: oponente com ATK maior que tudo na mao
@@ -105,6 +108,37 @@ namespace DuelServer
                                   activatable: new[] { POT }), 1);
             Check("regra 4: Pote da Ganancia antes de qualquer invocacao",
                   p.Action == "activate" && p.Index == 0, $"(veio {p.Action} idx {p.Index})");
+
+            // --- statline da propria carta decide o modo --------------------
+            // O caso exato levantado: o jogador tem 1100 em campo e o NPC tem um
+            // Aqua Madoor 1200/2000. Ele venceria atacando (1200 > 1100), mas o
+            // statline diz que ele rende mais como parede — entao seta.
+            campo.Clear(); campo.Add(4042268);         // Island Turtle, 1100 ATK
+            p = brain.Decide(Idle(new[] { AQUA_MADOOR }, settable: new[] { AQUA_MADOOR }), 1);
+            Check("Aqua Madoor 1200/2000 contra 1100: SETA (venceria atacando, mas e' parede)",
+                  p.Action == "setmonster", $"(veio {p.Action})");
+
+            campo.Clear(); campo.Add(GIANT_SOLDIER);   // 1300 ATK em campo
+            p = brain.Decide(Idle(new[] { MYSTICAL_ELF }, settable: new[] { MYSTICAL_ELF }), 1);
+            Check("Mystical Elf (800/2000) diante de 1300: seta",
+                  p.Action == "setmonster",
+                  $"(veio {p.Action} — DEF 2000 > ATK 800, e' parede)");
+
+            campo.Clear();                              // campo vazio
+            p = brain.Decide(Idle(new[] { MYSTICAL_ELF }, settable: new[] { MYSTICAL_ELF }), 1);
+            Check("sem ameaca, parede continua sendo setada (statline manda)",
+                  p.Action == "setmonster", $"(veio {p.Action})");
+
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { BATTLE_OX }, settable: new[] { BATTLE_OX }), 1);
+            Check("Battle Ox (1700/1000) com campo vazio: ataca",
+                  p.Action == "summon", $"(veio {p.Action})");
+
+            // ofensivo perde para a ameaca -> volta a defender
+            campo.Clear(); campo.Add(GAIA);            // 2300
+            p = brain.Decide(Idle(new[] { BATTLE_OX }, settable: new[] { BATTLE_OX, MYSTICAL_ELF }), 1);
+            Check("atacante fraco diante de 2300: seta o de maior DEF",
+                  p.Action == "setmonster" && p.Index == 1, $"(veio {p.Action} idx {p.Index})");
 
             // mao vazia
             campo.Clear();

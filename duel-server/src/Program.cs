@@ -63,6 +63,24 @@ namespace DuelServer
                 return 0;
             }
 
+            // Sonda do formato de resposta do SELECT_TRIBUTE/SELECT_CARD.
+            if (Array.IndexOf(args, "--probe-tribute") >= 0)
+            {
+                ProbeTribute.Run(streamingAssets);
+                return 0;
+            }
+
+            // Mesma sonda, com espaco de busca exaustivo.
+            if (Array.IndexOf(args, "--brute-tribute") >= 0)
+            {
+                ProbeTribute.Run(streamingAssets, brute: true);
+                return 0;
+            }
+
+            // Teste de aceitacao das invocacoes especiais.
+            if (Array.IndexOf(args, "--test-summons") >= 0)
+                return TestSummons.Run(streamingAssets);
+
             // Harness de diagnóstico do protocolo (console).
             if (Array.IndexOf(args, "--selfplay") >= 0)
             {

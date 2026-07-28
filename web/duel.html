@@ -77,6 +77,31 @@
   .log .l { white-space: pre-wrap; }
   .log .l.big { color: var(--gold); }
   .prompt { font-size: 12px; color: var(--gold); min-height: 16px; }
+
+  /* ---------- overlay de seleção (tributo / alvo) ---------- */
+  #sel-overlay {
+    position: fixed; inset: 0; background: #000b; z-index: 60;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #sel-overlay[hidden] { display: none; }
+  .sel-box {
+    background: var(--panel); border: 2px solid var(--gold);
+    padding: 16px; max-width: 620px; width: 92%;
+  }
+  .sel-box h3 { margin: 0 0 4px; color: var(--gold); font-size: 14px; }
+  .sel-info { font-size: 11px; color: var(--dim); margin-bottom: 10px; }
+  .sel-cards {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 6px; max-height: 46vh; overflow-y: auto; margin-bottom: 12px;
+  }
+  .sel-card {
+    border: 2px solid var(--line); cursor: pointer; aspect-ratio: 59/86;
+    overflow: hidden; background: var(--panel2);
+  }
+  .sel-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sel-card:hover { border-color: var(--blue); }
+  .sel-card.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+  .sel-acts { display: flex; gap: 8px; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -95,6 +120,18 @@
 
 <div class="hint" id="prompt-bar"><span class="prompt" id="prompt">—</span></div>
 <div class="hint" id="warn" style="color:var(--red)" hidden></div>
+
+<div id="sel-overlay" hidden>
+  <div class="sel-box">
+    <h3 id="sel-title"></h3>
+    <div class="sel-info" id="sel-info"></div>
+    <div class="sel-cards" id="sel-cards"></div>
+    <div class="sel-acts">
+      <button id="sel-ok" class="btn-primary">confirmar</button>
+      <button id="sel-finish">encerrar seleção</button>
+    </div>
+  </div>
+</div>
 
 <div class="arena">
   <div class="handrow opp" id="hand-opp"></div>
@@ -170,11 +207,65 @@ async function start() {
   } catch (e) { conn(false); warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).'); }
 }
 
-async function act(action, arg, label) {
+async function act(action, arg, label, args) {
   if (ended) return;
   turnPlays.push({ action, arg, label, turn: turnNo });
-  try { apply(await rpc('/respond', { action, arg })); }
+  try { apply(await rpc('/respond', args ? { action, arg, args } : { action, arg })); }
   catch (e) { conn(false); warn('perdi a conexão com o servidor.'); }
+}
+
+// ---------- seleção de cartas (tributo, alvo) ----------
+// O motor pede isso em três formatos: lista de uma vez (selectcard/selecttribute)
+// e escolha incremental, uma carta por vez (selectunselect). O overlay abaixo
+// atende os dois; a soma de níveis do ritual o servidor resolve sozinho.
+const picked = new Set();
+
+function selectionQuestion() {
+  if (!question || question.player !== 0) return null;
+  return ['selectcard', 'selecttribute', 'selectunselect'].includes(question.kind)
+    ? question : null;
+}
+
+function renderSelection() {
+  const q = selectionQuestion();
+  const box = $('sel-overlay');
+  if (!q) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const incremental = q.kind === 'selectunselect';
+  const need = q.selMin || 1;
+  $('sel-title').textContent = q.kind === 'selecttribute'
+    ? 'Escolha o(s) tributo(s)'
+    : incremental ? 'Escolha uma carta' : 'Escolha as cartas';
+  $('sel-info').textContent = incremental
+    ? `clique numa carta (faltam ${need})`
+    : `selecione ${need}${q.selMax > need ? ` a ${q.selMax}` : ''} — ${picked.size} escolhida(s)`;
+
+  const frag = document.createDocumentFragment();
+  for (const c of q.choices || []) {
+    const el = document.createElement('div');
+    el.className = 'sel-card' + (picked.has(c.index) ? ' on' : '');
+    el.innerHTML = `<img src="https://images.ygoprodeck.com/images/cards_small/${c.code}.jpg" alt="">`;
+    el.title = `código ${c.code}`;
+    el.onclick = () => {
+      if (incremental) { act('pick', c.index, `pick ${c.code}`); picked.clear(); return; }
+      picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
+      renderSelection();
+    };
+    frag.append(el);
+  }
+  $('sel-cards').replaceChildren(frag);
+
+  const ok = $('sel-ok');
+  ok.hidden = incremental;
+  ok.disabled = picked.size < need || (q.selMax > 0 && picked.size > q.selMax);
+  ok.onclick = () => {
+    const list = [...picked];
+    picked.clear();
+    act('select', 0, `select ${list.join(',')}`, list);
+  };
+  $('sel-finish').hidden = !(incremental && q.canFinish);
+  $('sel-finish').onclick = () => { picked.clear(); act('finishselect', 0, 'finish'); };
 }
 
 // ---------- aplicar a resposta do servidor ----------
@@ -184,7 +275,9 @@ function apply(j) {
     for (const ev of j.events || []) handle(ev);
     question = j.question || null;
     ended = !!j.ended;
+    picked.clear();
     render();
+    renderSelection();
   } catch (e) {
     console.error('[apply]', e, j);
     warn('ERRO na tela: ' + (e && e.message ? e.message : e) + ' — abra o console (F12) e/ou dê "novo duelo".');
@@ -375,7 +468,7 @@ function render() {
     bar.replaceChildren(div);
   } else {
     const unsupported = question && question.kind === 'unsupported';
-    if (unsupported) warn(`O motor pediu uma ação que o treino ainda não suporta (msg ${question.rawType} — ex.: escolher tributo/alvo). Dê "novo duelo".`);
+    if (unsupported) warn(`O motor pediu uma ação que o treino ainda não suporta (msg ${question.rawType}). Dê "novo duelo".`);
     bar.replaceChildren(Object.assign(document.createElement('span'), {
       className: 'prompt',
       textContent: ended ? 'duelo encerrado.'

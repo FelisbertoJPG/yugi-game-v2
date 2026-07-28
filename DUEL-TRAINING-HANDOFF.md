@@ -83,6 +83,33 @@ Depois **3 bytes de flag** (to_bp, to_ep, shuffle).
 monstro proibidas, **bits 8-12 = zonas de magia/armadilha**. Zona de campo = SZONE
 `seq=5`. Resposta = **3 bytes** `[player, location, sequence]` (loc 0x4=MZONE, 0x8=SZONE).
 
+**Seleção de cartas — SELECT_CARD (15), SELECT_TRIBUTE (20), SELECT_SUM (23):**
+resposta `[int32 tipo][uint32 quantidade][índices…]`.
+`tipo` 0 = índices uint32, 1 = uint16, 2 = uint8, 3 = bitfield, **-1 = cancelar**.
+> **O prefixo de tipo era o que faltava.** Sem ele o motor devolve MSG_RETRY para
+> qualquer buffer, por mais correto que o resto pareça — foi por isso que as 8
+> tentativas anteriores (e mais 30 minhas) falharam. Fonte: `parse_response_cards`
+> em `playerop.cpp` do edo9300/ygopro-core. `returns.at<T>(i)` indexa por
+> ELEMENTO, então os índices sempre começam no byte 8, seja qual for a largura.
+
+Mensagem dos três: `type(1) player(1) cancelable(1) min(4) max(4) count(4)` +
+entradas. Entrada = 10 bytes no SELECT_CARD, **11** no SELECT_TRIBUTE (o byte
+extra é quantos tributos a carta vale) e **18** no SELECT_SUM (`code(4) +
+info_location(10) + sum_param(4)`). Deduza o tamanho pelo comprimento da
+mensagem em vez de assumir.
+
+**SELECT_UNSELECT_CARD (26):** o seletor incremental do core novo — é ele que o
+tributo usa de fato. Escolhe-se UMA carta por vez e o motor repergunta.
+Mensagem: `type(1) player(1) finishable(1) cancelable(1) min(4) max(4)` +
+`count(4)`+entradas de **14 bytes** (selecionáveis) + `count(4)`+entradas (já
+escolhidas, para desmarcar).
+Resposta: **`[int32 1][int32 índice]`** — o primeiro campo tem que ser
+**exatamente 1**; `0` ou `>1` devolve RETRY. `[int32 -1]` encerra/cancela.
+
+**SELECT_SUM (23):** ritual. As cartas escolhidas têm de **somar exatamente** o
+`acc` pedido (nível), descontando as obrigatórias. Precisa de subconjunto-soma,
+não de escolha gulosa.
+
 **SELECT_CHAIN (16):** resposta `int32 -1` (não encadear).
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).
 **MSG_MOVE (50):** `code(4)` + prev`{ctrl(1)loc(1)seq(4)pos(4)}` + curr`{...}` + reason(4)`.
@@ -124,21 +151,30 @@ PHASE_MAIN1=0x4, BATTLE=0x80, END=0x200.
    pra Battle (idle cmd 6, confirmar), `SELECT_BATTLECMD (10)` (escolher atacante,
    formato a decifrar), `MSG_ATTACK`, resolução de dano (o LP já é rastreado), e
    `MSG_WIN` (achar o id) → tela de vitória.
-2. **Invocação com TRIBUTO (`SELECT_TRIBUTE`, msg 20)** — hoje cai em "ação não
-   suportada". Precisa parsear (parecido com SELECT_CARD) e uma UI de escolha de
-   tributo (ou auto p/ oponente). **O formato de resposta do `SELECT_CARD (15)` NÃO
-   foi decifrado** (8 formatos testados, todos RETRY) — usar o `--selfplay` pra sondar;
-   provavelmente o mesmo formato serve pro TRIBUTE e pro descarte.
-3. **Descarte por limite de mão do oponente** — contornado com NO_HAND_LIMIT. Se
-   quiser o descarte "de verdade", depende de achar o formato do SELECT_CARD acima.
-4. **`SELECT_YESNO/EFFECTYN/OPTION` (12/13/14)** — hoje "não suportado"; quando
-   aparecer (efeitos opcionais/alvos), tratar.
-5. **Ativar magia/armadilha JÁ SETADA no campo** (hoje só ativa da mão) e cartas com
-   **alvo** (`SELECT_CARD` de alvo) — mesmo bloqueio do formato do SELECT_CARD.
-6. **Usar as jogadas gravadas (`ygo:plays`) como script de IA dos NPCs** — o objetivo
+2. **`SELECT_YESNO/EFFECTYN/OPTION` (12/13/14)** — hoje "não suportado"; quando
+   aparecer (efeitos opcionais), tratar.
+3. **Ativar magia/armadilha JÁ SETADA no campo** (hoje só ativa da mão).
+4. **Usar as jogadas gravadas (`ygo:plays`) como script de IA dos NPCs** — o objetivo
    final do treino. Ainda não começado.
-7. **Cartas customizadas do usuário** (Kuriboh etc.) — precisam de Lua manual
+5. **Cartas customizadas do usuário** (Kuriboh etc.) — precisam de Lua manual
    (Estágio 2, ver `continue.md`); as cartas da **Lista 1** são reais e já funcionam.
+
+### Resolvido (era o item 2 e 3 desta lista)
+
+**Invocação por TRIBUTO e RITUAL funcionam.** O bloqueio era o formato de resposta
+da seleção de cartas, agora decifrado (seção 4) a partir da fonte do ocgcore em vez
+de tentativa e erro. Com isso vieram juntos o descarte por limite de mão e a base
+para cartas com alvo — todos usam o mesmo `parse_response_cards`.
+
+Teste de aceitação: `duel-server.exe --test-summons` (6 checagens; joga de verdade
+pelo `InteractiveDuel`, confirma que os tributos vão ao cemitério e que o monstro
+entra em campo). As sondas `--probe-tribute` e `--brute-tribute` ficaram no
+repositório para quando aparecer a próxima mensagem desconhecida.
+
+> Lição: **força bruta contra biblioteca nativa não presta.** Depois de ~785
+> respostas malformadas o ocgcore estourou com SEHException — ou seja, o estado
+> dele já estava corrompido e os RETRYs anteriores não eram confiáveis. Ler a
+> fonte resolveu em duas consultas o que a busca não resolveria nunca.
 
 ## 6.1. Onde os decks moram (mudou)
 

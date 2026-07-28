@@ -118,10 +118,20 @@ namespace DuelServer
         {
             string action = body.TryGetProperty("action", out var a) ? a.GetString() : null;
             int arg = body.TryGetProperty("arg", out var g) && g.ValueKind == JsonValueKind.Number ? g.GetInt32() : 0;
+
+            // "select" (tributo/alvo) manda vários índices de uma vez.
+            List<int> args = null;
+            if (body.TryGetProperty("args", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                args = new List<int>();
+                foreach (var e in arr.EnumerateArray())
+                    if (e.ValueKind == JsonValueKind.Number) args.Add(e.GetInt32());
+            }
+
             lock (_lock)
             {
                 if (_duel == null) return new { error = "nenhum duelo ativo — dê /start" };
-                return _duel.Respond(action ?? "endturn", arg);
+                return _duel.Respond(action ?? "endturn", arg, args);
             }
         }
 

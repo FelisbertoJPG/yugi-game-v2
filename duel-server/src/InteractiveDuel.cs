@@ -16,6 +16,10 @@ namespace DuelServer
         const int END = 0, AWAITING = 1, CONTINUE = 2;
         const byte HUMAN = 0; // só o player 0 joga; o 1 (oponente) passa automático
 
+        /// <summary>Liga o despejo hexadecimal das mensagens ainda em investigação.</summary>
+        public static bool DebugSelect = false;
+        static bool _dumpedUnselect;
+
         readonly DuelSession _s;
         Question _pending;
         readonly int[] _lp = { 8000, 8000 }; // pontos de vida dos 2 jogadores
@@ -33,9 +37,22 @@ namespace DuelServer
             public string zoneType = "m";        // "m" = monstro, "s" = magia/armadilha
             public List<Act> attackers = new();  // battle
             public int selMin, selMax, selCount; // select_card: quantas escolher / total
+            public bool cancelable;
+            public bool canFinish;               // selectunselect: já dá para encerrar
+            public int sumNeeded;                // selectsum: quanto ainda falta somar
+            public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
         public struct Act { public uint code; public int index; }
+
+        /// <summary>Carta oferecida num SELECT_CARD / SELECT_TRIBUTE.</summary>
+        public struct Sel
+        {
+            public uint code; public int index;
+            public byte controller, location; public int sequence;
+            public byte release;   // quantos tributos esta carta vale
+            public int param;      // select_sum: quanto esta carta soma (nível)
+        }
 
         public sealed class Result
         {
@@ -64,9 +81,35 @@ namespace DuelServer
                 var q = _pending;
                 if (q == null) { _s.Respond(I32(-1)); continue; }         // desconhecido: recusa
                 if (q.kind == "chain") { _s.Respond(I32(-1)); continue; }  // ninguém encadeia (vanilla)
-                // descarte por limite de mão (7+): resolve automático dos dois lados
-                if (q.kind == "selectcard") { _s.Respond(SelectCards(q)); continue; }
                 if (q.player != HUMAN) { AutoPass(q); continue; }          // oponente desligado
+
+                // Seleção de cartas do jogador: se houver escolha real, devolve
+                // pro front. Sem escolha (só dá para pegar o mínimo), resolve
+                // sozinho — pedir clique para uma decisão que não existe irrita.
+                if (q.kind is "selectcard" or "selecttribute")
+                {
+                    if (HasRealChoice(q)) { r.question = q; return r; }
+                    _s.Respond(AutoSelect(q));
+                    continue;
+                }
+
+                // Soma de níveis (ritual): existe uma única combinação válida na
+                // maioria das vezes, então resolver sozinho é melhor que pedir ao
+                // jogador que faça aritmética.
+                if (q.kind == "selectsum") { _s.Respond(AutoSum(q)); continue; }
+
+                // Seletor incremental: uma carta por vez. Se já dá para encerrar e
+                // não sobrou escolha, encerra; senão devolve pro front escolher.
+                if (q.kind == "selectunselect")
+                {
+                    if (q.choices.Count == 0) { _s.Respond(I32(-1)); continue; }
+                    if (q.choices.Count == 1 && !q.canFinish)
+                    {
+                        _s.Respond(PickOne(q.choices[0].index));  // escolha única: não pergunta
+                        continue;
+                    }
+                    r.question = q; return r;
+                }
                 if (q.kind == "position") { _s.Respond(I32(0x1)); continue; } // face-up ataque
                 // pergunta do player 0 que não sei responder: devolve pro front avisar
                 // (em vez de travar). O usuário começa um novo duelo.
@@ -79,10 +122,23 @@ namespace DuelServer
             return r;
         }
 
-        /// <summary>Aplica a jogada do player e avança de novo.</summary>
-        public Result Respond(string action, int arg)
+        /// <summary>Há mais candidatos do que o necessário? Só então vale perguntar.</summary>
+        static bool HasRealChoice(Question q)
         {
-            _s.Respond(Encode(action, arg));
+            if (q.choices.Count == 0) return false;
+            return q.choices.Count > Math.Max(1, q.selMin) || q.selMax > q.selMin;
+        }
+
+        /// <summary>Aplica a jogada do player e avança de novo.</summary>
+        public Result Respond(string action, int arg, IReadOnlyList<int> args = null)
+        {
+            _s.Respond(action switch
+            {
+                "select" => EncodeSelect(args ?? new[] { arg }),  // lista de uma vez
+                "pick" => PickOne(arg),                            // seletor incremental
+                "finishselect" => I32(-1),                         // encerra a seleção
+                _ => Encode(action, arg),
+            });
             return Advance();
         }
 
@@ -110,6 +166,14 @@ namespace DuelServer
                 case "battle": _s.Respond(I32(3)); break;         // encerra battle
                 case "place": _s.Respond(new byte[] { (byte)q.player, 0x4, (byte)(q.zones.Count > 0 ? q.zones[0] : 0) }); break;
                 case "position": _s.Respond(I32(0x1)); break;
+                case "selectcard":
+                case "selecttribute": _s.Respond(AutoSelect(q)); break;
+                case "selectunselect":
+                    // Oponente desligado: escolhe a primeira; se não há o que
+                    // escolher, encerra.
+                    _s.Respond(q.choices.Count > 0 ? PickOne(q.choices[0].index) : I32(-1));
+                    break;
+                case "selectsum": _s.Respond(AutoSum(q)); break;
                 default: _s.Respond(I32(-1)); break;
             }
         }
@@ -174,7 +238,10 @@ namespace DuelServer
                 case 10: _pending = ParseBattle(d, o, mlen); break;
                 case 19: _pending = new Question { kind = "position", player = d[o + 1] }; break;
                 case 16: _pending = new Question { kind = "chain", player = d.Length > o + 1 ? d[o + 1] : (byte)0 }; break;
-                case 15: _pending = ParseSelectCard(d, o); break; // ex.: descarte por limite de mão
+                case 15: _pending = ParseSelectCards(d, o, mlen, "selectcard"); break;
+                case 20: _pending = ParseSelectCards(d, o, mlen, "selecttribute"); break;
+                case 26: _pending = ParseSelectUnselect(d, o, mlen); break;
+                case 23: _pending = ParseSelectSum(d, o, mlen); break;
                 default:
                     // qualquer PERGUNTA (10..30) que ainda não trato: marca como não suportada
                     // em vez de deixar o _pending velho travar tudo em silêncio.
@@ -259,28 +326,274 @@ namespace DuelServer
             ev.Add(new { type = "lp", player, lp = _lp[player], delta = sign * amount });
         }
 
-        // SELECT_CARD: type(1) player(1) cancelable(1) min(4) max(4) count(4) + cartas
-        Question ParseSelectCard(byte[] d, int o)
+        /// <summary>
+        /// SELECT_CARD (15) e SELECT_TRIBUTE (20) compartilham o layout:
+        ///   type(1) player(1) cancelable(1) min(4) max(4) count(4)
+        /// e depois uma entrada por carta. No SELECT_CARD a entrada tem 10 bytes
+        /// (code, ctrl, loc, seq); no SELECT_TRIBUTE tem 11 — o byte extra é
+        /// quantos tributos a carta vale. Deduzimos o tamanho pelo comprimento
+        /// da mensagem em vez de assumir, porque isso já mordeu antes.
+        /// </summary>
+        Question ParseSelectCards(byte[] d, int o, int mlen, string kind)
         {
-            return new Question
+            var q = new Question
             {
-                kind = "selectcard",
+                kind = kind,
                 player = d[o + 1],
+                cancelable = d[o + 2] != 0,
                 selMin = BitConverter.ToInt32(d, o + 3),
                 selMax = BitConverter.ToInt32(d, o + 7),
                 selCount = BitConverter.ToInt32(d, o + 11),
             };
+
+            const int header = 15;
+            int rest = mlen - header;
+            if (q.selCount > 0 && rest >= q.selCount)
+            {
+                int entry = rest / q.selCount;
+                for (int i = 0; i < q.selCount; i++)
+                {
+                    int p = o + header + i * entry;
+                    if (p + entry > o + mlen) break;
+                    q.choices.Add(new Sel
+                    {
+                        code = BitConverter.ToUInt32(d, p),
+                        index = i,
+                        controller = d[p + 4],
+                        location = d[p + 5],
+                        sequence = BitConverter.ToInt32(d, p + 6),
+                        release = entry >= 11 ? d[p + 10] : (byte)1,
+                    });
+                }
+            }
+            return q;
         }
 
-        // Fallback caso o SELECT_CARD apareça mesmo assim (com NO_HAND_LIMIT não vem):
-        // formato edo9300/EDOPro em bytes [count][índice...]. Escolhe as primeiras.
-        byte[] SelectCards(Question q)
+        /// <summary>
+        /// Resposta de seleção de cartas, no formato que o ocgcore realmente lê
+        /// (`parse_response_cards`, playerop.cpp):
+        ///   [int32 tipo][uint32 quantidade][índices...]
+        /// tipo 0 = índices uint32, 1 = uint16, 2 = uint8, 3 = bitfield, -1 = cancelar.
+        ///
+        /// O prefixo de tipo é o detalhe que faltava: sem ele o motor devolve
+        /// MSG_RETRY para qualquer buffer, por mais correto que o resto pareça.
+        /// </summary>
+        /// <summary>
+        /// SELECT_UNSELECT_CARD: escolhe UMA carta. Formato [int32 1][int32 índice].
+        ///
+        /// O primeiro campo tem que valer exatamente 1 — o motor recusa 0 e
+        /// qualquer valor maior que 1 (`returns.at&lt;int32_t&gt;(0) == 0 || > 1`
+        /// devolve MSG_RETRY). -1 encerra/cancela a seleção.
+        /// </summary>
+        static byte[] PickOne(int index)
         {
-            int n = Math.Max(1, q.selMin);
-            var b = new byte[1 + n];
-            b[0] = (byte)n;
-            for (int i = 0; i < n; i++) b[i + 1] = (byte)i;
+            var b = new byte[8];
+            BitConverter.GetBytes(1).CopyTo(b, 0);
+            BitConverter.GetBytes(index).CopyTo(b, 4);
             return b;
+        }
+
+        public static byte[] EncodeSelect(IReadOnlyList<int> indices)
+        {
+            var b = new byte[8 + indices.Count * 4];
+            BitConverter.GetBytes(0).CopyTo(b, 0);                  // tipo 0 = uint32
+            BitConverter.GetBytes((uint)indices.Count).CopyTo(b, 4);
+            for (int i = 0; i < indices.Count; i++)
+                BitConverter.GetBytes((uint)indices[i]).CopyTo(b, 8 + i * 4);
+            return b;
+        }
+
+        /// <summary>
+        /// SELECT_UNSELECT_CARD (26) — o seletor incremental do core novo, usado
+        /// nos tributos: em vez de mandar a lista pronta, escolhe-se UMA carta por
+        /// vez e o motor repergunta, até dar "encerrar".
+        ///
+        ///   type(1) player(1) finishable(1) cancelable(1) min(4) max(4)
+        ///   count(4) + entradas   (cartas selecionáveis)
+        ///   count(4) + entradas   (cartas já escolhidas, para desmarcar)
+        ///
+        /// Resposta: [int32 0][int32 índice] escolhe; [int32 -1] encerra.
+        /// O tamanho da entrada é deduzido do comprimento da mensagem — assumir
+        /// já custou caro antes.
+        /// </summary>
+        Question ParseSelectUnselect(byte[] d, int o, int mlen)
+        {
+            var q = new Question
+            {
+                kind = "selectunselect",
+                player = d[o + 1],
+                cancelable = d[o + 3] != 0,
+                canFinish = d[o + 2] != 0,
+                selMin = BitConverter.ToInt32(d, o + 4),
+                selMax = BitConverter.ToInt32(d, o + 8),
+            };
+
+            if (DebugSelect && !_dumpedUnselect)
+            {
+                _dumpedUnselect = true;
+                var slice = new byte[Math.Min(mlen, 96)];
+                Array.Copy(d, o, slice, 0, slice.Length);
+                Log.Info($"[26 raw len={mlen}] {BitConverter.ToString(slice).Replace("-", " ")}");
+            }
+
+            const int header = 12;
+            int c1 = BitConverter.ToInt32(d, o + header);
+            int after1 = o + header + 4;
+            int bytesForEntries = mlen - header - 8;    // tira os dois contadores
+            int c2 = 0, entry = 0;
+            if (c1 > 0)
+            {
+                // (c1 + c2) * entry = bytesForEntries. Tenta os tamanhos plausíveis.
+                foreach (int e in new[] { 14, 10, 12, 8, 11 })
+                {
+                    if (bytesForEntries % e != 0) continue;
+                    int total = bytesForEntries / e;
+                    if (total < c1) continue;
+                    entry = e; c2 = total - c1; break;
+                }
+            }
+
+            if (entry > 0)
+            {
+                for (int i = 0; i < c1; i++)
+                {
+                    int p = after1 + i * entry;
+                    if (p + entry > o + mlen) break;
+                    q.choices.Add(new Sel
+                    {
+                        code = BitConverter.ToUInt32(d, p),
+                        index = i,
+                        controller = d[p + 4],
+                        location = d[p + 5],
+                        sequence = entry >= 10 ? BitConverter.ToInt32(d, p + 6) : 0,
+                        release = 1,
+                    });
+                }
+            }
+            q.selCount = q.choices.Count;
+            return q;
+        }
+
+        /// <summary>
+        /// SELECT_SUM (23) — usado pelo ritual: escolher cartas cujos níveis SOMEM
+        /// exatamente o valor pedido. A resposta usa o mesmo formato do
+        /// SELECT_CARD (`parse_response_cards`), o que muda é a mensagem:
+        ///
+        ///   type(1) player(1) semMax(1) acc(4) min(4) max(4)
+        ///   mustCount(4)   + entradas de 18 bytes  (obrigatórias, já contam)
+        ///   selectCount(4) + entradas de 18 bytes  (as que podemos escolher)
+        ///
+        /// Entrada = code(4) + info_location(10) + sum_param(4).
+        /// </summary>
+        Question ParseSelectSum(byte[] d, int o, int mlen)
+        {
+            var q = new Question { kind = "selectsum", player = d[o + 1] };
+            int acc = BitConverter.ToInt32(d, o + 3);
+            q.selMin = BitConverter.ToInt32(d, o + 7);
+            q.selMax = BitConverter.ToInt32(d, o + 11);
+
+            const int entry = 18;
+            int p = o + 15;
+            int mustCount = BitConverter.ToInt32(d, p); p += 4;
+
+            // As cartas obrigatórias já entram na conta; o que sobra é o alvo.
+            int mustSum = 0;
+            for (int i = 0; i < mustCount && p + entry <= o + mlen; i++)
+            {
+                mustSum += BitConverter.ToInt32(d, p + 14) & 0xffff;
+                p += entry;
+            }
+
+            int selCount = p + 4 <= o + mlen ? BitConverter.ToInt32(d, p) : 0; p += 4;
+            for (int i = 0; i < selCount && p + entry <= o + mlen; i++)
+            {
+                q.choices.Add(new Sel
+                {
+                    code = BitConverter.ToUInt32(d, p),
+                    index = i,
+                    controller = d[p + 4],
+                    location = d[p + 5],
+                    sequence = BitConverter.ToInt32(d, p + 6),
+                    param = BitConverter.ToInt32(d, p + 14) & 0xffff,
+                });
+                p += entry;
+            }
+            q.selCount = q.choices.Count;
+            q.sumNeeded = acc - mustSum;
+            return q;
+        }
+
+        /// <summary>
+        /// Acha um subconjunto cujos níveis somem exatamente o alvo. As listas
+        /// aqui são pequenas (cartas em campo/mão), então busca exaustiva basta e
+        /// evita a heurística gulosa errar quando os níveis não são uniformes.
+        /// </summary>
+        static List<int> SubsetForSum(List<Sel> items, int target, int minCount, int maxCount)
+        {
+            var best = new List<int>();
+            var cur = new List<int>();
+
+            bool Search(int i, int sum)
+            {
+                if (sum == target &&
+                    cur.Count >= Math.Max(1, minCount) &&
+                    (maxCount <= 0 || cur.Count <= maxCount))
+                {
+                    best = new List<int>(cur);
+                    return true;
+                }
+                if (sum > target || i >= items.Count) return false;
+                if (maxCount > 0 && cur.Count > maxCount) return false;
+
+                cur.Add(items[i].index);
+                if (Search(i + 1, sum + Math.Max(1, items[i].param))) return true;
+                cur.RemoveAt(cur.Count - 1);
+
+                return Search(i + 1, sum);
+            }
+
+            Search(0, 0);
+            return best;
+        }
+
+        /// <summary>Resolve o SELECT_SUM sozinho quando não há escolha interessante.</summary>
+        byte[] AutoSum(Question q)
+        {
+            var pick = SubsetForSum(q.choices, q.sumNeeded, q.selMin, q.selMax);
+            if (pick.Count == 0)
+            {
+                // Não achou combinação exata: manda o mínimo e deixa o motor reclamar,
+                // em vez de travar o duelo em silêncio.
+                Log.Err($"[selectsum] nenhum subconjunto soma {q.sumNeeded} " +
+                        $"entre {q.choices.Count} cartas");
+                for (int i = 0; i < Math.Max(1, q.selMin) && i < q.choices.Count; i++)
+                    pick.Add(q.choices[i].index);
+            }
+            return EncodeSelect(pick);
+        }
+
+        /// <summary>Escolha automática: pega as primeiras cartas até satisfazer o mínimo.</summary>
+        static byte[] AutoSelect(Question q)
+        {
+            int need = Math.Max(1, q.selMin);
+            var idx = new List<int>();
+
+            // No tributo cada carta pode valer mais de um; soma até bater o pedido.
+            if (q.choices.Count > 0 && q.choices[0].release > 0)
+            {
+                int sum = 0;
+                foreach (var c in q.choices)
+                {
+                    if (sum >= need) break;
+                    idx.Add(c.index);
+                    sum += Math.Max(1, (int)c.release);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < need && i < Math.Max(q.selCount, need); i++) idx.Add(i);
+            }
+            return EncodeSelect(idx);
         }
 
         Question ParseBattle(byte[] d, int o, int mlen)

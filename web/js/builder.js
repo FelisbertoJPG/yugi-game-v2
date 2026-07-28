@@ -56,6 +56,8 @@ let dirty = false;
 let npcMode = null;
 let npcDeckIndex = null;
 let npcSignature = null;
+let npcCover = null;      // carta que ilustra o deck (só visual)
+let pickingCover = false; // aguardando o clique na carta que virará a moldura
 
 // ---------------------------------------------------------------- utilidades
 
@@ -100,6 +102,7 @@ function renderDeck() {
       el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">` +
                      (count > 1 ? `<span class="count">×${count}</span>` : '');
       el.onclick = () => {
+        if (tryPickCover(id)) return;   // escolhendo moldura: não remove a carta
         deck.remove(id, zone);
         markDirty();
         refresh();
@@ -147,7 +150,10 @@ function renderPool() {
     el.innerHTML = (c.custom ? '<span class="badge">CST</span>' : '') +
                    `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">` +
                    (copies ? `<span class="count">${copies}</span>` : '');
-    el.onclick = () => addCard(c);
+    el.onclick = () => {
+      if (tryPickCover(c.id)) return;   // escolhendo moldura: não adiciona
+      addCard(c);
+    };
     el.oncontextmenu = (e) => { e.preventDefault(); showDetail(c.id); };
     el.onmouseenter = () => showDetail(c.id);
     if (!full) wireDragSource(el, c.id, 'pool');
@@ -170,7 +176,7 @@ function addCard(c) {
 function refresh() {
   renderDeck();
   renderPool();   // recalcula os contadores nas miniaturas do pool
-  if (npcMode) updateNpcDrop();
+  if (npcMode) { updateNpcDrop(); renderCover(); }
 }
 
 // ---------------------------------------------------------------- modo NPC
@@ -182,6 +188,13 @@ function enterNpcModeUI() {
   // o campo de nome passa a ser o nome DESTE deck do NPC (editável).
   // 'btn-project' sai porque no modo NPC o próprio salvar já grava em decks/npc/.
   for (const id of ['deck-select', 'btn-new', 'btn-delete', 'btn-project']) $(id).hidden = true;
+  const cover = $('npc-cover');
+  cover.onclick = () => (pickingCover ? cancelPickCover() : startPickCover());
+  cover.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cover.onclick(); }
+  };
+  renderCover();
+
   $('npc-back').onclick = () => {
     if (confirmDiscard()) location.href = '/web/npcs.html';
   };
@@ -207,11 +220,56 @@ function updateNpcDrop() {
   sel.value = uniq.includes(prev) ? String(prev) : String(uniq[0]);
 }
 
+/* ---------------------------------------------------------------- moldura
+ * A "moldura" é a carta que ilustra o deck na lista de NPCs. É só visual —
+ * quem define a recompensa continua sendo a "carta que dropa".
+ */
+
+/** Desenha o quadrinho da moldura com a arte atual. */
+function renderCover() {
+  const el = $('npc-cover');
+  if (!el) return;
+  const id = npcCover || npcSignature;
+  el.style.backgroundImage = id ? `url("${ART(id, false)}")` : '';
+  el.classList.toggle('empty', !id);
+  el.classList.toggle('picking', pickingCover);
+  const nome = id ? (brief(id)?.name ?? id) : 'nenhuma';
+  el.title = pickingCover
+    ? 'agora clique numa carta (Esc cancela)'
+    : `moldura: ${nome} — clique para trocar`;
+}
+
+function startPickCover() {
+  pickingCover = true;
+  document.body.classList.add('picking-cover');
+  renderCover();
+  toast('escolha a carta que vai ilustrar o deck (Esc cancela)');
+}
+
+function cancelPickCover() {
+  if (!pickingCover) return;
+  pickingCover = false;
+  document.body.classList.remove('picking-cover');
+  renderCover();
+}
+
+/** Consome o clique quando estamos escolhendo a moldura. */
+function tryPickCover(id) {
+  if (!pickingCover) return false;
+  npcCover = Number(id);
+  cancelPickCover();
+  markDirty();
+  toast(`moldura: ${brief(npcCover)?.name ?? npcCover}`);
+  return true;
+}
+
 async function saveNpcDeckFromUI() {
   const sig = Number($('npc-drop').value) || npcSignature;
   const name = $('deck-name').value.trim() || `Deck ${npcMode.name}`;
 
-  const r = await saveNpcDeckAt(npcMode.id, npcDeckIndex, { name, deck, signatureId: sig });
+  const r = await saveNpcDeckAt(npcMode.id, npcDeckIndex, {
+    name, deck, signatureId: sig, coverId: npcCover || sig,
+  });
   if (r.index < 0) return void toast(r.error ?? 'falha ao salvar');
   npcDeckIndex = r.index;
   npcSignature = sig;
@@ -756,6 +814,11 @@ $('im-save').onclick = async () => {
 
 $('detail').onmouseleave = () => $('detail').classList.remove('show');
 
+// Esc sai do modo de escolher a moldura sem alterar nada.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') cancelPickCover();
+});
+
 setupDropZone($('main-zone'), 'main');
 setupDropZone($('extra-zone'), 'extra');
 setupDropZone($('pool-zone'), 'pool');
@@ -807,6 +870,7 @@ if (npc) {
   deck = slot ? slot.deck : new Deck({ name: `Deck ${st.decks.length + 1}` });
   deckIndex = null;
   npcSignature = slot ? slot.signatureId : npc.signatureId;
+  npcCover = slot ? (slot.coverId ?? slot.signatureId) : npc.signatureId;
   $('deck-name').value = deck.name;
   enterNpcModeUI();
   markDirty(false);

@@ -185,5 +185,26 @@ t('metadado com acento/espaco sobrevive', () => {
   assert.equal(Deck.fromYdk(d.toYdk()).name, 'Deck do Yugi — Caos');
 });
 
+console.log('\n=== moldura do deck (ilustração, separada da recompensa) ===');
+t('cover e signature sao campos independentes', () => {
+  const d = new Deck({ name: 'X', main: [1], extra: [] });
+  const back = Deck.fromYdk(d.toYdk({ signature: 111, cover: 222 }));
+  assert.equal(Number(back.meta.signature), 111);
+  assert.equal(Number(back.meta.cover), 222);
+});
+t('cover sobrevive a ida e volta', () => {
+  const d = new Deck({ name: 'Yugi Chaos', main: [46986414], extra: [] });
+  const back = Deck.fromYdk(d.toYdk({ npc: 'yugi', signature: 46986414, cover: 30208479 }));
+  assert.equal(Number(back.meta.cover), 30208479);
+});
+t('deck sem cover nao ganha a chave', () => {
+  const back = Deck.fromYdk(new Deck({ main: [1] }).toYdk({ signature: 1 }));
+  assert.equal(back.meta.cover, undefined, 'quem lê deve cair na signature');
+});
+t('cover nao vira carta do deck', () => {
+  const d = new Deck({ name: 'X', main: [10, 20], extra: [] });
+  assert.deepEqual(Deck.fromYdk(d.toYdk({ cover: 99999999 })).main, [10, 20]);
+});
+
 console.log(`\n${pass} passaram, ${fail} falharam\n`);
 process.exitCode = fail ? 1 : 0;

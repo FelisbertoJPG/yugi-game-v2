@@ -89,11 +89,14 @@ export async function loadNpcDecks() {
     if (!m) continue;                       // decks de jogador ficam de fora
     const npcId = m[1];
     if (!cache[npcId]) continue;            // pasta de um NPC que não existe mais
+    const sig = Number(meta.signature) || getNpc(npcId)?.signatureId;
     cache[npcId].push({
       name: meta.name || deck.name,
       main: deck.main,
       extra: deck.extra,
-      signatureId: Number(meta.signature) || getNpc(npcId)?.signatureId,
+      signatureId: sig,
+      // A moldura é só ilustração; sem ela, a carta que dropa serve de capa.
+      coverId: Number(meta.cover) || sig,
       updatedAt: meta.updated ?? null,
       path,
     });
@@ -132,6 +135,7 @@ export function getNpcDecks(id) {
   return st.decks.map((d, i) => ({
     index: i, name: d.name, deck: toDeck(npc, d),
     signatureId: d.signatureId ?? npc.signatureId, updatedAt: d.updatedAt ?? null,
+    coverId: d.coverId ?? d.signatureId ?? npc.signatureId,
     // `path` null = o deck ainda não está versionado no projeto (só no navegador).
     path: d.path ?? null,
   }));
@@ -159,18 +163,20 @@ export function getNpcActiveDeck(id) {
  *
  * @returns {Promise<{index:number, path?:string, downloaded?:boolean, error?:string}>}
  */
-export async function saveNpcDeckAt(id, index, { name, deck, signatureId }) {
+export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverId }) {
   const npc = getNpc(id);
   if (!npc) return { index: -1, error: 'NPC inexistente' };
 
   const list = cache[id] ?? (cache[id] = []);
   const finalName = (name || '').trim() || `Deck ${list.length + 1}`;
   const sig = Number(signatureId) || npc.signatureId;
+  const cover = Number(coverId) || sig;
   const entry = {
     name: finalName,
     main: [...deck.main],
     extra: [...deck.extra],
     signatureId: sig,
+    coverId: cover,
     updatedAt: new Date().toISOString(),
     path: null,
   };
@@ -179,7 +185,7 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId }) {
   const path = npcDeckPath(id, finalName);
 
   const r = await saveProjectDeck(path, deck, {
-    name: finalName, npc: id, signature: sig, updated: entry.updatedAt,
+    name: finalName, npc: id, signature: sig, cover, updated: entry.updatedAt,
   });
   entry.path = r.ok ? r.path : null;
 
@@ -226,7 +232,8 @@ export async function migrateLegacyToProject() {
       if (list[i].path) continue;                       // já está no projeto
       const d = new Deck({ name: list[i].name, main: list[i].main, extra: list[i].extra });
       const r = await saveNpcDeckAt(npc.id, i, {
-        name: list[i].name, deck: d, signatureId: list[i].signatureId,
+        name: list[i].name, deck: d,
+        signatureId: list[i].signatureId, coverId: list[i].coverId,
       });
       if (r.path) migrated++; else failed++;
     }

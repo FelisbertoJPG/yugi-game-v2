@@ -74,6 +74,8 @@ function render() {
   for (const npc of listNpcState()) {
     const { decks, activeIndex, active } = npc;
     const sig = active ? active.signatureId : npc.signatureId;
+    // A moldura ilustra o deck; sem uma definida, cai na carta que dropa.
+    const cover = (active && (active.coverId ?? active.signatureId)) || npc.signatureId;
 
     let counts, state, pickHtml;
     if (!active) {
@@ -98,7 +100,7 @@ function render() {
     const card = document.createElement('div');
     card.className = 'npc';
     card.innerHTML = `
-      <img class="sig" src="${ART(sig)}" alt="" loading="lazy">
+      <img class="sig" src="${ART(cover)}" alt="" loading="lazy">
       <div class="body">
         <h3>${npc.name}</h3>
         <div class="theme">${npc.theme}</div>

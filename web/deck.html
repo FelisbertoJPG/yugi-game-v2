@@ -82,6 +82,24 @@
 
   .hint { font-size: 10px; color: var(--dim); padding: 5px 12px; background: var(--bg2); }
 
+  /* ---------- moldura do deck (a carta que o ilustra) ---------- */
+  .cover-slot {
+    width: 26px; height: 38px; flex: none; display: block;
+    border: 1px solid var(--line2); background: var(--panel2) center/cover no-repeat;
+    cursor: pointer; position: relative;
+  }
+  .cover-slot:hover, .cover-slot:focus { border-color: var(--gold); outline: none; }
+  .cover-slot.empty::after {
+    content: "+"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim); font-size: 15px;
+  }
+  /* enquanto escolhe, o slot pisca e as cartas ficam com o cursor de alvo */
+  .cover-slot.picking { border-color: var(--gold); animation: pulse .9s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  body.picking-cover .thumb { cursor: crosshair; }
+  body.picking-cover .thumb:hover { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+
   /* ---------- arrastar e soltar ---------- */
   .dropzone { min-height: 74px; transition: background .12s, outline-color .12s; }
   .dropzone.over {
@@ -160,6 +178,11 @@
      style="display:flex; gap:10px; align-items:center; background:#16273a; color:var(--ink); border-bottom:1px solid var(--line)">
   <span>👤 Montando o deck do NPC: <b id="npc-name" style="color:var(--gold)"></b></span>
   <span style="flex:1"></span>
+  <label style="display:flex; gap:6px; align-items:center" title="a carta que ilustra este deck">
+    moldura:
+    <span id="npc-cover" class="cover-slot" tabindex="0"
+          title="clique e depois escolha uma carta do deck"></span>
+  </label>
   <label style="display:flex; gap:5px; align-items:center">
     carta que dropa:
     <select id="npc-drop" style="max-width:220px; font-size:11px"></select>

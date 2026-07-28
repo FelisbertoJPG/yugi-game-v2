@@ -100,23 +100,21 @@ function renderDeck() {
       el.draggable = true;
       el.dataset.id = id;
       el.dataset.zone = zone;
-      el.title = `${c?.name ?? id}\nclique: remover 1 · segurar: +1 cópia · `
-               + `arraste: reordenar ou devolver`;
+      el.title = `${c?.name ?? id}\nclique: +1 cópia · segurar: detalhes · `
+               + `arraste para o pool: remover`;
       el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">` +
                      (count > 1 ? `<span class="count">×${count}</span>` : '');
 
-      // Segurar adiciona uma cópia — o oposto do clique, que remove uma.
-      const segurou = wireLongPress(el, HOLD_MS, () => {
+      // Segurar abre a janela de detalhes, igual ao pool.
+      const segurou = wireLongPress(el, HOLD_MS, () => showDetail(id));
+
+      // Clique ADICIONA. Remover é só arrastando de volta para o pool — assim
+      // não dá para perder uma carta por engano num clique perdido.
+      el.onclick = () => {
+        if (segurou()) return;          // acabou de abrir o detalhe: não adiciona
+        if (tryPickCover(id)) return;   // escolhendo moldura: não mexe no deck
         const cc = brief(id);
         if (cc) addCard(cc);
-      });
-
-      el.onclick = () => {
-        if (segurou()) return;          // acabou de adicionar: não remove em seguida
-        if (tryPickCover(id)) return;   // escolhendo moldura: não remove a carta
-        deck.remove(id, zone);
-        markDirty();
-        refresh();
       };
       el.oncontextmenu = (e) => { e.preventDefault(); showDetail(id); };
       wireDragSource(el, id, zone);

@@ -3,7 +3,7 @@
  */
 
 /** Quanto tempo segurar para disparar a ação de "segurar". */
-export const HOLD_MS = 800;
+export const HOLD_MS = 600;
 
 /**
  * Segurar o elemento por `ms` dispara `onLong`.

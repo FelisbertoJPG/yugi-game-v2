@@ -199,6 +199,8 @@
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, listDecks, getActiveIndex } from '/web/js/storage.js';
+import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
+import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
 const SRV = 'http://localhost:8770';
 const $ = (id) => document.getElementById(id);
@@ -208,6 +210,10 @@ const PHASES = [[1,'DP'],[2,'SP'],[4,'M1'],[0x80,'BP'],[0x100,'M2'],[0x200,'EP']
 let db = null;
 try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch {}
 const nameOf = (id) => db?.brief(id)?.name ?? String(id);
+
+// Mesma janela de detalhes do navegador de cartas e do Deck Builder.
+injectHoldStyles(HOLD_MS);
+configureCardDetail({ db });
 
 // estado do duelo no cliente
 let hand = { 0: [], 1: 0 };                 // p0: lista de codes; p1: só contagem
@@ -457,10 +463,15 @@ function zoneEl(cell, cls, label, onClick, drop) {
     const facedown = (cell.pos & 0xa) !== 0;   // POS_FACEDOWN_*
     const el = document.createElement(facedown ? 'div' : 'img');
     if (facedown) { el.className = 'back'; el.style.width = '100%'; el.style.height = '100%'; el.title = nameOf(cell.code) + ' (virada)'; }
-    else { el.src = ART(cell.code); el.title = nameOf(cell.code); }
+    else { el.src = ART(cell.code); el.title = nameOf(cell.code) + '\nsegurar: ver detalhes'; }
     // só MONSTRO em defesa deita (horizontal); magia/armadilha fica sempre vertical
     if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
     z.append(el);
+    // Carta virada não revela nada: ver o detalhe dela seria trapaça.
+    if (!facedown) {
+      wireLongPress(z, HOLD_MS, () => showCardDetail(cell.code));
+      z.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(cell.code); };
+    }
   } else if (onClick) { z.classList.add('free'); z.onclick = onClick; }
   return z;
 }
@@ -680,10 +691,15 @@ function render() {
   if (selectedHand != null && actionsFor(selectedHand).length === 0) selectedHand = null;
   $('hand-you').replaceChildren(...hand[0].map((code, h) => {
     const c = document.createElement('div'); c.className = 'card';
-    c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}" alt="" draggable="false">`;
+    c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}\nsegurar: ver detalhes" alt="" draggable="false">`;
+
+    // Segurar abre os detalhes — vale para toda carta da mão, jogável ou não.
+    const segurou = wireLongPress(c, HOLD_MS, () => showCardDetail(code));
+    c.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(code); };
+
     if (actionsFor(h).length) {
       c.classList.add('playable', 'draggable');
-      c.onclick = () => toggleSelect(h);
+      c.onclick = () => { if (segurou()) return; toggleSelect(h); };
       // Arrastar é o caminho novo; o clique continua funcionando para quem
       // preferir a barra de ações.
       c.draggable = true;

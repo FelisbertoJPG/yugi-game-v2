@@ -43,6 +43,10 @@ namespace DuelServer
             public List<Act> settable = new();   // monstros setáveis (facedown defense)
             public List<Act> settableST = new(); // magias/armadilhas setáveis
             public List<Act> activatable = new();// cartas ativáveis AGORA (condição ok)
+            // Cartas em campo que podem MUDAR DE POSIÇÃO agora. Quem decide se
+            // pode é o motor: monstro invocado neste turno não entra na lista,
+            // e é assim que a regra "só vira no turno seguinte" se aplica sozinha.
+            public List<Act> repositionable = new();
             public bool canBattle, canEnd;
             public List<int> zones = new();      // place: zonas livres
             public string zoneType = "m";        // "m" = monstro, "s" = magia/armadilha
@@ -54,7 +58,16 @@ namespace DuelServer
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
-        public struct Act { public uint code; public int index; }
+        /// <summary>
+        /// Uma opção do idle. `location`/`sequence` dizem ONDE a carta está —
+        /// sem isso o front não consegue ligar a opção à zona certa do tabuleiro
+        /// (a mão casa por código, mas o campo precisa da posição exata).
+        /// </summary>
+        public struct Act
+        {
+            public uint code; public int index;
+            public byte controller, location; public int sequence;
+        }
 
         /// <summary>Carta oferecida num SELECT_CARD / SELECT_TRIBUTE.</summary>
         public struct Sel
@@ -206,17 +219,25 @@ namespace DuelServer
 
         byte _placeLoc = 0x4; // lembra se o place atual é MZONE(0x4) ou SZONE(0x8)
 
+        // Comandos do SELECT_IDLECMD: (índice << 16) | comando.
+        //   0 summon · 1 spsummon · 2 reposição · 3 mset · 4 sset
+        //   5 ativar · 6 ir pra Battle · 7 End Phase
+        // Comandos do SELECT_BATTLECMD:
+        //   0 atacar · 1 ativar · 2 ir pra Main2 · 3 End Phase
         byte[] Encode(string action, int arg) => action switch
         {
             "summon" => I32(arg << 16),               // idle, comando 0 = Normal Summon
+            "reposition" => I32((arg << 16) | 2),     // idle, comando 2 = mudar posição
             "setmonster" => I32((arg << 16) | 3),     // idle, comando 3 = Set (monstro)
             "setspell" => I32((arg << 16) | 4),       // idle, comando 4 = Set (magia/armadilha)
             "activate" => I32((arg << 16) | 5),       // idle, comando 5 = Ativar
-            "endturn" => I32(7),                      // idle, encerrar turno
-            "battle" => I32(6),                       // idle, ir pra Battle Phase (tentativa)
+            "battle" => I32(6),                       // idle, ir pra Battle Phase
+            "endturn" => I32(7),                      // idle, End Phase
             "place" => new byte[] { HUMAN, _placeLoc, (byte)arg }, // zona escolhida
-            "attack" => I32(arg << 16),               // battlecmd, comando 0 = atacar (tentativa)
-            "endbattle" => I32(3),                    // battlecmd, encerrar
+            "attack" => I32(arg << 16),               // battlecmd, comando 0 = atacar
+            "battleactivate" => I32((arg << 16) | 1), // battlecmd, comando 1 = ativar
+            "tomain2" => I32(2),                      // battlecmd, comando 2 = ir pra Main2
+            "endbattle" => I32(3),                    // battlecmd, comando 3 = End Phase
             _ => I32(-1),
         };
 
@@ -307,6 +328,23 @@ namespace DuelServer
                     if (cl == LOCATION_MZONE) _board[(cc, cs)] = (code, cpo);
                     break;
                 }
+                case 53: // MSG_POS_CHANGE
+                {
+                    // type(1) code(4) ctrl(1) loc(1) seq(1) posAnterior(1) posAtual(1)
+                    // Medido com --probe-pos; repare que o `seq` aqui tem 1 byte,
+                    // ao contrário do MSG_MOVE, onde tem 4.
+                    uint code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF;
+                    byte ctrl = d[o + 5], loc = d[o + 6], seq = d[o + 7];
+                    byte anterior = d[o + 8], atual = d[o + 9];
+                    ev.Add(new
+                    {
+                        type = "pos", code, controller = ctrl, loc,
+                        seq = (int)seq, pos = (int)atual, prevPos = (int)anterior,
+                    });
+                    if (loc == LOCATION_MZONE && _board.TryGetValue((ctrl, seq), out var antes))
+                        _board[(ctrl, seq)] = (antes.code, atual);
+                    break;
+                }
                 case 91: LpChange(d, o, -1, ev); break; // MSG_DAMAGE: perde LP
                 case 92: LpChange(d, o, +1, ev); break; // MSG_RECOVER: ganha LP
                 case 100: LpChange(d, o, -1, ev); break; // MSG_PAY_LPCOST: paga LP
@@ -342,7 +380,7 @@ namespace DuelServer
             int p = o + 2;
             q.summonable = ReadActs(d, ref p, limit);       // summon (entradas de 10 bytes)
             ReadActs(d, ref p, limit);                      // special summon
-            ReadActs(d, ref p, limit, 7);                   // reposition — entradas de 7 bytes (seq 1 byte)!
+            q.repositionable = ReadActs(d, ref p, limit, 7); // reposition — 7 bytes (seq 1 byte)!
             q.settable = ReadActs(d, ref p, limit);         // mset — monstro setável
             q.settableST = ReadActs(d, ref p, limit);       // sset — magia/armadilha setável
             q.activatable = ReadActsDesc(d, ref p, limit);  // activate — condição já atendida
@@ -374,7 +412,14 @@ namespace DuelServer
             int n = (int)BitConverter.ToUInt32(d, p); p += 4;
             for (int i = 0; i < n && p + entrySize <= limit; i++)
             {
-                list.Add(new Act { code = BitConverter.ToUInt32(d, p), index = i });
+                list.Add(new Act
+                {
+                    code = BitConverter.ToUInt32(d, p),
+                    index = i,
+                    controller = d[p + 4],
+                    location = d[p + 5],
+                    sequence = entrySize >= 10 ? BitConverter.ToInt32(d, p + 6) : d[p + 6],
+                });
                 p += entrySize;
             }
             return list;
@@ -398,7 +443,14 @@ namespace DuelServer
             int n = (int)BitConverter.ToUInt32(d, p); p += 4;
             for (int i = 0; i < n && p + ACT_ENTRY <= limit; i++)
             {
-                list.Add(new Act { code = BitConverter.ToUInt32(d, p), index = i });
+                list.Add(new Act
+                {
+                    code = BitConverter.ToUInt32(d, p),
+                    index = i,
+                    controller = d[p + 4],
+                    location = d[p + 5],
+                    sequence = BitConverter.ToInt32(d, p + 6),
+                });
                 p += ACT_ENTRY;
             }
             return list;

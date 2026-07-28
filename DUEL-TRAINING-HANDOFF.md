@@ -113,7 +113,17 @@ Buffer de `OCG_DuelGetMessage`: sequência de `[int32 len][byte type][payload]`.
 **SELECT_IDLECMD (11):** `type(1) player(1)` + **6 listas** nesta ordem:
 summon, spsummon, **reposition**, mset (set monstro), sset (set magia/arm), activate.
 Depois **3 bytes de flag** (to_bp, to_ep, shuffle).
+- Resposta = `(índice << 16) | comando`. Comandos: **0** summon · **1** spsummon ·
+  **2** mudar posição · **3** mset · **4** sset · **5** ativar · **6** ir pra Battle ·
+  **7** End Phase. No `SELECT_BATTLECMD`: **0** atacar · **1** ativar · **2** ir pra
+  Main 2 · **3** End Phase.
 - Entradas de mão (summon/spsummon/mset/sset) = **10 bytes**: `code(4) ctrl(1) loc(1) seq(4)`.
+
+> **As regras de "quando pode virar" são do motor, não nossas.** Um monstro
+> invocado neste turno simplesmente não entra na lista `reposition`; uma
+> armadilha baixada agora não entra em `activatable`, e uma magia normal entra.
+> Basta desenhar o que o motor ofereceu — reimplementar isso do lado de fora
+> seria duplicar regra e errar.
 - Entradas de **reposition = 7 bytes** (`seq` de 1 byte, é carta no campo) ⚠️ (bug já
   corrigido — ler repos como 10 desalinhava tudo do turno 3 em diante).
 - Entradas de **activate = 19 bytes**: `code(4) ctrl(1) loc(1) seq(4) description(8)
@@ -168,6 +178,10 @@ uma única combinação possível — aí perguntar seria uma etapa sem decisão
 **SELECT_CHAIN (16):** resposta `int32 -1` (não encadear).
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).
 **MSG_MOVE (50):** `code(4)` + prev`{ctrl(1)loc(1)seq(4)pos(4)}` + curr`{...}` + reason(4)`.
+**MSG_POS_CHANGE (53):** `code(4) ctrl(1) loc(1) seq(1) posAnterior(1) posAtual(1)`.
+⚠️ O `seq` aqui tem **1 byte**, ao contrário do MSG_MOVE, onde tem 4. Mudança de
+posição NÃO emite MSG_MOVE — sem tratar o 53, a carta vira no motor e não na tela.
+Medido com `--probe-pos`.
 **MSG_DRAW (90):** `player(1) count(4)` + por carta `code(4) status(4)` (bit 0x80000000=oculta).
 **MSG_DAMAGE(91)/RECOVER(92)/PAY_LPCOST(100):** `player(1) amount(4)`. LP começa 8000.
 NEW_TURN=40, NEW_PHASE=41 (int16), SUMMONING=60, SUMMONED=61.

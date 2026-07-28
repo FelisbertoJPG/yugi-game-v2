@@ -50,10 +50,34 @@
   .actbar b { color: var(--gold); }
   .actbar button { font-size: 11px; padding: 3px 10px; }
 
-  .midbar { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 4px; background: var(--panel); border: 1px solid var(--line); }
+  .midbar { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 4px; background: var(--panel); border: 1px solid var(--line); flex-wrap: wrap; }
   .phase-pill { padding: 1px 7px; border: 1px solid var(--line); font-size: 10px; color: var(--dim); }
   .phase-pill.on { color: var(--gold); border-color: var(--gold); }
   .lp { font-size: 12px; color: var(--ink); }
+  .midbar button { font-size: 11px; padding: 3px 10px; }
+
+  /* ---------- zona interativa (mudar posição / ativar em campo) ---------- */
+  .zone.actionable { outline: 2px solid var(--green); outline-offset: -2px; cursor: pointer; }
+  .zone.actionable:hover { outline-color: var(--gold); }
+
+  /* ---------- aviso de fase ---------- */
+  /* Entra deslizando, segura um instante e sai. Não intercepta clique. */
+  #phase-toast {
+    position: fixed; top: 38%; left: 0; right: 0; text-align: center;
+    pointer-events: none; z-index: 55;
+  }
+  #phase-toast span {
+    display: inline-block; padding: 8px 26px;
+    background: #0c1118dd; border: 2px solid var(--gold); color: var(--gold);
+    font-size: 22px; letter-spacing: 4px; text-transform: uppercase;
+    animation: fase 1.4s ease-out forwards;
+  }
+  @keyframes fase {
+    0%   { opacity: 0; transform: translateX(-70px); }
+    18%  { opacity: 1; transform: translateX(0); }
+    68%  { opacity: 1; transform: translateX(0); }
+    100% { opacity: 0; transform: translateX(70px); }
+  }
 
   .pilezone {
     width: 58px; aspect-ratio: 59/86; border: 1px dashed #3a4756; border-radius: 2px;
@@ -177,6 +201,8 @@
   </div>
 </div>
 
+<div id="phase-toast"></div>
+
 <div class="arena">
   <div class="handrow opp" id="hand-opp"></div>
 
@@ -206,6 +232,12 @@ const SRV = 'http://localhost:8770';
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 const PHASES = [[1,'DP'],[2,'SP'],[4,'M1'],[0x80,'BP'],[0x100,'M2'],[0x200,'EP']];
+const PHASE_NOME = {
+  1: 'Draw Phase', 2: 'Standby Phase', 4: 'Main Phase 1',
+  0x8: 'Battle Phase', 0x10: 'Battle Step', 0x20: 'Damage Step',
+  0x40: 'Damage Step', 0x80: 'Battle Phase', 0x100: 'Main Phase 2',
+  0x200: 'End Phase',
+};
 
 let db = null;
 try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch {}
@@ -227,6 +259,21 @@ let deckName = '';                            // deck em uso
 function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: null, g: [] }; }
 
 function log(msg, big=false){ const e=document.createElement('div'); e.className='l'+(big?' big':''); e.textContent=msg; $('log').append(e); $('log').scrollTop=1e9; }
+
+/**
+ * Anuncia a fase com um texto que entra deslizando e some. Recriamos o elemento
+ * a cada aviso para a animação reiniciar — reusar o mesmo nó faz o CSS ignorar
+ * a segunda chamada.
+ */
+let avisoTimer = null;
+function avisoFase(texto) {
+  const box = $('phase-toast');
+  const s = document.createElement('span');
+  s.textContent = texto;
+  box.replaceChildren(s);
+  clearTimeout(avisoTimer);
+  avisoTimer = setTimeout(() => box.replaceChildren(), 1500);
+}
 
 // ---------- comunicação com o servidor ----------
 async function rpc(path, body) {
@@ -354,6 +401,7 @@ function apply(j) {
     question = j.question || null;
     ended = !!j.ended;
     picked.clear();
+    selectedField = null;   // a pergunta mudou: a seleção de campo não vale mais
 
     // Zona já escolhida no arrasto: responde o SELECT_PLACE sem perguntar de novo.
     // O destino vale para UMA pergunta só — se a próxima não for de zona (há
@@ -392,9 +440,30 @@ function handle(ev) {
       deckCount[ev.player] = Math.max(0, deckCount[ev.player] - ev.cards.length);
       log(`compra: jogador ${ev.player} +${ev.cards.length}`);
       break;
-    case 'turn': turn = ev.player; turnNo++; if (ev.player === 0) turnPlays = []; log(`— turno ${turnNo} (jogador ${ev.player}) —`, true); break;
-    case 'phase': phase = ev.phase; break;
+    case 'turn':
+      turn = ev.player; turnNo++;
+      if (ev.player === 0) turnPlays = [];
+      log(`— turno ${turnNo} (jogador ${ev.player}) —`, true);
+      avisoFase(ev.player === 0 ? 'Seu turno' : 'Turno do oponente');
+      break;
+    case 'phase': {
+      const antes = phase;
+      phase = ev.phase;
+      // O motor emite as fases iniciais em rajada; só anunciamos mudanças reais.
+      if (antes !== phase) avisoFase(PHASE_NOME[phase] ?? `Fase ${phase}`);
+      break;
+    }
     case 'summoning': log(`invocando ${nameOf(ev.code)}`); break;
+    case 'pos': {
+      // Mudança de posição: a carta continua na zona, só muda a orientação.
+      const f = field[ev.controller];
+      const alvo = ev.loc === 4 ? f?.m?.[ev.seq]
+                 : ev.loc === 8 ? (ev.seq === 5 ? f?.f : f?.s?.[ev.seq]) : null;
+      if (alvo) alvo.pos = ev.pos;
+      const nomes = { 1: 'ataque', 2: 'ataque (virada)', 4: 'defesa', 8: 'defesa (virada)' };
+      log(`${nameOf(ev.code)} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
+      break;
+    }
     case 'move': {
       // limpa a zona de origem (carta que sai p/ cemitério, mão, etc.)
       const src = field[ev.fromCtrl];
@@ -435,10 +504,34 @@ function handle(ev) {
 }
 
 // ---------- render ----------
-function zoneEl(cell, cls, label, onClick, drop) {
+function zoneEl(cell, cls, label, onClick, drop, campoOpts) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
   z.innerHTML = `<span class="zl">${label}</span>`;
+
+  // Ações disponíveis para a carta que já está nesta zona.
+  if (cell && campoOpts) {
+    const chave = `${campoOpts.loc}:${campoOpts.seq}`;
+    const opts = [];
+    const iRepos = campoOpts.acoes.repos.get(chave);
+    const iAtiva = campoOpts.acoes.ativa.get(chave);
+    if (iAtiva !== undefined) opts.push({ action: 'activate', arg: iAtiva, label: 'Ativar' });
+    if (iRepos !== undefined) opts.push({ action: 'reposition', arg: iRepos, label: 'Mudar posição' });
+
+    if (opts.length) {
+      z.classList.add('actionable');
+      const sel = selectedField;
+      const marcada = sel && sel.loc === campoOpts.loc && sel.seq === campoOpts.seq;
+      if (marcada) z.style.outlineColor = 'var(--gold)';
+      z.onclick = () => {
+        // Uma opção só: executa direto. Duas: mostra a barra para escolher.
+        if (opts.length === 1) { act(opts[0].action, opts[0].arg, `${opts[0].label} ${nameOf(cell.code)}`); return; }
+        selectedField = marcada ? null : { ...campoOpts, code: cell.code, opts };
+        selectedHand = null;
+        render();
+      };
+    }
+  }
 
   // Zona vazia com uma carta em jogo (arrastada ou clicada): marca se aceita o
   // TIPO dela. Aceita tanto soltar quanto clicar.
@@ -476,26 +569,54 @@ function zoneEl(cell, cls, label, onClick, drop) {
   return z;
 }
 
+/**
+ * O que o motor permite fazer com as cartas JÁ em campo, indexado por posição.
+ *
+ * É aqui que as regras oficiais entram sem que a gente as escreva: um monstro
+ * invocado neste turno não aparece em `repositionable`, uma armadilha baixada
+ * agora não aparece em `activatable`, e uma magia normal aparece. Quem decide
+ * é o motor — nós só desenhamos o que ele ofereceu.
+ */
+function acoesDeCampo(player) {
+  const repos = new Map(), ativa = new Map();
+  if (question && question.kind === 'idle' && question.player === 0) {
+    for (const a of question.repositionable || []) {
+      if (a.controller === player) repos.set(`${a.location}:${a.sequence}`, a.index);
+    }
+    for (const a of question.activatable || []) {
+      // location 2 = mão; aqui só interessam as que já estão no campo
+      if (a.controller === player && a.location !== 2) ativa.set(`${a.location}:${a.sequence}`, a.index);
+    }
+  }
+  return { repos, ativa };
+}
+
+let selectedField = null;   // { loc, seq, code } da carta de campo selecionada
+
 function fieldRows(player, isYou) {
   const wrap = document.createElement('div'); wrap.className = 'rows';
   const f = field[player];
+  const campo = acoesDeCampo(player);
   const placing = question && question.kind === 'place' && isYou;
   const freeM = placing && question.zoneType === 'm' ? new Set(question.zones) : new Set();
   const freeS = placing && question.zoneType === 's' ? new Set(question.zones) : new Set();
 
   const mrow = document.createElement('div'); mrow.className = 'zonerow';
   const srow = document.createElement('div'); srow.className = 'zonerow';
-  mrow.append(zoneEl(f.f, 'fz', 'F', null, isYou ? { type: 'f', index: 5 } : null));
+  const co = (loc, seq) => (isYou ? { loc, seq, acoes: campo } : null);
+
+  mrow.append(zoneEl(f.f, 'fz', 'F', null,
+    isYou ? { type: 'f', index: 5 } : null, co(8, 5)));
   for (let i = 0; i < 5; i++)
     mrow.append(zoneEl(f.m[i], 'mz', 'M'+i,
       freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null,
-      isYou ? { type: 'm', index: i } : null));
+      isYou ? { type: 'm', index: i } : null, co(4, i)));
   mrow.append(pileEl(player, 'GY', f.g));   // cemitério à direita dos monstros
   const spacer = document.createElement('div'); spacer.style.width = '58px'; srow.append(spacer);
   for (let i = 0; i < 5; i++)
     srow.append(zoneEl(f.s[i], 'sz', 'S'+i,
       freeS.has(i) ? () => act('place', i, `colocar na zona S${i}`) : null,
-      isYou ? { type: 's', index: i } : null));
+      isYou ? { type: 's', index: i } : null, co(8, i)));
   // Deck logo abaixo do cemitério, que é onde ele fica de verdade na mesa.
   srow.append(deckEl(player));
 
@@ -677,6 +798,7 @@ function render() {
   $('mid').replaceChildren(
     lpEl(1),
     ...PHASES.map(([v, n]) => { const s = document.createElement('span'); s.className = 'phase-pill' + (v === phase ? ' on' : ''); s.textContent = n; return s; }),
+    ...botoesDeFase(),
     lpEl(0),
   );
 
@@ -722,7 +844,20 @@ function render() {
 
   // barra de ação (quando há carta selecionada) ou prompt normal
   const bar = $('prompt-bar');
-  if (selectedHand != null) {
+  if (selectedField) {
+    const div = document.createElement('div'); div.className = 'actbar';
+    div.append(Object.assign(document.createElement('b'), { textContent: nameOf(selectedField.code) + ':' }));
+    for (const a of selectedField.opts) {
+      const b = document.createElement('button');
+      b.textContent = a.label;
+      b.onclick = () => { const s = selectedField; selectedField = null; act(a.action, a.arg, `${a.label} ${nameOf(s.code)}`); };
+      div.append(b);
+    }
+    const x = document.createElement('button'); x.textContent = 'cancelar';
+    x.onclick = () => { selectedField = null; render(); };
+    div.append(x);
+    bar.replaceChildren(div);
+  } else if (selectedHand != null) {
     const div = document.createElement('div'); div.className = 'actbar';
     div.append(Object.assign(document.createElement('b'), { textContent: nameOf(hand[0][selectedHand]) + ':' }));
     div.append(Object.assign(document.createElement('span'), {
@@ -748,6 +883,39 @@ function render() {
         : 'aguarde…'
     }));
   }
+}
+
+/**
+ * Botões de fase, no centro do tabuleiro.
+ *
+ * O motor não tem um "próxima fase" genérico: da Main 1 dá para ir à Battle
+ * (idle 6) ou à End Phase (idle 7); dentro da Battle dá para ir à Main 2
+ * (battle 2) ou à End Phase (battle 3). O botão traduz isso para o que faz
+ * sentido no momento, e desliga quando o motor não permite.
+ */
+function botoesDeFase() {
+  const meu = question && question.player === 0 && !ended;
+  const idle = meu && question.kind === 'idle';
+  const batalha = meu && question.kind === 'battle';
+
+  let proxima = null;
+  if (idle && question.canBattle) proxima = { rotulo: '▶ Battle Phase', acao: 'battle' };
+  else if (idle && question.canEnd) proxima = { rotulo: '▶ End Phase', acao: 'endturn' };
+  else if (batalha) proxima = { rotulo: '▶ Main Phase 2', acao: 'tomain2' };
+
+  const b1 = document.createElement('button');
+  b1.textContent = proxima ? proxima.rotulo : '▶ próxima fase';
+  b1.disabled = !proxima;
+  b1.title = 'avança para a próxima fase';
+  if (proxima) b1.onclick = () => act(proxima.acao, 0, proxima.rotulo);
+
+  const b2 = document.createElement('button');
+  b2.textContent = '⏭ End Phase';
+  b2.title = 'pula direto para a End Phase';
+  b2.disabled = !(idle ? question.canEnd : batalha);
+  b2.onclick = () => act(batalha ? 'endbattle' : 'endturn', 0, 'End Phase');
+
+  return [b1, b2];
 }
 
 function pileEl(player, label, cards) {

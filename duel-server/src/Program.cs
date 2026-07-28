@@ -92,6 +92,13 @@ namespace DuelServer
                 return 0;
             }
 
+            // Sonda da mudanca de posicao.
+            if (Array.IndexOf(args, "--probe-pos") >= 0)
+            {
+                ProbePos.Run(streamingAssets);
+                return 0;
+            }
+
             // Harness de diagnóstico do protocolo (console).
             if (Array.IndexOf(args, "--selfplay") >= 0)
             {

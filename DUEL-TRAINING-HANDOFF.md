@@ -116,7 +116,16 @@ Depois **3 bytes de flag** (to_bp, to_ep, shuffle).
 - Entradas de mão (summon/spsummon/mset/sset) = **10 bytes**: `code(4) ctrl(1) loc(1) seq(4)`.
 - Entradas de **reposition = 7 bytes** (`seq` de 1 byte, é carta no campo) ⚠️ (bug já
   corrigido — ler repos como 10 desalinhava tudo do turno 3 em diante).
-- Entradas de **activate = 18 bytes** (as de 10 + `description(8)`).
+- Entradas de **activate = 19 bytes**: `code(4) ctrl(1) loc(1) seq(4) description(8)
+  client_mode(1)`. ⚠️ O `client_mode` é fácil de esquecer: com 18 bytes a lista
+  desalinha a partir da **segunda** carta, e o sintoma é "só a primeira magia da mão
+  pode ser ativada" — sem erro nenhum. Confirmado na fonte e medido com `--probe-idle`.
+
+> **Como medir isso sem chutar:** a mensagem termina em 3 bytes de flag, então o
+> cursor tem de parar exatamente em `fim - 3`. `--probe-idle` testa as combinações
+> de tamanho e diz qual fecha a conta; ele só é conclusivo quando as listas em
+> questão não estão vazias (por isso ele joga, em vez de só passar o turno).
+> O `ParseIdle` agora faz essa verificação sozinho e grita no log se desalinhar.
 - Resposta = **int32 `(índice << 16) | comando`**: 0=Normal Summon, 3=set monstro,
   4=set magia/arm, 5=ativar, **7=encerrar turno**, 6=ir pra Battle (provável).
 
@@ -149,7 +158,12 @@ Resposta: **`[int32 1][int32 índice]`** — o primeiro campo tem que ser
 
 **SELECT_SUM (23):** ritual. As cartas escolhidas têm de **somar exatamente** o
 `acc` pedido (nível), descontando as obrigatórias. Precisa de subconjunto-soma,
-não de escolha gulosa.
+não de escolha gulosa. Entrada da mensagem = 18 bytes (`code(4) +
+info_location(10) + sum_param(4)`), e o `sum_param` é o nível que a carta soma.
+
+Quem escolhe os tributos é o **jogador**: a pergunta vai para o front com o nível
+de cada carta e um contador de "somados / alvo". Só resolvemos sozinho quando há
+uma única combinação possível — aí perguntar seria uma etapa sem decisão.
 
 **SELECT_CHAIN (16):** resposta `int32 -1` (não encadear).
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).

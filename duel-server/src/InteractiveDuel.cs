@@ -122,10 +122,15 @@ namespace DuelServer
                     continue;
                 }
 
-                // Soma de níveis (ritual): existe uma única combinação válida na
-                // maioria das vezes, então resolver sozinho é melhor que pedir ao
-                // jogador que faça aritmética.
-                if (q.kind == "selectsum") { _s.Respond(AutoSum(q)); continue; }
+                // Soma de níveis (ritual): quem escolhe os tributos é o jogador.
+                // Só resolvemos sozinho quando existe uma única combinação possível
+                // — aí perguntar seria só uma etapa a mais sem decisão nenhuma.
+                if (q.kind == "selectsum")
+                {
+                    if (SomaTemEscolha(q)) { r.question = q; return r; }
+                    _s.Respond(AutoSum(q));
+                    continue;
+                }
 
                 // Seletor incremental: uma carta por vez. Se já dá para encerrar e
                 // não sobrou escolha, encerra; senão devolve pro front escolher.
@@ -241,7 +246,7 @@ namespace DuelServer
                     // escolher, encerra.
                     _s.Respond(q.choices.Count > 0 ? PickOne(q.choices[0].index) : I32(-1));
                     break;
-                case "selectsum": _s.Respond(AutoSum(q)); break;
+                case "selectsum": _s.Respond(AutoSum(q)); break;   // NPC não escolhe: resolve
                 default: _s.Respond(I32(-1)); break;
             }
         }
@@ -341,6 +346,21 @@ namespace DuelServer
             q.settable = ReadActs(d, ref p, limit);         // mset — monstro setável
             q.settableST = ReadActs(d, ref p, limit);       // sset — magia/armadilha setável
             q.activatable = ReadActsDesc(d, ref p, limit);  // activate — condição já atendida
+
+            // Rede de segurança: a mensagem termina em 3 bytes de flag, então o
+            // cursor TEM de parar exatamente aqui. Se não parar, algum tamanho de
+            // entrada está errado e as listas acima saíram corrompidas — o que já
+            // aconteceu e se manifesta como "só a primeira magia é ativável",
+            // sem erro nenhum. Melhor gritar.
+            int sobra = limit - p;
+            if (sobra != 3)
+            {
+                Log.Err($"[idle] desalinhado: sobraram {sobra} bytes (esperado 3). " +
+                        $"summon={q.summonable.Count} mset={q.settable.Count} " +
+                        $"sset={q.settableST.Count} act={q.activatable.Count} — " +
+                        "algum tamanho de entrada mudou no motor.");
+            }
+
             q.canBattle = d[limit - 3] != 0;
             q.canEnd = d[limit - 2] != 0;
             return q;
@@ -360,16 +380,26 @@ namespace DuelServer
             return list;
         }
 
-        // Lista de ativação: cada entrada tem um "description" extra (8 bytes).
+        /// <summary>
+        /// Lista de ativação. Entrada = **19 bytes**:
+        ///   code(4) ctrl(1) loc(1) seq(4) description(8) client_mode(1)
+        ///
+        /// O `client_mode` é fácil de esquecer — com 18 bytes a leitura desalinha
+        /// a partir da SEGUNDA carta, e o efeito prático é que só a primeira magia
+        /// da mão aparece como ativável. Confirmado na fonte do ocgcore e medido
+        /// com `--probe-idle`.
+        /// </summary>
+        const int ACT_ENTRY = 19;
+
         static List<Act> ReadActsDesc(byte[] d, ref int p, int limit)
         {
             var list = new List<Act>();
             if (p + 4 > limit) return list;
             int n = (int)BitConverter.ToUInt32(d, p); p += 4;
-            for (int i = 0; i < n && p + 18 <= limit; i++)
+            for (int i = 0; i < n && p + ACT_ENTRY <= limit; i++)
             {
                 list.Add(new Act { code = BitConverter.ToUInt32(d, p), index = i });
-                p += 18; // code(4)+ctrl(1)+loc(1)+seq(4)+desc(8)
+                p += ACT_ENTRY;
             }
             return list;
         }
@@ -628,6 +658,27 @@ namespace DuelServer
 
             Search(0, 0);
             return best;
+        }
+
+        /// <summary>
+        /// Há mais de uma forma de somar o alvo? Só então vale perguntar ao jogador.
+        /// Conta as combinações até achar a segunda — não precisa enumerar todas.
+        /// </summary>
+        static bool SomaTemEscolha(Question q)
+        {
+            if (q.choices.Count == 0) return false;
+            int achadas = 0;
+
+            void Busca(int i, int soma, int usados)
+            {
+                if (achadas >= 2) return;
+                if (soma == q.sumNeeded && usados > 0) { achadas++; return; }
+                if (soma > q.sumNeeded || i >= q.choices.Count) return;
+                Busca(i + 1, soma + Math.Max(1, q.choices[i].param), usados + 1);
+                Busca(i + 1, soma, usados);
+            }
+            Busca(0, 0, 0);
+            return achadas >= 2;
         }
 
         /// <summary>Resolve o SELECT_SUM sozinho quando não há escolha interessante.</summary>

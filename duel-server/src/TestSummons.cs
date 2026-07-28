@@ -106,6 +106,17 @@ namespace DuelServer
                             ? duel.Respond("finishselect", 0)
                             : duel.Respond("pick", q.choices[0].index);
                         break;
+                    case "selectsum":
+                    {
+                        // O jogador agora escolhe os tributos do ritual: precisamos
+                        // de um subconjunto cujos niveis somem exatamente o alvo.
+                        var pick = SubconjuntoQueSoma(q.choices, q.sumNeeded);
+                        Log.Info($"  > selectsum: alvo={q.sumNeeded} " +
+                                 $"opcoes={q.choices.Count} escolhi=[{string.Join(",", pick)}]");
+                        Check("achei tributos que somam o nivel exato", pick.Count > 0);
+                        r = duel.Respond("select", 0, pick);
+                        break;
+                    }
                     case "battle":
                         r = duel.Respond("endbattle", 0);
                         break;
@@ -131,6 +142,25 @@ namespace DuelServer
                   $"(foram {tributed.Count})");
             Check("os tributos somam o nivel 8 do Black Luster Soldier",
                   tributed.Count * 4 == 8, $"(monstros Nv4; vieram {tributed.Count})");
+        }
+
+        /// <summary>Subconjunto cujos níveis somam exatamente o alvo (listas pequenas).</summary>
+        static List<int> SubconjuntoQueSoma(List<InteractiveDuel.Sel> itens, int alvo)
+        {
+            var cur = new List<int>();
+            var achou = new List<int>();
+
+            bool Busca(int i, int soma)
+            {
+                if (soma == alvo && cur.Count > 0) { achou = new List<int>(cur); return true; }
+                if (soma > alvo || i >= itens.Count) return false;
+                cur.Add(itens[i].index);
+                if (Busca(i + 1, soma + Math.Max(1, itens[i].param))) return true;
+                cur.RemoveAt(cur.Count - 1);
+                return Busca(i + 1, soma);
+            }
+            Busca(0, 0);
+            return achou;
         }
 
         static uint[] RitualDeck()

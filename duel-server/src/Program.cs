@@ -85,6 +85,13 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-npc") >= 0)
                 return TestNpc.Run(streamingAssets);
 
+            // Sonda do layout do SELECT_IDLECMD.
+            if (Array.IndexOf(args, "--probe-idle") >= 0)
+            {
+                ProbeIdle.Run(streamingAssets);
+                return 0;
+            }
+
             // Harness de diagnóstico do protocolo (console).
             if (Array.IndexOf(args, "--selfplay") >= 0)
             {

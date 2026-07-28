@@ -100,7 +100,13 @@
   }
   .sel-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .sel-card:hover { border-color: var(--blue); }
+  .sel-card { position: relative; }
   .sel-card.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+  /* nível da carta, para conferir a soma do ritual sem abrir o card */
+  .sel-card .lvl {
+    position: absolute; left: 0; bottom: 0; background: #000c; color: var(--gold);
+    font-size: 9px; padding: 0 3px;
+  }
   .sel-acts { display: flex; gap: 8px; justify-content: flex-end; }
 
   /* ---------- arrastar da mão para a zona ---------- */
@@ -264,8 +270,15 @@ const picked = new Set();
 
 function selectionQuestion() {
   if (!question || question.player !== 0) return null;
-  return ['selectcard', 'selecttribute', 'selectunselect'].includes(question.kind)
+  return ['selectcard', 'selecttribute', 'selectunselect', 'selectsum'].includes(question.kind)
     ? question : null;
+}
+
+/** Soma dos níveis das cartas marcadas (usado no ritual). */
+function somaMarcada(q) {
+  let s = 0;
+  for (const c of q.choices || []) if (picked.has(c.index)) s += (c.param || 0);
+  return s;
 }
 
 function renderSelection() {
@@ -275,20 +288,34 @@ function renderSelection() {
   box.hidden = false;
 
   const incremental = q.kind === 'selectunselect';
+  const soma = q.kind === 'selectsum';
   const need = q.selMin || 1;
-  $('sel-title').textContent = q.kind === 'selecttribute'
-    ? 'Escolha o(s) tributo(s)'
+
+  $('sel-title').textContent =
+    soma ? 'Escolha os tributos do Ritual'
+    : q.kind === 'selecttribute' ? 'Escolha o(s) tributo(s)'
     : incremental ? 'Escolha uma carta' : 'Escolha as cartas';
-  $('sel-info').textContent = incremental
-    ? `clique numa carta (faltam ${need})`
-    : `selecione ${need}${q.selMax > need ? ` a ${q.selMax}` : ''} — ${picked.size} escolhida(s)`;
+
+  if (soma) {
+    // Feedback do que importa aqui: os níveis têm de somar EXATAMENTE o alvo.
+    const atual = somaMarcada(q);
+    const falta = q.sumNeeded - atual;
+    const el = $('sel-info');
+    el.innerHTML = `níveis somados: <b style="color:${atual === q.sumNeeded ? 'var(--green)' : 'var(--gold)'}">${atual}</b>`
+      + ` / ${q.sumNeeded}` + (falta > 0 ? ` — faltam ${falta}` : falta < 0 ? ` — passou ${-falta}` : ' — pronto!');
+  } else {
+    $('sel-info').textContent = incremental
+      ? `clique numa carta (faltam ${need})`
+      : `selecione ${need}${q.selMax > need ? ` a ${q.selMax}` : ''} — ${picked.size} escolhida(s)`;
+  }
 
   const frag = document.createDocumentFragment();
   for (const c of q.choices || []) {
     const el = document.createElement('div');
     el.className = 'sel-card' + (picked.has(c.index) ? ' on' : '');
-    el.innerHTML = `<img src="https://images.ygoprodeck.com/images/cards_small/${c.code}.jpg" alt="">`;
-    el.title = `código ${c.code}`;
+    el.innerHTML = `<img src="https://images.ygoprodeck.com/images/cards_small/${c.code}.jpg" alt="">`
+      + (soma ? `<span class="lvl">Nv ${c.param ?? '?'}</span>` : '');
+    el.title = `código ${c.code}` + (soma ? ` — nível ${c.param}` : '');
     el.onclick = () => {
       if (incremental) { act('pick', c.index, `pick ${c.code}`); picked.clear(); return; }
       picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
@@ -300,7 +327,10 @@ function renderSelection() {
 
   const ok = $('sel-ok');
   ok.hidden = incremental;
-  ok.disabled = picked.size < need || (q.selMax > 0 && picked.size > q.selMax);
+  // No ritual o que libera não é a quantidade, é a SOMA bater exatamente.
+  ok.disabled = soma
+    ? somaMarcada(q) !== q.sumNeeded
+    : picked.size < need || (q.selMax > 0 && picked.size > q.selMax);
   ok.onclick = () => {
     const list = [...picked];
     picked.clear();

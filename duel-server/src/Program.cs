@@ -25,9 +25,37 @@ namespace DuelServer
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             bool serve = Array.IndexOf(args, "--serve") >= 0;
-            Log.Info(serve
-                ? "=== duel-server (modo servidor de treino / web) ==="
-                : "=== duel-server (ocgcore edo9300, sem Unity) ===");
+
+            // --app: o jogo inteiro num processo so' (duelo + front + navegador),
+            // que e' o modo do executavel distribuido. Sem Node, sem launcher.
+            //
+            // Com payload embutido e sem argumento nenhum, --app e' o padrao: quem
+            // recebeu o arquivo vai dar dois cliques, nao abrir um terminal.
+            bool app = Array.IndexOf(args, "--app") >= 0
+                       || (args.Length == 0 && Payload.Exists);
+            string appRoot = null;
+            if (app)
+            {
+                Console.Title = "Duel Academy";
+                Log.Info("=== Duel Academy ===");
+                appRoot = Payload.EnsureExtracted() ?? FindProjectRoot();
+                if (appRoot == null)
+                {
+                    Log.Err("Nao achei os arquivos do jogo (web/ + duel_academy/).");
+                    Log.Err("Este executavel nao foi empacotado: rode-o de dentro da pasta do projeto.");
+                    return Segurar(2);
+                }
+                // O ResolveStreamingAssets abaixo respeita YGODEMO_PATH, entao
+                // apontar por aqui evita duplicar a logica de busca.
+                Environment.SetEnvironmentVariable(
+                    "YGODEMO_PATH", Path.Combine(appRoot, "duel_academy", "Assets", "StreamingAssets"));
+            }
+            else
+            {
+                Log.Info(serve
+                    ? "=== duel-server (modo servidor de treino / web) ==="
+                    : "=== duel-server (ocgcore edo9300, sem Unity) ===");
+            }
 
             // 1. Localizar os StreamingAssets (cards.cdb + scripts lua)
             string streamingAssets = ResolveStreamingAssets(args);
@@ -35,7 +63,7 @@ namespace DuelServer
             {
                 Log.Err("Nao encontrei duel_academy/Assets/StreamingAssets/YGODemo/cards.cdb.");
                 Log.Err("Passe o caminho de StreamingAssets como primeiro argumento, ou defina YGODEMO_PATH.");
-                return 2;
+                return app ? Segurar(2) : 2;
             }
             Log.Info($"StreamingAssets: {streamingAssets}");
 
@@ -48,12 +76,29 @@ namespace DuelServer
             catch (DllNotFoundException e)
             {
                 Log.Err($"ocgcore.dll nao encontrada ao lado do executavel: {e.Message}");
-                return 3;
+                return app ? Segurar(3) : 3;
             }
             catch (BadImageFormatException)
             {
                 Log.Err("BadImageFormat: a ocgcore.dll e x64 e o processo esta em 32-bit. Rebuild com PlatformTarget x64.");
-                return 3;
+                return app ? Segurar(3) : 3;
+            }
+
+            // Modo aplicativo: um processo atende as duas portas (front e duelo) e
+            // abre o navegador sozinho. A janela fica aberta porque ELA e' o jogo:
+            // fechar o console encerra o servidor, que e' o comportamento esperado
+            // de um programa avulso.
+            if (app)
+            {
+                WebServer.Run(streamingAssets,
+                    webRoot: appRoot,
+                    extraUrl: FrontUrl,
+                    onReady: () =>
+                    {
+                        if (Array.IndexOf(args, "--no-browser") >= 0) return;
+                        AbrirNavegador(FrontUrl + "web/duel.html");
+                    });
+                return 0;
             }
 
             // Modo servidor de treino (web): sobe o HttpListener e transmite via SSE.
@@ -227,6 +272,59 @@ namespace DuelServer
         /// 1) primeiro argumento; 2) env YGODEMO_PATH; 3) busca subindo a arvore
         /// a partir do executavel e do diretorio atual.
         /// </summary>
+        private const string FrontUrl = "http://localhost:8080/";
+
+        /// <summary>
+        /// Raiz do jogo quando NAO ha payload embutido (rodando do repositorio).
+        /// Procura as duas pastas que o modo --app precisa servir.
+        /// </summary>
+        private static string FindProjectRoot()
+        {
+            foreach (string start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+            {
+                var dir = new DirectoryInfo(start);
+                while (dir != null)
+                {
+                    if (Directory.Exists(Path.Combine(dir.FullName, "web")) &&
+                        Directory.Exists(Path.Combine(dir.FullName, "duel_academy")))
+                        return dir.FullName;
+                    dir = dir.Parent;
+                }
+            }
+            return null;
+        }
+
+        private static void AbrirNavegador(string url)
+        {
+            Console.WriteLine();
+            Log.Info($"abrindo {url}");
+            Log.Info("DEIXE ESTA JANELA ABERTA — fechar aqui encerra o jogo.");
+            Console.WriteLine();
+            try
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"nao consegui abrir o navegador ({e.Message}).");
+                Log.Warn($"Abra manualmente: {url}");
+            }
+        }
+
+        /// <summary>
+        /// Segura a janela antes de sair. Sem isto um erro no modo --app aparece e
+        /// some junto com o console, e quem recebeu o executavel so' ve' um piscar
+        /// de terminal — exatamente o relato que originou este modo.
+        /// </summary>
+        private static int Segurar(int code)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  (pressione qualquer tecla para fechar)");
+            try { Console.ReadKey(true); } catch { System.Threading.Thread.Sleep(8000); }
+            return code;
+        }
+
         private static string ResolveStreamingAssets(string[] args)
         {
             if (args.Length > 0 && HasCdb(args[0])) return args[0];

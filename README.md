@@ -27,6 +27,26 @@ Sem `npm install` — o front tem **zero dependências**. Precisa de Node >= 18;
 o duelo precisa de .NET 8 e **Windows x64** (as DLLs nativas do ocgcore).
 Python 3 só é necessário para regenerar o banco de cartas (`npm run data:build`).
 
+## Mandar para alguém jogar
+
+```bash
+npm run pack        # gera dist/DuelAcademy.exe (~61 MB)
+```
+
+Um arquivo só, e do outro lado **não se instala nada**: o .NET vai dentro do
+executável e o Node deixou de ser necessário (o `StaticServer.cs` faz o papel do
+`serve.mjs`). Web, cartas, `cards.cdb` e os 20.949 scripts Lua viajam como um
+`payload.zip` embutido, que na primeira execução se instala em
+`%LOCALAPPDATA%\DuelAcademy\game` — de segundos, e nas próximas vezes abre
+direto. Duplo clique sobe as duas portas num processo só e abre o navegador; a
+janela do console **é** o jogo, fechá-la encerra tudo.
+
+Continua valendo **Windows x64**, porque a `ocgcore.dll` é nativa. Atualizar é
+mandar o exe novo: ele percebe pelo hash do payload, reinstala e **preserva
+`store/` e `decks/`** — a carteira e os decks de quem está jogando não somem.
+
+Quem empacota precisa do SDK .NET 8; quem recebe, de nada.
+
 ## Estrutura
 
 | Pasta | O que é |
@@ -37,7 +57,7 @@ Python 3 só é necessário para regenerar o banco de cartas (`npm run data:buil
 | **`launcher/`** | Fonte dos dois executáveis de liga/desliga. Um só `Program.cs` gera ambos. |
 | **`ygo-data/`** | Banco local de dados — 13.728 cartas decodificadas e 12.702 scripts Lua, extraídos do `cards.cdb` e prontos para consumo web. |
 | **`duel_academy/`** | Protótipo Unity que provou a integração com o `ocgcore.dll`: cria duelo, carrega os scripts Lua, compra cartas e responde ao motor. Fonte de onde os dados foram extraídos. |
-| **`tools/`** | Servidor estático de desenvolvimento. Andaime, não faz parte do produto. |
+| **`tools/`** | Servidor estático de desenvolvimento (`serve.mjs`) e o empacotador (`pack.ps1`). |
 
 Comece por [`ygo-data/README.md`](ygo-data/README.md) — ele documenta o formato
 dos dados, as pegadinhas de decodificação e os caminhos possíveis para rodar o

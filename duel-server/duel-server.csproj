@@ -15,6 +15,14 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
+  <!-- Distribuicao: `npm run pack` gera duel-server/payload.zip (web, dados,
+       cards.cdb e os scripts lua) e ele entra COMO RECURSO no executavel, para o
+       jogo poder ser entregue como um arquivo unico. No dia a dia o zip nao
+       existe, a condicao nao bate e o build sai igual ao de sempre. -->
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\payload.zip')">
+    <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" />
+  </ItemGroup>
+
   <!-- Copia as bibliotecas nativas para junto do executavel, para o
        DllImport("ocgcore") / DllImport("sqlite3") encontra-las. -->
   <ItemGroup>

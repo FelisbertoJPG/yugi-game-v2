@@ -9,6 +9,7 @@
     "data:build": "python ygo-data/tools/build.py",
     "data:check": "node ygo-data/examples/node-demo.mjs",
     "launcher:build": "dotnet publish launcher -c Release -o . -v q --nologo && dotnet publish launcher/stop -c Release -o . -v q --nologo",
+    "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/pack.ps1",
     "stop": ".\\duel-academy-stop.exe",
     "duel:build": ".\\duel-academy-stop.exe && dotnet build duel-server -v q --nologo",
     "duel:test": ".\\duel-academy-stop.exe && dotnet build duel-server -v q --nologo && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-npc && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-summons"

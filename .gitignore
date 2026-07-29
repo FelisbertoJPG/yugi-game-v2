@@ -33,6 +33,12 @@ duel-academy.pdb
 duel-academy-stop.exe
 duel-academy-stop.pdb
 
+# Distribuicao (`npm run pack`): 61 MB de artefato regeneravel. O payload.zip e'
+# intermediario e o proprio script o apaga; fica listado caso um pack quebre no
+# meio e deixe o arquivo para tras.
+dist/
+duel-server/payload.zip
+
 # SO / editor
 .DS_Store
 Thumbs.db

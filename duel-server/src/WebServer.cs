@@ -21,23 +21,38 @@ namespace DuelServer
         static readonly object _lock = new();
         static InteractiveDuel _duel;
         static string _sa;
+        static string _webRoot;
         static volatile bool _shutdown;
 
-        public static void Run(string streamingAssets, string url = "http://localhost:8770/")
+        /// <summary>
+        /// Sobe o servidor. `webRoot` liga o servidor de arquivos embutido (modo
+        /// --app, sem Node); `extraUrl` adiciona a porta do front ao MESMO
+        /// listener, para o executavel empacotado ser um processo so'.
+        /// </summary>
+        public static void Run(string streamingAssets, string url = "http://localhost:8770/",
+                               string webRoot = null, string extraUrl = null,
+                               Action onReady = null)
         {
             _sa = streamingAssets;
+            _webRoot = webRoot == null ? null : Path.GetFullPath(webRoot).TrimEnd(Path.DirectorySeparatorChar);
             var listener = new HttpListener();
             listener.Prefixes.Add(url);
+            if (extraUrl != null) listener.Prefixes.Add(extraUrl);
             try { listener.Start(); }
             catch (HttpListenerException e)
             {
-                Log.Err($"Não consegui abrir {url}: {e.Message}");
+                Log.Err($"Não consegui abrir {url}{(extraUrl != null ? " / " + extraUrl : "")}: {e.Message}");
+                Log.Err("Porta ocupada? Feche outra instância (duel-academy-stop.exe) e tente de novo.");
                 Log.Err($"Se for acesso negado: netsh http add urlacl url={url} user=%USERNAME%");
                 return;
             }
 
             Log.Info($"Servidor de duelo (treino W2) em {url}");
+            if (_webRoot != null) Log.Info($"Servidor do front em {extraUrl}  (raiz: {_webRoot})");
             Log.Info("  POST /start · POST /respond · GET /health · POST /shutdown · Ctrl+C para sair");
+
+            try { onReady?.Invoke(); }
+            catch (Exception e) { Log.Warn($"[web] onReady: {e.Message}"); }
 
             while (!_shutdown)
             {
@@ -71,7 +86,9 @@ namespace DuelServer
 
             // Encerramento a pedido do launcher. Responde primeiro, so' entao sai
             // do laco — assim quem pediu recebe o 200 em vez de uma conexao morta.
-            if (path == "/shutdown")
+            // `/__shutdown` e' o nome que o serve.mjs usa: no modo --app este
+            // processo faz o papel dos dois, entao responde pelos dois nomes.
+            if (path == "/shutdown" || path == "/__shutdown")
             {
                 WriteText(res, "bye");
                 _shutdown = true;
@@ -90,6 +107,9 @@ namespace DuelServer
                 WriteJson(res, RespondDuel(body));
                 return;
             }
+            // Nao e' rota da API: no modo --app o servidor de arquivos assume.
+            if (_webRoot != null && StaticServer.Handle(ctx, _webRoot)) return;
+
             res.StatusCode = 404; WriteText(res, "not found");
         }
 

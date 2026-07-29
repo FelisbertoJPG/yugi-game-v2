@@ -949,10 +949,14 @@ if (npc) {
   enterNpcModeUI();
   markDirty(false);
 } else {
-  // carrega o deck ativo, se houver
+  // carrega o deck pedido em `?deck=<i>` (o Inventário abre por aqui) ou o ativo
   const active = getActiveIndex();
   const saved = listDecks();
-  if (saved.length) loadDeck(active !== null && saved[active] ? active : 0);
+  const pedido = params.get('deck');
+  const escolhido = pedido !== null && pedido !== '' && saved[Number(pedido)]
+    ? Number(pedido)
+    : (active !== null && saved[active] ? active : 0);
+  if (saved.length) loadDeck(escolhido);
   else { $('deck-name').value = deck.name; refreshDeckSelect(); }
 }
 

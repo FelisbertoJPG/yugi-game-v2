@@ -84,8 +84,13 @@
       <span>Deck Builder</span>
       <span class="why">montar deck com as cartas da sua Coleção</span>
     </button>
-    <button id="btn-adv">
+    <button id="btn-inv">
       <span class="k">3</span>
+      <span>Inventário</span>
+      <span class="why">suas cartas e decks · vender cópias por DP</span>
+    </button>
+    <button id="btn-adv">
+      <span class="k">4</span>
       <span>Adversário</span>
       <span class="why">duelar contra um NPC · vitória = +100 DP e a carta dele</span>
     </button>
@@ -142,13 +147,15 @@ function render() {
 
 $('btn-shop').onclick = () => (location.href = '/web/loja.html');
 $('btn-deck').onclick = () => (location.href = '/web/deck.html?owned=1');
+$('btn-inv').onclick = () => (location.href = '/web/inventario.html');
 $('btn-adv').onclick = () => (location.href = '/web/adversario.html');
 $('btn-test').onclick = () => (location.href = '/web/teste.html');
 
 document.addEventListener('keydown', (e) => {
   if (e.key === '1') $('btn-shop').click();
   if (e.key === '2') $('btn-deck').click();
-  if (e.key === '3') $('btn-adv').click();
+  if (e.key === '3') $('btn-inv').click();
+  if (e.key === '4') $('btn-adv').click();
 });
 
 try {

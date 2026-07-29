@@ -17,6 +17,17 @@ export const START_DP = 2000;
 export const BOOSTER_PRICE = 100;
 export const WIN_REWARD = 100;
 
+/**
+ * Quanto vale VENDER uma cópia, por raridade (Inventário → Cards).
+ *
+ * Uma carta que não está em nenhum booster não tem raridade. Ela vale como
+ * Normal — mesmo critério que o Deck Builder já usa ao tratá-la como carta
+ * farta, então o jogador não descobre duas regras diferentes para o mesmo caso.
+ */
+export const SELL_PRICE = { N: 5, R: 10, SR: 20, UR: 100 };
+
+export const sellPriceOf = (rarity) => SELL_PRICE[rarity] ?? SELL_PRICE.N;
+
 function read(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -140,6 +151,44 @@ export function addCards(ids) {
 
 export function totalCards() {
   return Object.values(getCollection()).reduce((s, n) => s + n, 0);
+}
+
+/** Quantas cartas DIFERENTES o jogador possui. */
+export function distinctCards() {
+  return Object.values(getCollection()).filter((n) => n > 0).length;
+}
+
+/**
+ * Vende cópias da coleção por DP.
+ *
+ * `lotes`: `[{ id, qty, rarity }]`. Cada lote é limitado ao que o jogador
+ * realmente tem — a tela pode estar desatualizada (outra aba, outro booster
+ * aberto), e é aqui, onde a coleção é lida, que dá para garantir que ninguém
+ * venda uma carta que não possui.
+ *
+ * Coleção e DP mudam juntos ou não mudam: se nada for vendável, nem grava.
+ *
+ * @returns {{ok: boolean, total: number, vendidas: number, dp: number}}
+ */
+export function sellCards(lotes) {
+  const col = getCollection();
+  let total = 0;
+  let vendidas = 0;
+
+  for (const { id, qty, rarity } of lotes ?? []) {
+    const key = Number(id);
+    const tem = col[key] ?? 0;
+    const n = Math.min(Math.max(0, Math.round(Number(qty) || 0)), tem);
+    if (!n) continue;
+    col[key] = tem - n;
+    if (col[key] <= 0) delete col[key];
+    total += n * sellPriceOf(rarity);
+    vendidas += n;
+  }
+
+  if (!vendidas) return { ok: false, total: 0, vendidas: 0, dp: getDP() };
+  write(KEY_COL, col);
+  return { ok: true, total, vendidas, dp: addDP(total) };
 }
 
 // ------------------------------------------------------------------ pity (SR garantida)

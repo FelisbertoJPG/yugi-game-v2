@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventário — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .dp {
+    font-size: 14px; color: var(--gold); font-weight: bold;
+    border: 1px solid var(--gold); padding: 3px 10px; letter-spacing: 1px;
+  }
+
+  /* ---------- abas: Cards | Decks ---------- */
+  .tabs { display: flex; gap: 0; background: var(--bg2); border-bottom: 2px solid var(--line); }
+  .tabs button {
+    border: none; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    background: none; padding: 10px 22px; font-size: 12px; letter-spacing: 2px;
+    color: var(--dim);
+  }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button[aria-selected="true"] { color: var(--gold); border-bottom-color: var(--gold); }
+  .tabs .spacer { flex: 1; }
+  .tabs .n { font-size: 10px; color: var(--dim); margin-left: 6px; }
+
+  .pane { flex: 1; overflow-y: auto; padding: 14px 16px 24px; display: none; }
+  .pane.on { display: block; }
+
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  /* `display:flex` de classe vence o `[hidden]` da folha do navegador; sem esta
+     regra, esconder a barra de filtros na aba Decks simplesmente não funciona. */
+  .filters[hidden] { display: none; }
+  .filters input, .filters select { padding: 4px 6px; font-size: 11px; }
+  .filters input[type="text"] { flex: 1; min-width: 140px; }
+  .filters .spacer { flex: 1; }
+
+  .hint { font-size: 11px; color: var(--dim); padding: 8px 16px; background: var(--bg2); }
+  .empty { color: var(--dim); font-style: italic; padding: 30px 4px; }
+
+  /* ---------- Cards ---------- */
+  .cards-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 10px;
+  }
+  .ic { position: relative; user-select: none; -webkit-user-select: none; }
+  .ic .art {
+    position: relative; border: 2px solid var(--line); background: var(--panel2);
+    aspect-ratio: 59 / 86; cursor: pointer; overflow: hidden;
+  }
+  .ic .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ic .art:hover { border-color: var(--gold); }
+  .ic.sel .art { border-color: var(--gold); box-shadow: 0 0 0 2px #e8c46a55; }
+  .ic.zerando .art { border-color: var(--red); }
+
+  /* selo de raridade + quanto o jogador possui */
+  .ic .rar {
+    position: absolute; top: 3px; right: 3px; z-index: 2;
+    font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 2px;
+    font-weight: bold; letter-spacing: .5px; background: #04121fdd;
+  }
+  .ic .rar.UR { color: #e8c46a; } .ic .rar.SR { color: #cbb7ff; }
+  .ic .rar.R  { color: #7fd0ff; } .ic .rar.N  { color: #cfd6de; }
+  .ic .rar.desconhecida { color: var(--dim); font-weight: normal; }
+  .ic .own {
+    position: absolute; bottom: 3px; left: 3px; z-index: 2;
+    font-size: 10px; padding: 1px 5px; border-radius: 2px;
+    background: #04121fdd; color: var(--ink);
+  }
+
+  /* os dois sinais: [nro selecionado] [-] */
+  .ic .sel-row { display: flex; align-items: stretch; gap: 3px; margin-top: 3px; }
+  .ic .sel-row .n {
+    flex: 1; text-align: center; font-size: 12px; padding: 3px 0;
+    border: 1px solid var(--line); background: var(--bg2); color: var(--dim);
+  }
+  .ic.sel .sel-row .n { color: var(--gold); border-color: var(--gold); font-weight: bold; }
+  .ic .sel-row .minus {
+    width: 26px; padding: 0; font-size: 14px; line-height: 1;
+    background: var(--bg2); border: 1px solid var(--line);
+  }
+  .ic .nm {
+    font-size: 9px; color: var(--dim); margin-top: 3px; line-height: 1.25;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .ic .vale { font-size: 9px; color: var(--dim); }
+
+  /* Barra de venda presa no rodapé do painel. `bottom: 0` gruda no fim da área
+     que rola; a margem negativa embaixo só come o padding do painel, para não
+     sobrar um vão quando a rolagem chega ao fim. */
+  .sellbar {
+    position: sticky; bottom: 0; margin: 14px -16px -24px; z-index: 5;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--panel); border-top: 2px solid var(--line);
+  }
+  .sellbar .resumo { font-size: 12px; }
+  .sellbar .resumo b { color: var(--gold); }
+  .sellbar .spacer { flex: 1; }
+
+  /* ---------- Decks (quadros estilo booster) ---------- */
+  .decks-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+  }
+  .dk {
+    background: var(--panel); border: 2px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .dk.ativo { border-color: var(--gold); }
+  .dk .art {
+    height: 210px; background: var(--panel2) center/cover no-repeat;
+    border-bottom: 1px solid var(--line); position: relative;
+  }
+  .dk .art .badge {
+    position: absolute; top: 6px; left: 6px;
+    font-size: 9px; letter-spacing: 1px; padding: 2px 6px;
+    background: var(--gold); color: #1a1408; font-weight: bold;
+  }
+  .dk .art .semarte {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--dim); font-size: 10px; font-style: italic; text-align: center; padding: 10px;
+  }
+  .dk .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .dk .name { color: var(--gold); font-size: 15px; }
+  .dk .meta { font-size: 10px; color: var(--dim); }
+  .dk .acoes { display: flex; gap: 5px; margin-top: 4px; }
+  .dk .acoes button { flex: 1; font-size: 11px; padding: 5px 4px; }
+  .pill { padding: 1px 7px; font-size: 10px; border: 1px solid; align-self: flex-start; }
+  .pill.ok  { color: var(--green); border-color: var(--green); }
+  .pill.err { color: var(--red);   border-color: var(--red); }
+
+  /* ---------- modais ---------- */
+  .back {
+    position: fixed; inset: 0; z-index: 60; display: none;
+    align-items: center; justify-content: center; background: #000c; padding: 20px;
+  }
+  .back.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 2px solid var(--gold);
+    padding: 20px; max-width: min(680px, 96vw); max-height: 86vh; overflow-y: auto;
+    box-shadow: 0 8px 40px #000c;
+  }
+  .modal h2 { margin: 0 0 4px; color: var(--gold); font-size: 17px; }
+  .modal .sub { font-size: 11px; color: var(--dim); margin-bottom: 14px; }
+  .modal .actions { margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end; }
+  .modal .lista { font-size: 12px; max-height: 40vh; overflow-y: auto; }
+  .modal .lista .linha {
+    display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--line);
+  }
+  .modal .lista .linha .q { color: var(--dim); min-width: 30px; }
+  .modal .lista .linha .v { margin-left: auto; color: var(--gold); }
+  .modal .perigo { color: var(--red); font-size: 11px; margin-top: 10px; }
+
+  /* escolha da moldura: as cartas do próprio deck */
+  .cover-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px;
+  }
+  .cover-grid img {
+    width: 100%; display: block; border: 2px solid var(--line); cursor: pointer;
+  }
+  .cover-grid img:hover { border-color: var(--gold); }
+  .cover-grid img.atual { border-color: var(--gold); box-shadow: 0 0 0 2px #e8c46a55; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>▚ INVENTÁRIO</h1>
+  <span class="spacer"></span>
+  <span class="dp" id="dp">— DP</span>
+  <button id="btn-home">← home</button>
+</div>
+
+<div class="tabs" role="tablist">
+  <button id="tab-cards" role="tab" aria-selected="true">CARDS<span class="n" id="n-cards"></span></button>
+  <button id="tab-decks" role="tab" aria-selected="false">DECKS<span class="n" id="n-decks"></span></button>
+</div>
+
+<!-- ------------------------------------------------------------- CARDS -->
+<div class="filters" id="filtros-cards">
+  <input type="text" id="f-nome" placeholder="buscar por nome…" autocomplete="off">
+  <select id="f-rar">
+    <option value="">raridade: todas</option>
+    <option value="UR">UR — 100 DP</option>
+    <option value="SR">SR — 20 DP</option>
+    <option value="R">R — 10 DP</option>
+    <option value="N">N — 5 DP</option>
+  </select>
+  <select id="f-ord">
+    <option value="rar">ordem: raridade</option>
+    <option value="qtd">mais cópias</option>
+    <option value="nome">nome</option>
+  </select>
+  <span class="spacer"></span>
+  <button id="btn-tudo" title="selecionar as duplicatas: deixa 1 cópia de cada carta">selecionar duplicatas</button>
+  <button id="btn-limpar">limpar seleção</button>
+</div>
+
+<div class="pane on" id="pane-cards">
+  <div class="cards-grid" id="grid-cards"></div>
+  <div class="empty" id="cards-vazio" hidden>
+    Sua Coleção está vazia. Abra pacotes na <b>Loja</b> para conseguir cartas.
+  </div>
+
+  <div class="sellbar">
+    <span class="resumo" id="resumo">nenhuma carta selecionada</span>
+    <span class="spacer"></span>
+    <button id="btn-vender" class="btn-primary" disabled>vender selecionadas</button>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------- DECKS -->
+<div class="pane" id="pane-decks">
+  <div class="hint" style="margin: -14px -16px 14px">
+    Seus decks montados. A <b>moldura</b> é a carta que ilustra o deck — clique em
+    <b>moldura</b> para escolher outra entre as cartas do próprio deck.
+  </div>
+  <div class="decks-grid" id="grid-decks"></div>
+  <div class="empty" id="decks-vazio" hidden>
+    Nenhum deck ainda. Monte um no <b>Deck Builder</b>.
+  </div>
+</div>
+
+<!-- confirmação da venda -->
+<div class="back" id="venda-back">
+  <div class="modal">
+    <h2>Vender cartas</h2>
+    <div class="sub" id="venda-sub"></div>
+    <div class="lista" id="venda-lista"></div>
+    <div class="perigo" id="venda-aviso" hidden></div>
+    <div class="actions">
+      <button id="venda-cancelar">cancelar</button>
+      <button id="venda-ok" class="btn-primary">vender</button>
+    </div>
+  </div>
+</div>
+
+<!-- escolha da moldura do deck -->
+<div class="back" id="cover-back">
+  <div class="modal">
+    <h2>Moldura do deck</h2>
+    <div class="sub" id="cover-sub"></div>
+    <div class="cover-grid" id="cover-grid"></div>
+    <div class="actions">
+      <button id="cover-limpar">usar a primeira do Main</button>
+      <button id="cover-fechar">fechar</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/web/js/inventario.js"></script>
+</body>
+</html>

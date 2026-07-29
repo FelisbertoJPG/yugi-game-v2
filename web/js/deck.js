@@ -34,11 +34,18 @@ export function isExtraDeck(card) {
 }
 
 export class Deck {
-  /** @param {{name?: string, main?: number[], extra?: number[]}} init */
+  /** @param {{name?: string, main?: number[], extra?: number[], coverId?: number}} init */
   constructor(init = {}) {
     this.name = init.name ?? 'Novo Deck';
     this.main = [...(init.main ?? [])];
     this.extra = [...(init.extra ?? [])];
+    /** Carta que ilustra o deck (a "moldura"). Só visual; null = usa a 1ª do Main. */
+    this.coverId = Number(init.coverId) || null;
+  }
+
+  /** A carta que representa o deck: a moldura escolhida, ou a primeira do Main. */
+  get cover() {
+    return this.coverId ?? this.main[0] ?? this.extra[0] ?? null;
   }
 
   get size() { return this.main.length + this.extra.length; }
@@ -120,11 +127,11 @@ export class Deck {
   }
 
   clone() {
-    return new Deck({ name: this.name, main: this.main, extra: this.extra });
+    return new Deck({ name: this.name, main: this.main, extra: this.extra, coverId: this.coverId });
   }
 
   toJSON() {
-    return { name: this.name, main: this.main, extra: this.extra };
+    return { name: this.name, main: this.main, extra: this.extra, coverId: this.coverId };
   }
 
   /**
@@ -141,7 +148,11 @@ export class Deck {
 
     // `main` e `extra` são marcadores estruturais do formato — não podem virar
     // metadado, senão o arquivo fica ambíguo.
-    const all = { name: this.name, ...meta };
+    //
+    // A moldura entra como `#cover` (mesma chave que os decks de NPC já usam),
+    // então ela sobrevive ao export/import do .ydk. Um `meta.cover` explícito
+    // continua tendo a palavra final.
+    const all = { name: this.name, ...(this.coverId ? { cover: this.coverId } : {}), ...meta };
     for (const [k, v] of Object.entries(all)) {
       if (RESERVED_YDK_KEYS.has(k.toLowerCase())) continue;
       if (v === null || v === undefined || v === '') continue;
@@ -187,6 +198,7 @@ export class Deck {
     }
 
     if (deck.meta.name) deck.name = deck.meta.name;
+    if (deck.meta.cover) deck.coverId = Number(deck.meta.cover) || null;
     return deck;
   }
 }

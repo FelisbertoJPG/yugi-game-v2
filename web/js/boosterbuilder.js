@@ -8,9 +8,9 @@
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
-  RARITIES, RARITY_LABEL, listBoosters, getBoosterAt, saveBooster, deleteBooster,
+  RARITIES, RARITY_LABEL, listBoosters, listBoostersOrdered, getBoosterAt, saveBooster, deleteBooster,
   boosterSize, emptyBooster, downloadBooster, importBoosterFile, annotateDb,
-  allBoosterTags, hydrateBoosters, salvarNoProjeto,
+  allBoosterTags, hydrateBoosters, salvarNoProjeto, reprintsOf,
 } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
 import { inLista1 } from '/web/js/lista1.js';
@@ -132,13 +132,34 @@ function removeFromBooster(id) {
   return removed;
 }
 
+/**
+ * Em qual raridade esta carta JÁ está travada por outro booster (ou null).
+ * Recalculado a cada consulta: o jogador pode salvar outro booster numa segunda
+ * aba, e uma trava desatualizada é pior do que trava nenhuma.
+ */
+function travaDe(id) {
+  return reprintsOf(id, boosterIndex);
+}
+
 function addCard(id, rarity = activeRarity) {
   const nome = brief(id)?.name ?? id;
   const before = currentRarityOf(id);
+
+  // Reprint é permitido, mas na MESMA raridade: a raridade é da carta, não do
+  // pacote. Em vez de recusar o clique, a carta entra na raridade correta e o
+  // aviso diz de onde ela veio — o jogador queria a carta, não o balde.
+  const trava = travaDe(id);
+  if (trava && trava.rarity !== rarity) {
+    if (setRarity(id, trava.rarity)) { markDirty(); refresh(); }
+    return void toast(
+      `${nome} é ${trava.rarity} em "${trava.boosters[0]}" — reprint entrou em ${trava.rarity}`);
+  }
+
   if (setRarity(id, rarity)) {
     markDirty();
     refresh();
-    toast(before ? `${nome}: ${before} → ${rarity}` : `+ ${nome} → ${rarity}`);
+    toast(before ? `${nome}: ${before} → ${rarity}`
+                 : (trava ? `+ ${nome} → ${rarity} (reprint)` : `+ ${nome} → ${rarity}`));
   }
 }
 
@@ -222,16 +243,24 @@ function renderPool() {
   const frag = document.createDocumentFragment();
   for (const c of poolResults.slice(0, MAX_RENDER)) {
     const rar = currentRarityOf(c.id);
+    // Só interessa a trava quando a carta ainda NÃO está neste booster: se já
+    // está, o selo da raridade atual já conta a história (e ela obedece à trava).
+    const trava = rar ? null : travaDe(c.id);
+
     const el = document.createElement('div');
-    el.className = 'thumb' + (c.custom ? ' custom' : '') + (rar ? ' in-booster' : '');
+    el.className = 'thumb' + (c.custom ? ' custom' : '')
+      + (rar ? ' in-booster' : '') + (trava ? ' reprint' : '');
     el.draggable = true;
     el.dataset.id = c.id;
     el.title = `${c.name}\n${c.tl}`
       + (rar ? `\n(no booster: ${rar})` : '')
-      + `\nclique = adicionar em ${activeRarity} · segurar = detalhes`;
+      + (trava ? `\n↺ já é ${trava.rarity} em: ${trava.boosters.join(', ')}`
+               + `\nreprint mantém ${trava.rarity}` : '')
+      + `\nclique = adicionar em ${trava ? trava.rarity : activeRarity} · segurar = detalhes`;
     el.innerHTML =
       (c.custom ? '<span class="badge">CST</span>' : '') +
       (rar ? `<span class="rarity ${rar}">${rar}</span>` : '') +
+      (trava ? `<span class="rarity ${trava.rarity} reprint">↺${trava.rarity}</span>` : '') +
       `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">`;
 
     const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(c.id));
@@ -261,8 +290,10 @@ function refresh() {
   renderPool();
   renderCover();
   updateShopButton();
-  // reflete o preço do booster atual (sem mexer enquanto o usuário digita nele)
+  // reflete preço e ordem do booster atual (sem mexer no campo em foco, senão o
+  // valor pula embaixo do cursor enquanto se digita)
   if (document.activeElement !== $('booster-price')) $('booster-price').value = booster.price;
+  if (document.activeElement !== $('booster-order')) $('booster-order').value = booster.order;
 }
 
 // ---------------------------------------------------------------- arrastar
@@ -383,10 +414,14 @@ function refreshTagSelect() {
 // ---------------------------------------------------------------- boosters salvos
 
 function refreshBoosterSelect() {
-  const list = listBoosters();
+  // Listado na ordem da vitrine, mas o valor continua sendo o índice real —
+  // é ele que identifica o booster ao salvar.
+  const list = listBoostersOrdered();
   const sel = $('booster-select');
   sel.replaceChildren();
-  list.forEach((b, i) => sel.append(new Option(`${b.name} (${boosterSize(b)})`, String(i))));
+  for (const b of list) {
+    sel.append(new Option(`${b.order}. ${b.name} (${boosterSize(b)})`, String(b.index)));
+  }
   if (!list.length) sel.append(new Option('(nenhum salvo)', ''));
   sel.value = boosterIndex === null ? '' : String(boosterIndex);
   $('btn-delete').disabled = boosterIndex === null;
@@ -398,6 +433,7 @@ function loadBooster(i) {
   booster = b;
   boosterIndex = i;
   $('booster-name').value = booster.name;
+  $('booster-order').value = booster.order;
   markDirty(false);
   refreshBoosterSelect();
   refresh();
@@ -496,6 +532,13 @@ $('booster-price').oninput = () => {
   booster.price = Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
   markDirty();
 };
+// Ordem de prioridade na vitrine: menor aparece primeiro. Negativo é válido —
+// é como se põe um lançamento na frente sem renumerar todos os outros.
+$('booster-order').oninput = () => {
+  const v = Number($('booster-order').value);
+  booster.order = Number.isFinite(v) ? Math.round(v) : 0;
+  markDirty();
+};
 
 // capa (mesma ideia do deck de NPC): clica no slot, depois numa carta
 $('cover').onclick = () => (pickingCover ? cancelPickCover() : startPickCover());
@@ -581,8 +624,10 @@ refreshTagSelect();
 $('status').textContent = 'Monte o booster: escolha uma raridade (clique no cabeçalho) e clique nas cartas.';
 renderBoosterZones();
 
-const list = listBoosters();
-if (list.length) loadBooster(0);
+// Abre o primeiro da VITRINE, não o primeiro do arquivo: é a mesma ordem que o
+// select mostra, então o que abre é o que está no topo da lista.
+const list = listBoostersOrdered();
+if (list.length) loadBooster(list[0].index);
 else { $('booster-name').value = booster.name; refreshBoosterSelect(); refresh(); }
 
 applyFilters();

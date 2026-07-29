@@ -101,6 +101,14 @@
   .thumb .rarity.R  { color: #7fd0ff; }
   .thumb .rarity.N  { color: #cfd6de; }
 
+  /* "↺UR" = a carta já existe em OUTRO booster nessa raridade. Um reprint é
+     permitido, mas travado nela — daí o selo tracejado, diferente do selo
+     cheio, que marca a raridade dentro deste booster. */
+  .thumb .rarity.reprint {
+    border: 1px dashed currentColor; padding: 1px 3px; opacity: .85;
+  }
+  .thumb.reprint { outline: 1px dashed var(--line2); outline-offset: -1px; }
+
   /* miniatura de carta customizada */
   .thumb.custom { outline: 1px solid var(--blue); }
   .thumb .badge {
@@ -130,6 +138,12 @@
     <input type="number" id="booster-price" min="0" step="50" value="100"
            style="width:66px; background:var(--bg2); color:var(--ink); border:1px solid var(--line); font-size:12px; padding:3px 5px">
     DP
+  </label>
+  <label style="display:flex; gap:4px; align-items:center; font-size:11px; color:var(--dim)"
+         title="prioridade na vitrine da Loja — menor aparece primeiro (aceita negativo)">
+    ordem
+    <input type="number" id="booster-order" step="1" value="0"
+           style="width:52px; background:var(--bg2); color:var(--ink); border:1px solid var(--line); font-size:12px; padding:3px 5px">
   </label>
   <select id="booster-select" title="trocar de booster"></select>
   <span class="spacer"></span>
@@ -213,7 +227,7 @@
     <div class="sec-head">
       <span id="pool-count">—</span>
       <span class="spacer"></span>
-      <span>clique = adicionar à raridade selecionada · segurar = detalhes · arraste do booster p/ cá remove</span>
+      <span>clique = adicionar à raridade selecionada · segurar = detalhes · arraste do booster p/ cá remove · ↺ = reprint (raridade travada)</span>
     </div>
     <div class="pool-scroll dropzone" id="pool-zone">
       <div class="pool-grid" id="pool-grid"></div>

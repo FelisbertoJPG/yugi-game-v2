@@ -91,18 +91,20 @@ export const DEFAULT_PRICE = 100;
 /** A cada N pacotes deste booster, 1 SR garantida (substitui uma carta N). */
 export const PITY_EVERY = 10;
 
-/** Garante o formato { name, coverId, inShop, price, cards:{...}, updatedAt }. */
+/** Garante o formato { name, coverId, inShop, price, order, cards:{...}, updatedAt }. */
 export function normalize(b = {}) {
   const cards = {};
   for (const r of RARITIES) {
     cards[r] = Array.isArray(b.cards?.[r]) ? b.cards[r].map(Number).filter(Boolean) : [];
   }
   const price = Number(b.price);
+  const order = Number(b.order);
   return {
     name: (b.name ?? 'Novo Booster').toString(),
     coverId: b.coverId ? Number(b.coverId) : null,   // carta que ilustra/define o booster
     inShop: !!b.inShop,                               // exposto na Loja?
     price: Number.isFinite(price) && price >= 0 ? Math.round(price) : DEFAULT_PRICE,
+    order: Number.isFinite(order) ? Math.round(order) : 0,   // prioridade na vitrine
     cards,
     updatedAt: b.updatedAt ?? null,
   };
@@ -115,6 +117,18 @@ export function emptyBooster(name = 'Novo Booster') {
 
 export function listBoosters() {
   return read();
+}
+
+/**
+ * Ordem em que os boosters devem APARECER: `order` crescente (menor = primeiro),
+ * empate resolvido pelo nome. Cada item leva o `index` original, porque é ele
+ * que identifica o booster para salvar/excluir — a posição na vitrine não pode
+ * virar identidade, senão mudar a ordem passaria a editar o booster errado.
+ */
+export function listBoostersOrdered() {
+  return read()
+    .map((b, index) => ({ ...b, index }))
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'pt-BR'));
 }
 
 export function getBoosterAt(i) {
@@ -150,11 +164,9 @@ export function boosterSize(b) {
 
 // ------------------------------------------------------- loja / pacotes
 
-/** Boosters expostos na Loja (marcados com inShop e com pelo menos 1 carta). */
+/** Boosters expostos na Loja (inShop, com carta), já na ordem de prioridade. */
 export function listShopBoosters() {
-  return read()
-    .map((b, index) => ({ ...b, index }))
-    .filter((b) => b.inShop && boosterSize(b) > 0);
+  return listBoostersOrdered().filter((b) => b.inShop && boosterSize(b) > 0);
 }
 
 /** Liga/desliga a exposição de um booster na Loja (por índice). Persiste. */
@@ -234,6 +246,40 @@ export function rarityIndex() {
 /** A maior raridade da carta, ou null se ela não está em nenhum booster. */
 export function rarityOf(id) {
   return rarityIndex().get(Number(id))?.rarity ?? null;
+}
+
+/**
+ * Onde a carta já aparece em OUTROS boosters — a trava do reprint.
+ *
+ * Uma carta pode ser reimpressa em quantos pacotes quiser, mas sempre na MESMA
+ * raridade: sem isso, uma UT de um booster entra como N no seguinte e o valor
+ * dela (e o preço de venda no Inventário, que lê `rarityIndex`) muda conforme o
+ * pacote de onde ela caiu. A raridade é da carta, não do pacote.
+ *
+ * `exceto` é o índice do booster sendo editado — ele não conta como "outro".
+ * Passe `null` para um booster ainda não salvo, que naturalmente não está na
+ * lista.
+ *
+ * @returns {{rarity: string, boosters: string[]}|null}
+ */
+export function reprintsOf(id, exceto = null) {
+  id = Number(id);
+  let rarity = null;
+  const boosters = [];
+
+  read().forEach((b, i) => {
+    if (i === exceto) return;
+    for (const r of RARITIES) {
+      if (!b.cards[r].includes(id)) continue;
+      boosters.push(b.name);
+      // Dados antigos podem ter a mesma carta em raridades diferentes; a MAIOR
+      // vence, para a trava nunca rebaixar uma carta.
+      if (!rarity || RARITIES.indexOf(r) < RARITIES.indexOf(rarity)) rarity = r;
+      break;
+    }
+  });
+
+  return rarity ? { rarity, boosters } : null;
 }
 
 /** As tags que uma carta ganha dos boosters: nomes dos boosters + raridades. */

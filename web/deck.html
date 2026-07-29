@@ -121,6 +121,25 @@
     background: var(--blue); color: #04121f; font-weight: bold; letter-spacing: .5px;
   }
 
+  /* selo de raridade (vindo dos boosters) no canto direito */
+  .thumb .rarity {
+    position: absolute; top: 2px; right: 2px; z-index: 2;
+    font-size: 8px; line-height: 1; padding: 2px 3px; border-radius: 2px;
+    font-weight: bold; letter-spacing: .5px; background: #04121fcc;
+  }
+  .thumb .rarity.UR { color: #e8c46a; }
+  .thumb .rarity.SR { color: #cbb7ff; }
+  .thumb .rarity.R  { color: #7fd0ff; }
+  .thumb .rarity.N  { color: #cfd6de; }
+
+  /* quantas cópias o jogador PODE usar (modo Coleção): canto inferior esquerdo */
+  .thumb .avail {
+    position: absolute; bottom: 2px; left: 2px; z-index: 2;
+    font-size: 9px; line-height: 1; padding: 1px 4px; border-radius: 2px;
+    background: #04121fcc; color: var(--green); font-weight: bold;
+  }
+  .thumb.full .avail { color: var(--dim); }
+
   /* ---------- modal de importar carta ---------- */
   .modal-back {
     position: fixed; inset: 0; z-index: 60; display: none;
@@ -200,6 +219,8 @@
     <div class="sec-head">
       <span>MAIN DECK</span>
       <span class="n" id="main-count">0</span>
+      <button id="btn-clear" class="btn-danger" style="font-size:10px; padding:2px 8px"
+              title="remover todas as cartas deste deck">limpar deck</button>
       <span class="spacer"></span>
       <span id="main-rule">40–60</span>
     </div>
@@ -265,6 +286,12 @@
       <select id="f-race"><option value="">raça: todas</option></select>
       <select id="f-arch"><option value="">arquétipo: todos</option></select>
       <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
+      <select id="f-sort" title="ordenar as cartas">
+        <option value="">ordem: padrão</option>
+        <option value="atk">maior ATK</option>
+        <option value="def">maior DEF</option>
+        <option value="lv">maior nível</option>
+      </select>
       <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
       <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
       <input type="number" id="f-atk" placeholder="ATK⩾" min="0" step="100">

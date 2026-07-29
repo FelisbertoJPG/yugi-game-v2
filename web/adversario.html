@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adversário — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; }
+  .wrap { flex: 1; overflow-y: auto; padding: 20px; }
+  .npcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; max-width: 900px; margin: 0 auto; }
+  .npc {
+    background: var(--panel); border: 2px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .npc .art { height: 240px; background: var(--panel2) center/cover no-repeat; border-bottom: 1px solid var(--line); }
+  .npc .body { padding: 12px; display: flex; flex-direction: column; gap: 5px; }
+  .npc .name { color: var(--gold); font-size: 17px; }
+  .npc .theme { font-size: 11px; color: var(--blue); }
+  .npc .reward { font-size: 10px; color: var(--dim); }
+  .npc .go { margin-top: 6px; }
+  .npc .go:disabled { opacity: .5; }
+  .hint { font-size: 11px; color: var(--dim); padding: 8px 14px; background: var(--bg2); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>▚ ADVERSÁRIO</h1>
+  <span class="spacer"></span>
+  <span class="dp" id="dp" style="color:var(--gold); border:1px solid var(--gold); padding:3px 10px; font-weight:bold">— DP</span>
+  <button id="btn-home">← home</button>
+</div>
+
+<div class="hint">
+  Escolha um oponente e dispare o duelo. Ao <b>vencer</b>: <b>+100 DP</b> e a
+  <b>carta-assinatura</b> do NPC entra na sua Coleção. Exige o <b>duel-server</b> no ar
+  (suba pelo <b>duel-academy.exe</b>). Você duela com o seu deck ativo.
+</div>
+
+<div class="wrap">
+  <div class="npcs" id="npcs"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/web/js/adversario.js"></script>
+</body>
+</html>

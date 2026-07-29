@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DECKS = join(ROOT, 'decks');
+const STORE = join(ROOT, 'store');
 const PORT = Number(process.env.PORT ?? 8080);
 
 const MIME = {
@@ -51,6 +52,13 @@ const server = createServer(async (req, res) => {
     if (rel.startsWith('/__decks/')) {
       if (!isLocal(req)) return void res.writeHead(403).end('403');
       return void await handleDecks(rel.slice('/__decks/'.length), req, res);
+    }
+
+    // Config versionada no projeto (store/*.json): boosters, carteira, etc. — para
+    // sobreviverem a commit/transferência em vez de morrerem no localStorage.
+    if (rel.startsWith('/__store/')) {
+      if (!isLocal(req)) return void res.writeHead(403).end('403');
+      return void await handleStore(rel.slice('/__store/'.length), req, res);
     }
 
     // Redireciona de verdade em vez de servir o arquivo em '/': se o documento
@@ -193,4 +201,37 @@ async function handleDecks(action, req, res) {
   }
 
   return json(res, { ok: false, error: 'ação desconhecida' }, 404);
+}
+
+// ---------------------------------------------------------------------------
+// store/ — config do jogo em JSON versionado (boosters, carteira do jogador…),
+// para viajar no git como os decks. GET lê, POST grava. Um arquivo por "name".
+// ---------------------------------------------------------------------------
+
+/** Só um nome simples de arquivo .json dentro de store/ (sem subpastas). */
+function safeStorePath(name) {
+  if (typeof name !== 'string' || !/^[a-zA-Z0-9_-]+\.json$/.test(name)) return null;
+  const full = join(STORE, name);
+  if (!full.startsWith(STORE + sep)) return null;
+  return full;
+}
+
+async function handleStore(name, req, res) {
+  const full = safeStorePath(name);
+  if (!full) return json(res, { ok: false, error: 'nome inválido (use <nome>.json)' }, 400);
+
+  if (req.method === 'POST') {
+    const data = await readBody(req);
+    await mkdir(STORE, { recursive: true });
+    await writeFile(full, JSON.stringify(data, null, 2), 'utf8');
+    console.log(`  store salvo: ${relative(ROOT, full)}`);
+    return json(res, { ok: true });
+  }
+  // GET: devolve o JSON cru (ou 404 se ainda não existe)
+  try {
+    const text = await readFile(full, 'utf8');
+    return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }).end(text);
+  } catch {
+    return json(res, { ok: false, error: 'não existe' }, 404);
+  }
 }

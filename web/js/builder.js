@@ -20,6 +20,8 @@ import {
 } from '/web/js/npcs.js';
 import { saveProjectDeck, playerDeckPath } from '/web/js/projectdecks.js';
 import { inLista1 } from '/web/js/lista1.js';
+import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
+import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
@@ -58,6 +60,28 @@ let dirty = false;
 let npcMode = null;
 let npcDeckIndex = null;
 let npcSignature = null;
+
+// Modo Coleção (?owned=1): o pool mostra só as cartas que o jogador POSSUI —
+// é o Deck Builder "real". Sem a flag (Área de Teste), o pool é o banco inteiro.
+let ownedMode = new URLSearchParams(location.search).get('owned') === '1';
+
+// Raridade das cartas (dos boosters). Estável durante a sessão do builder, então
+// calculo uma vez no boot.
+let rarIdx = new Map();
+
+/**
+ * Quantas cópias desta carta o jogador pode usar no deck.
+ *   • Área de Teste (sem Coleção): a regra normal, 3.
+ *   • Coleção, carta Normal (ou sem raridade): sempre 3 — possuir 1 vale por 3.
+ *   • Coleção, carta R/SR/UR: as cópias EXATAS que possui (no teto de 3).
+ * Assim UR/SR viram colecionáveis de verdade e Normais são fartas.
+ */
+function availableCopies(id) {
+  if (!ownedMode) return RULES.MAX_COPIES;
+  const rar = rarIdx.get(Number(id))?.rarity;
+  if (!rar || rar === 'N') return RULES.MAX_COPIES;
+  return Math.min(RULES.MAX_COPIES, ownedCount(id));
+}
 let npcCover = null;      // carta que ilustra o deck (só visual)
 let pickingCover = false; // aguardando o clique na carta que virará a moldura
 
@@ -147,16 +171,23 @@ function renderPool() {
   const frag = document.createDocumentFragment();
   for (const c of poolResults.slice(0, MAX_RENDER)) {
     const copies = deck.copies(c.id);
-    const full = copies >= RULES.MAX_COPIES;
+    const avail = availableCopies(c.id);       // quantas o jogador pode usar
+    const full = copies >= avail;
+    const rar = rarIdx.get(c.id)?.rarity;
     const el = document.createElement('div');
     el.className = 'thumb' + (full ? ' full' : '') + (c.custom ? ' custom' : '');
     el.draggable = !full;
     el.dataset.id = c.id;
     el.title = `${c.name}\n${c.tl}` +
+      (rar ? `\nraridade: ${rar}` : '') +
+      (ownedMode ? `\nvocê pode usar: ${avail}` : '') +
       (c.custom ? '\n(carta customizada — sem efeito em duelo)' : '') +
-      (full ? '\n(já tem 3 cópias)' : '\nclique ou arraste para adicionar') +
+      (full ? `\n(no limite: ${avail})` : '\nclique ou arraste para adicionar') +
       '\nsegurar: ver detalhes';
     el.innerHTML = (c.custom ? '<span class="badge">CST</span>' : '') +
+                   (rar ? `<span class="rarity ${rar}">${rar}</span>` : '') +
+                   // no modo Coleção, mostra QUANTAS o jogador tem disponíveis (×N)
+                   (ownedMode ? `<span class="avail">×${avail}</span>` : '') +
                    `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">` +
                    (copies ? `<span class="count">${copies}</span>` : '');
 
@@ -180,6 +211,13 @@ function renderPool() {
 }
 
 function addCard(c) {
+  // Na Coleção, o teto por carta vem da raridade × cópias possuídas.
+  const lim = availableCopies(c.id);
+  if (deck.copies(c.id) >= lim) {
+    return void toast(ownedMode && lim === 0
+      ? `você não possui "${c.name}"`
+      : `limite: ${lim} cópia${lim === 1 ? '' : 's'} de "${c.name}"`);
+  }
   const r = deck.add(c);
   if (!r.ok) return void toast(r.reason);
   markDirty();
@@ -451,17 +489,34 @@ function applyFilters() {
     atkMin: num('f-atk'),
   });
   if (sub) poolResults = poolResults.filter((c) => matchesSub(c, cardType, sub));
-  // O filtro por tag é pós-processado: só as customizadas têm tags.
+  // Filtro por tag: customizadas trazem tags próprias; boosters injetam
+  // nome+raridade nas entradas do índice (annotateDb).
   const tag = $('f-tag').value;
   if (tag) poolResults = poolResults.filter((c) => (c.tags ?? []).includes(tag));
   // Lista 1: restringe ao pool jogável desta fase.
   if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
+  // Coleção: no Deck Builder "real", só o que o jogador possui.
+  if (ownedMode) poolResults = poolResults.filter((c) => ownsCard(c.id));
+  poolResults = sortPool(poolResults, $('f-sort').value);
   renderPool();
+}
+
+/** Ordena por maior ATK/DEF/nível (decrescente); cartas sem o valor por último. */
+function sortPool(list, key) {
+  if (!key) return list;
+  const val = (c) => (key === 'atk' ? c.atk : key === 'def' ? c.def : c.lv);
+  return [...list].sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return vb - va;
+  });
 }
 
 /** Reconstrói o select de tags a partir das cartas customizadas em memória. */
 function refreshTagSelect() {
-  const tags = new Set();
+  const tags = new Set(allBoosterTags());   // nomes de boosters + raridades
   for (const c of listCustom()) for (const t of (c.tags ?? [])) tags.add(t);
   const sel = $('f-tag');
   const current = sel.value;
@@ -573,6 +628,17 @@ $('btn-home').onclick = () => {
   location.href = '/web/index.html';
 };
 
+// Limpar deck: tira todas as cartas (Main + Extra), mas mantém o deck aberto.
+$('btn-clear').onclick = () => {
+  if (deck.size === 0) return void toast('o deck já está vazio');
+  if (!confirm(`Remover todas as ${deck.size} cartas de "${deck.name}"?`)) return;
+  deck.main = [];
+  deck.extra = [];
+  markDirty();
+  refresh();
+  toast('deck limpo');
+};
+
 $('deck-select').onchange = (e) => {
   if (e.target.value === '') return;
   if (!confirmDiscard()) return void refreshDeckSelect();
@@ -582,7 +648,7 @@ $('deck-select').onchange = (e) => {
 $('deck-name').oninput = () => markDirty();
 
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
-const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag',
+const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-sort',
                     'f-lvmin', 'f-lvmax', 'f-atk'];
 for (const id of [...FILTER_IDS, 'f-lista1']) $(id).addEventListener('input', applyFilters);
 
@@ -840,7 +906,15 @@ configureCardDetail({
 
 // injeta as cartas customizadas salvas (localStorage) antes de tudo que usa
 // o índice — assim elas aparecem no pool e nos decks que já as referenciam.
+// Boosters + carteira do projeto (store/*.json) antes de ler raridade/coleção.
+await hydrateBoosters();
+await hydrateWallet();
+
 for (const c of listCustom()) injectCustom(c);
+// Marca as cartas com a raridade/booster salvos (tags + selo).
+annotateDb(db);
+rarIdx = rarityIndex();
+briefCache.clear();
 refreshTagSelect();
 
 // popula os selects a partir dos dados reais
@@ -880,6 +954,14 @@ if (npc) {
   const saved = listDecks();
   if (saved.length) loadDeck(active !== null && saved[active] ? active : 0);
   else { $('deck-name').value = deck.name; refreshDeckSelect(); }
+}
+
+// No Deck Builder "real" (Coleção), deixa claro o modo e some com o "＋ carta"
+// (criar carta é coisa da Área de Teste, não do fluxo do jogador).
+if (ownedMode && !npcMode) {
+  const h1 = document.querySelector('.topbar h1');
+  if (h1) h1.textContent = '▚ DECK BUILDER — COLEÇÃO';
+  const imp = $('f-import'); if (imp) imp.hidden = true;
 }
 
 applyFilters();

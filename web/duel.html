@@ -12,7 +12,9 @@
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--red); margin-right:5px; }
   .dot.on { background: var(--green); }
 
-  .arena { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; overflow: auto; }
+  /* zoom escala o cenário inteiro (cartas, zonas, mãos, midbar) de uma vez —
+     inclusive os widths que o JS seta inline — mantendo tudo alinhado. +25%. */
+  .arena { flex: 1; zoom: 1.25; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; overflow: auto; }
   .handrow { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; min-height: 62px; }
   .handrow.opp { opacity: .8; }
 
@@ -188,6 +190,25 @@
   .pos-info .sub { font-size: 11px; color: var(--dim); margin-bottom: 12px; }
   .pos-acts { display: flex; flex-direction: column; gap: 7px; }
   .pos-acts button { padding: 9px 14px; font-size: 13px; text-align: left; }
+
+  /* ---------- popup de fim de duelo (vitória/derrota) ---------- */
+  #end-overlay {
+    position: fixed; inset: 0; background: #000d; z-index: 90;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #end-overlay[hidden] { display: none; }
+  .end-box {
+    background: var(--panel); border: 2px solid var(--gold);
+    padding: 26px 34px; text-align: center; min-width: min(360px, 90vw);
+    box-shadow: 0 0 40px #000;
+  }
+  #end-emoji { font-size: 44px; line-height: 1; margin-bottom: 6px; }
+  .end-box h2 { margin: 0 0 6px; font-size: 22px; color: var(--gold); }
+  #end-sub { font-size: 12px; color: var(--dim); margin-bottom: 18px; }
+  .end-box.lose { border-color: var(--red); }
+  .end-box.lose h2 { color: var(--red); }
+  .end-acts { display: flex; gap: 10px; justify-content: center; }
+  .end-acts button { padding: 9px 16px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -230,6 +251,18 @@
   </div>
 </div>
 
+<div id="end-overlay" hidden>
+  <div class="end-box">
+    <div id="end-emoji">🏆</div>
+    <h2 id="end-title"></h2>
+    <div id="end-sub"></div>
+    <div class="end-acts">
+      <button id="end-home" class="btn-primary">voltar para a home</button>
+      <button id="end-again">novo duelo</button>
+    </div>
+  </div>
+</div>
+
 <div id="phase-toast"></div>
 
 <div class="arena">
@@ -254,8 +287,19 @@
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, listDecks, getActiveIndex } from '/web/js/storage.js';
+import { getNpc, loadNpcDecks, getNpcActiveDeck } from '/web/js/npcs.js';
+import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
+
+// Modo Adversário: duel.html?npc=<id>. Sem npc = Treino (Área de Teste, sem
+// recompensa). Com npc, o NPC usa o próprio deck e vencer dá +100 DP e a
+// carta-assinatura dele.
+const advId = new URLSearchParams(location.search).get('npc');
+let advNpc = advId ? getNpc(advId) : null;
+let advDeck = null;        // deck do NPC (main ids), carregado no boot
+let advSignature = null;
+let rewardGiven = false;   // trava para não premiar duas vezes no mesmo duelo
 
 const SRV = 'http://localhost:8770';
 const $ = (id) => document.getElementById(id);
@@ -324,15 +368,20 @@ async function start() {
   deckName = deck.name;
   hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
   lp = { 0: 8000, 1: 8000 };
-  // Sem deck próprio para o NPC, os dois usam o mesmo — mesma contagem inicial.
-  deckCount = { 0: ids.length, 1: ids.length };
   ended = false; turnNo = 0; turnPlays = []; selectedHand = null;
-  dragging = null; pendingZone = null; fecharPopupPosicao();
+  rewardGiven = false;
+  dragging = null; pendingZone = null; fecharPopupPosicao(); fecharFimDuelo();
   $('log').replaceChildren();
+  // No modo Adversário o NPC joga com o PRÓPRIO deck; no Treino, os dois usam o seu.
+  const npcIds = (advNpc && advDeck && advDeck.length) ? advDeck : ids;
+  deckCount = { 0: ids.length, 1: npcIds.length };
   try {
-    const j = await rpc('/start', { deck: ids });   // seed aleatória no servidor
+    const body = { deck: ids };
+    if (advNpc && advDeck && advDeck.length) body.npcDeck = npcIds;
+    const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
-    log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)`, true);
+    const vs = advNpc ? ` vs ${advNpc.name}` : '';
+    log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)${vs}`, true);
     apply(j);
   } catch (e) { conn(false); warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).'); }
 }
@@ -363,6 +412,25 @@ function somaMarcada(q) {
   return s;
 }
 
+/**
+ * A seleção de tributos do ritual já é válida?
+ *   • soma exata (q.sumOverflow=false): os níveis batem cravado o alvo.
+ *   • "ou mais"  (q.sumOverflow=true):  a soma passa do alvo SEM tributo
+ *     dispensável — tirar o de menor nível já derrubaria abaixo do alvo. É a
+ *     mesma regra do motor; sem isso ele recusa (RETRY) e o ritual não sai.
+ */
+function somaValida(q) {
+  let soma = 0, menor = Infinity, n = 0;
+  for (const c of q.choices || []) if (picked.has(c.index)) {
+    const v = c.param || 0; soma += v; if (v < menor) menor = v; n++;
+  }
+  if (n === 0) return false;
+  if (q.selMin && n < q.selMin) return false;
+  if (q.selMax > 0 && n > q.selMax) return false;
+  return q.sumOverflow ? (soma >= q.sumNeeded && soma - menor < q.sumNeeded)
+                       : (soma === q.sumNeeded);
+}
+
 function renderSelection() {
   const q = selectionQuestion();
   const box = $('sel-overlay');
@@ -379,12 +447,17 @@ function renderSelection() {
     : incremental ? 'Escolha uma carta' : 'Escolha as cartas';
 
   if (soma) {
-    // Feedback do que importa aqui: os níveis têm de somar EXATAMENTE o alvo.
+    // Feedback: no ritual "ou mais" o alvo é um mínimo, não um valor cravado.
     const atual = somaMarcada(q);
     const falta = q.sumNeeded - atual;
+    const pronto = somaValida(q);
+    const alvoTxt = q.sumOverflow ? `${q.sumNeeded} ou mais` : `${q.sumNeeded}`;
     const el = $('sel-info');
-    el.innerHTML = `níveis somados: <b style="color:${atual === q.sumNeeded ? 'var(--green)' : 'var(--gold)'}">${atual}</b>`
-      + ` / ${q.sumNeeded}` + (falta > 0 ? ` — faltam ${falta}` : falta < 0 ? ` — passou ${-falta}` : ' — pronto!');
+    el.innerHTML = `níveis somados: <b style="color:${pronto ? 'var(--green)' : 'var(--gold)'}">${atual}</b>`
+      + ` / ${alvoTxt}`
+      + (pronto ? ' — pronto!'
+         : falta > 0 ? ` — faltam ${falta}`
+         : ' — tem tributo sobrando');
   } else {
     $('sel-info').textContent = incremental
       ? `clique numa carta (faltam ${need})`
@@ -395,9 +468,13 @@ function renderSelection() {
   for (const c of q.choices || []) {
     const el = document.createElement('div');
     el.className = 'sel-card' + (picked.has(c.index) ? ' on' : '');
-    el.innerHTML = `<img src="https://images.ygoprodeck.com/images/cards_small/${c.code}.jpg" alt="">`
+    // Carta virada do oponente (o servidor omite o código): mostra o verso, não a arte.
+    const oculta = c.hidden || !c.code;
+    el.innerHTML = (oculta
+        ? `<div class="back" style="width:100%;height:100%"></div>`
+        : `<img src="${ART(c.code)}" alt="">`)
       + (soma ? `<span class="lvl">Nv ${c.param ?? '?'}</span>` : '');
-    el.title = `código ${c.code}` + (soma ? ` — nível ${c.param}` : '');
+    el.title = oculta ? 'carta virada' : `código ${c.code}` + (soma ? ` — nível ${c.param}` : '');
     el.onclick = () => {
       if (incremental) { act('pick', c.index, `pick ${c.code}`); picked.clear(); return; }
       picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
@@ -409,9 +486,10 @@ function renderSelection() {
 
   const ok = $('sel-ok');
   ok.hidden = incremental;
-  // No ritual o que libera não é a quantidade, é a SOMA bater exatamente.
+  // No ritual o que libera não é a quantidade, é a SOMA ser válida (exata ou
+  // "ou mais", conforme o modo que o motor pediu).
   ok.disabled = soma
-    ? somaMarcada(q) !== q.sumNeeded
+    ? !somaValida(q)
     : picked.size < need || (q.selMax > 0 && picked.size > q.selMax);
   ok.onclick = () => {
     const list = [...picked];
@@ -517,7 +595,7 @@ function handle(ev) {
     case 'retry':
       // O motor recusou. Sem avisar, a tela só "não reage" e parece bug de clique.
       warn('O motor recusou essa escolha — confira se ela atende ao que foi pedido '
-         + '(por exemplo, no ritual os níveis têm de somar exatamente).');
+         + '(por exemplo, no ritual os níveis precisam somar o nível pedido, ou mais, sem tributo sobrando).');
       log('⚠ escolha recusada pelo motor');
       break;
     case 'refused':
@@ -537,9 +615,11 @@ function handle(ev) {
       const f = field[ev.controller];
       const alvo = ev.loc === 4 ? f?.m?.[ev.seq]
                  : ev.loc === 8 ? (ev.seq === 5 ? f?.f : f?.s?.[ev.seq]) : null;
-      if (alvo) alvo.pos = ev.pos;
+      // Ao REVELAR (flip), o pos traz o código real: atualiza para a arte aparecer.
+      // Continua virada (code=0) => mantém o que tinha.
+      if (alvo) { alvo.pos = ev.pos; if (ev.code) alvo.code = ev.code; }
       const nomes = { 1: 'ataque', 2: 'ataque (virada)', 4: 'defesa', 8: 'defesa (virada)' };
-      log(`${nameOf(ev.code)} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
+      log(`${ev.code ? nameOf(ev.code) : 'carta virada'} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
       break;
     }
     case 'move': {
@@ -574,8 +654,15 @@ function handle(ev) {
       break;
     }
     case 'end': {
-      const win = lp[0] <= 0 ? 'oponente venceu' : lp[1] <= 0 ? 'você venceu!' : 'duelo encerrado';
-      log(`=== ${win} ===`, true);
+      // Vencedor definitivo do motor (0/1 = jogador, 2 = empate); se não veio,
+      // deduz pelos LP zerados.
+      const w = (typeof ev.winner === 'number' && ev.winner >= 0) ? ev.winner
+              : lp[0] <= 0 ? 1 : lp[1] <= 0 ? 0 : -1;
+      const empate = w === 2 || w < 0;
+      const venci = w === 0;
+      log(`=== ${empate ? 'duelo encerrado' : venci ? 'você venceu!' : 'oponente venceu'} ===`, true);
+      const premio = concederRecompensa(venci);
+      mostrarFimDuelo(venci, empate, premio);
       break;
     }
   }
@@ -597,7 +684,7 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
     else el.src = ART(cell.code);
     // só MONSTRO em defesa deita; magia/armadilha fica sempre vertical
     if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
-    el.title = nameOf(cell.code) + (facedown ? ' (virada)' : '\nsegurar: ver detalhes');
+    el.title = facedown ? 'carta virada' : nameOf(cell.code) + '\nsegurar: ver detalhes';
     z.append(el);
     // Carta virada não revela nada: ver o detalhe dela seria trapaça.
     if (!facedown) {
@@ -607,7 +694,10 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   }
 
   // --- ataque: meu monstro que pode atacar ---
-  if (cell && atk && atk.meu) {
+  // Guarda de posição: só monstro em ATAQUE face-up declara ataque. O motor já
+  // não lista monstro em defesa como atacante, mas travar aqui também alinha o
+  // visual (carta deitada = defesa) à ação e mata qualquer descompasso.
+  if (cell && atk && atk.meu && !(cell.pos & 0xc)) {
     z.classList.add('attacker');
     z.insertAdjacentHTML('beforeend', '<span class="sword" title="pode atacar">⚔️</span>');
     if (atacando && atacando.seq === atk.seq) z.classList.add('attacking');
@@ -660,7 +750,8 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
       const marcada = picked.has(c.index);
       z.classList.add('selectable');
       if (marcada) z.classList.add('picked');
-      z.title = `${nameOf(cell.code)}` + (q.kind === 'selectsum' ? ` — nível ${c.param}` : '')
+      const nome = (c.hidden || !cell.code) ? 'carta virada' : nameOf(cell.code);
+      z.title = nome + (q.kind === 'selectsum' ? ` — nível ${c.param}` : '')
               + (marcada ? ' — escolhida (clique para tirar)' : ' — clique para escolher');
       z.onclick = () => {
         // Escolha única (seletor incremental ou seleção de 1) envia na hora.
@@ -1228,13 +1319,58 @@ function savePlays() {
   log(`✔ jogada do turno ${turnNo} salva (${turnPlays.length} ações, ${snap.myHand.length} na mão). Total: ${all.length}.`, true);
 }
 
+/**
+ * Recompensa do modo Adversário: só se for adversário (tem `advNpc`), se venceu,
+ * e uma vez por duelo. Dá +100 DP e a carta-assinatura do NPC na Coleção.
+ */
+function concederRecompensa(venci) {
+  if (!advNpc || !venci || rewardGiven) return null;
+  rewardGiven = true;
+  addDP(WIN_REWARD);
+  if (advSignature) addCards([advSignature]);
+  return { dp: WIN_REWARD, cardId: advSignature };
+}
+
+/** Popup de fim de duelo: quem venceu + recompensa + botão para voltar à home. */
+function mostrarFimDuelo(venci, empate, premio) {
+  const box = document.querySelector('#end-overlay .end-box');
+  box.classList.toggle('lose', !venci && !empate);
+  $('end-emoji').textContent = empate ? '🤝' : venci ? '🏆' : '💀';
+  $('end-title').textContent = empate ? 'Duelo empatado' : venci ? 'Você venceu!' : 'Você perdeu';
+  let sub = `LP — você ${Math.max(0, lp[0])} · oponente ${Math.max(0, lp[1])}`;
+  if (premio) {
+    const carta = premio.cardId ? (nameOf(premio.cardId)) : null;
+    sub += `<br><b style="color:var(--gold)">+${premio.dp} DP</b>`
+         + (carta ? ` e <b style="color:var(--gold)">${carta}</b> na Coleção!` : '');
+  }
+  $('end-sub').innerHTML = sub;
+  $('end-overlay').hidden = false;
+}
+function fecharFimDuelo() { $('end-overlay').hidden = true; }
+
 $('btn-start').onclick = start;
 $('btn-end').onclick = () => act('endturn', 0, 'encerrar turno');
 $('btn-save').onclick = savePlays;
 $('btn-home').onclick = () => (location.href = '/web/index.html');
+$('end-home').onclick = () => (location.href = '/web/index.html');
+$('end-again').onclick = () => { fecharFimDuelo(); start(); };
 $('deck-sel').onchange = start;                 // trocar de deck começa novo duelo
 $('gv-close').onclick = () => $('gv-back').classList.remove('show');
 $('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $('gv-back').classList.remove('show'); });
+
+await hydrateWallet();   // carteira do projeto antes de premiar vitórias
+
+// Modo Adversário: carrega o deck e a assinatura do NPC antes do 1º duelo.
+if (advNpc) {
+  const h1 = document.querySelector('.topbar h1');
+  if (h1) h1.textContent = `▚ ADVERSÁRIO — vs ${advNpc.name}`;
+  try {
+    await loadNpcDecks();
+    const active = getNpcActiveDeck(advId);
+    advDeck = active?.deck?.main?.length ? active.deck.main : null;
+    advSignature = active?.signatureId ?? advNpc.signatureId;
+  } catch { advSignature = advNpc.signatureId; }
+}
 
 populateDecks();
 start();

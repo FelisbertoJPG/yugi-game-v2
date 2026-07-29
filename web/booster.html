@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booster Builder — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; overflow: hidden; }
+
+  .topbar input.deck-name {
+    width: 200px; background: var(--bg2); color: var(--gold);
+    border: 1px solid var(--line); font-size: 13px;
+  }
+
+  /* ---------- duas colunas: booster | pool ---------- */
+  .workspace {
+    flex: 1; display: grid; grid-template-columns: minmax(360px, 42%) 1fr;
+    gap: 0; min-height: 0;
+  }
+  .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .col.booster { border-right: 2px solid var(--line); background: var(--bg2); }
+
+  .sec-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    font-size: 11px; letter-spacing: 1px; color: var(--dim);
+  }
+  .sec-head .n { color: var(--ink); }
+  .sec-head .spacer { flex: 1; }
+
+  /* cada raridade tem uma cor de destaque */
+  .sec-head .rar { font-weight: bold; letter-spacing: 2px; }
+  .rar-UR { color: #e8c46a; }   /* dourado */
+  .rar-SR { color: #cbb7ff; }   /* prata/roxo */
+  .rar-R  { color: #7fd0ff; }   /* azul */
+  .rar-N  { color: var(--dim); }
+
+  .booster-scroll { flex: 1; overflow-y: auto; padding: 8px 12px 16px; }
+  .rar-block { margin-bottom: 10px; }
+  .deck-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+    gap: 4px;
+  }
+  .zone-empty {
+    color: var(--dim); font-size: 11px; padding: 10px 4px; font-style: italic;
+  }
+
+  /* ---------- pool ---------- */
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .filters input, .filters select { padding: 4px 6px; font-size: 11px; }
+  .filters input[type="text"] { flex: 1; min-width: 130px; }
+  .filters input[type="number"] { width: 62px; }
+  .filters select { max-width: 140px; }
+  .filters .chk {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--dim); white-space: nowrap;
+  }
+  .filters .chk input { width: auto; }
+
+  .pool-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 20px; }
+  .pool-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+    gap: 6px;
+  }
+
+  .hint { font-size: 10px; color: var(--dim); padding: 5px 12px; background: var(--bg2); }
+
+  .thumb { user-select: none; -webkit-user-select: none; position: relative; }
+
+  /* capa do booster (a carta que o ilustra/define na Loja) */
+  .cover-slot {
+    width: 30px; height: 44px; flex: none; display: block;
+    border: 1px solid var(--line2); background: var(--panel2) center/cover no-repeat;
+    cursor: pointer; position: relative;
+  }
+  .cover-slot:hover, .cover-slot:focus { border-color: var(--gold); outline: none; }
+  .cover-slot.empty::after {
+    content: "+"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim); font-size: 16px;
+  }
+  .cover-slot.picking { border-color: var(--gold); animation: pulse .9s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  body.picking-cover .thumb { cursor: crosshair; }
+  body.picking-cover .thumb:hover { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+  .in-shop-on { color: var(--green) !important; border-color: var(--green) !important; }
+
+  /* selo de raridade no canto da miniatura */
+  .thumb .rarity {
+    position: absolute; top: 2px; right: 2px; z-index: 2;
+    font-size: 8px; line-height: 1; padding: 2px 3px; border-radius: 2px;
+    font-weight: bold; letter-spacing: .5px; background: #04121fcc;
+  }
+  .thumb .rarity.UR { color: #e8c46a; }
+  .thumb .rarity.SR { color: #cbb7ff; }
+  .thumb .rarity.R  { color: #7fd0ff; }
+  .thumb .rarity.N  { color: #cfd6de; }
+
+  /* miniatura de carta customizada */
+  .thumb.custom { outline: 1px solid var(--blue); }
+  .thumb .badge {
+    position: absolute; top: 2px; left: 2px; z-index: 2;
+    font-size: 8px; line-height: 1; padding: 2px 3px; border-radius: 2px;
+    background: var(--blue); color: #04121f; font-weight: bold; letter-spacing: .5px;
+  }
+
+  /* ---------- arrastar e soltar ---------- */
+  .dropzone { min-height: 60px; transition: background .12s, outline-color .12s; }
+  .dropzone.over {
+    background: #e8c46a12;
+    outline: 2px dashed var(--gold); outline-offset: -3px;
+  }
+  .dropzone.reject.over { outline-color: var(--red); background: #e2707a12; }
+  .thumb.dragging { opacity: .35; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>▚ BOOSTER BUILDER</h1>
+  <span class="cover-slot" id="cover" tabindex="0" title="capa do booster — clique e depois escolha uma carta"></span>
+  <input class="deck-name" id="booster-name" maxlength="40" placeholder="nome do booster">
+  <label style="display:flex; gap:4px; align-items:center; font-size:11px; color:var(--dim)" title="preço do pacote na Loja (DP)">
+    preço
+    <input type="number" id="booster-price" min="0" step="50" value="100"
+           style="width:66px; background:var(--bg2); color:var(--ink); border:1px solid var(--line); font-size:12px; padding:3px 5px">
+    DP
+  </label>
+  <select id="booster-select" title="trocar de booster"></select>
+  <span class="spacer"></span>
+  <button id="btn-shop" title="expor este booster na Loja para compra">inserir na Loja</button>
+  <button id="btn-new">novo</button>
+  <button id="btn-import">importar .json</button>
+  <button id="btn-export">exportar .json</button>
+  <button id="btn-delete" class="btn-danger">excluir</button>
+  <button id="btn-save" class="btn-primary">salvar</button>
+  <button id="btn-home">← home</button>
+</div>
+
+<div class="hint" id="status">carregando banco de cartas…</div>
+
+<div class="workspace">
+  <!-- ESQUERDA: o booster, por raridade -->
+  <div class="col booster">
+    <div class="sec-head">
+      <span>BOOSTER</span>
+      <span class="n" id="booster-count">0</span>
+      <span class="spacer"></span>
+      <span>arraste ou clique numa raridade selecionada</span>
+    </div>
+    <div class="booster-scroll" id="booster-zones">
+      <!-- as 4 raridades são geradas pelo JS -->
+    </div>
+  </div>
+
+  <!-- DIREITA: o pool de cartas -->
+  <div class="col">
+    <div class="filters">
+      <input type="text" id="f-name" placeholder="buscar por nome…" autocomplete="off">
+      <select id="f-mon" title="filtrar monstros por tipo">
+        <option value="">monstro…</option>
+        <option value="*">▸ todos os monstros</option>
+        <option value="Normal">Normal</option>
+        <option value="Effect">Efeito</option>
+        <option value="Ritual">Ritual</option>
+        <option value="Fusion">Fusão</option>
+        <option value="Synchro">Sincro</option>
+        <option value="Xyz">Xyz</option>
+        <option value="Link">Link</option>
+        <option value="Pendulum">Pêndulo</option>
+      </select>
+      <select id="f-spell" title="filtrar magias por tipo">
+        <option value="">magia…</option>
+        <option value="*">▸ todas as magias</option>
+        <option value="Normal">Normal</option>
+        <option value="Continuous">Contínua</option>
+        <option value="Equip">Equipamento</option>
+        <option value="Field">Campo</option>
+        <option value="Quick-Play">Rápida</option>
+        <option value="Ritual">Ritual</option>
+      </select>
+      <select id="f-trap" title="filtrar armadilhas por tipo">
+        <option value="">armadilha…</option>
+        <option value="*">▸ todas as armadilhas</option>
+        <option value="Normal">Normal</option>
+        <option value="Continuous">Contínua</option>
+        <option value="Counter">Counter</option>
+      </select>
+      <select id="f-attr"><option value="">atributo: todos</option></select>
+      <select id="f-race"><option value="">raça: todas</option></select>
+      <select id="f-arch"><option value="">arquétipo: todos</option></select>
+      <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
+      <select id="f-sort" title="ordenar as cartas">
+        <option value="">ordem: padrão</option>
+        <option value="atk">maior ATK</option>
+        <option value="def">maior DEF</option>
+        <option value="lv">maior nível</option>
+      </select>
+      <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
+      <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
+      <input type="number" id="f-atk" placeholder="ATK⩾" min="0" step="100">
+      <label class="chk" title="só as cartas jogáveis nesta fase: Normais + 7 magia/armadilha">
+        <input type="checkbox" id="f-lista1"> Lista 1
+      </label>
+      <button id="f-clear">limpar</button>
+    </div>
+    <div class="sec-head">
+      <span id="pool-count">—</span>
+      <span class="spacer"></span>
+      <span>clique = adicionar à raridade selecionada · segurar = detalhes · arraste do booster p/ cá remove</span>
+    </div>
+    <div class="pool-scroll dropzone" id="pool-zone">
+      <div class="pool-grid" id="pool-grid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/web/js/boosterbuilder.js"></script>
+</body>
+</html>

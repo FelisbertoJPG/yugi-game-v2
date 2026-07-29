@@ -1,0 +1,290 @@
+/**
+ * Boosters — coleções de cartas organizadas por RARIDADE (UR/SR/R/N), no lugar
+ * das zonas Main/Extra de um deck. Servem para dar "raridade" às cartas: ao
+ * salvar um booster, cada carta ganha as tags `[nome do booster]` e `[raridade]`,
+ * que passam a aparecer no filtro de tag do Deck Builder e como selo na carta.
+ *
+ * Persistência: `localStorage` (preso ao navegador) + export/import `.json` — é
+ * o `.json` que faz o booster (e as raridades) "sobreviverem fora" desta máquina.
+ * Quando houver backend, só esta camada muda. Espelha o papel de storage.js.
+ */
+
+import { pushFile, hydrate } from '/web/js/projectstore.js';
+
+/** Raridades, da mais alta para a mais baixa (a ordem importa: define a "maior"). */
+export const RARITIES = ['UR', 'SR', 'R', 'N'];
+
+export const RARITY_LABEL = {
+  UR: 'Ultra Rare',
+  SR: 'Super Rare',
+  R: 'Rare',
+  N: 'Normal',
+};
+
+const KEY = 'ygo:boosters';
+
+function read() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const arr = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(normalize) : [];
+  } catch {
+    return [];
+  }
+}
+
+function write(list) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(list));
+    pushFile('boosters', list);   // espelha em store/boosters.json (vai no git)
+    return true;
+  } catch (e) {
+    console.error('[boosters] falha ao gravar', e);
+    return false;
+  }
+}
+
+/** Traz store/boosters.json (disco) para o localStorage. Chame no boot. */
+export function hydrateBoosters() {
+  return hydrate('boosters', KEY);
+}
+
+/**
+ * Chances de cada raridade ao abrir um pacote (peso relativo, POR CARTA, soma 1000).
+ * Calibrado para UR ser "ultra rara": 0,4%/carta → num pacote de 5 dá ~2% de
+ * chance de sair 1 UR → em média ~50 pacotes = ~5000 DP por UR, como pedido.
+ * (N domina; SR ~5,6%/carta; R comum.) Só entram as raridades presentes no
+ * booster, renormalizadas — um booster sem UR simplesmente não dropa UR.
+ */
+export const PACK_ODDS = { N: 700, R: 240, SR: 56, UR: 4 };
+/** Quantas cartas saem por pacote. */
+export const PACK_SIZE = 5;
+/** Preço padrão de um pacote (o booster pode ter o seu). */
+export const DEFAULT_PRICE = 100;
+/** A cada N pacotes deste booster, 1 SR garantida (substitui uma carta N). */
+export const PITY_EVERY = 10;
+
+/** Garante o formato { name, coverId, inShop, price, cards:{...}, updatedAt }. */
+export function normalize(b = {}) {
+  const cards = {};
+  for (const r of RARITIES) {
+    cards[r] = Array.isArray(b.cards?.[r]) ? b.cards[r].map(Number).filter(Boolean) : [];
+  }
+  const price = Number(b.price);
+  return {
+    name: (b.name ?? 'Novo Booster').toString(),
+    coverId: b.coverId ? Number(b.coverId) : null,   // carta que ilustra/define o booster
+    inShop: !!b.inShop,                               // exposto na Loja?
+    price: Number.isFinite(price) && price >= 0 ? Math.round(price) : DEFAULT_PRICE,
+    cards,
+    updatedAt: b.updatedAt ?? null,
+  };
+}
+
+/** Booster vazio. */
+export function emptyBooster(name = 'Novo Booster') {
+  return normalize({ name });
+}
+
+export function listBoosters() {
+  return read();
+}
+
+export function getBoosterAt(i) {
+  return read()[i] ?? null;
+}
+
+/** Salva (novo se index null/inválido) e devolve o índice gravado. */
+export function saveBooster(booster, index = null) {
+  const list = read();
+  const rec = normalize({ ...booster, updatedAt: new Date().toISOString() });
+  if (index === null || index < 0 || index >= list.length) {
+    list.push(rec);
+    write(list);
+    return list.length - 1;
+  }
+  list[index] = rec;
+  write(list);
+  return index;
+}
+
+export function deleteBooster(index) {
+  const list = read();
+  if (index < 0 || index >= list.length) return false;
+  list.splice(index, 1);
+  write(list);
+  return true;
+}
+
+/** Total de cartas (todas as raridades) de um booster. */
+export function boosterSize(b) {
+  return RARITIES.reduce((n, r) => n + (b.cards?.[r]?.length ?? 0), 0);
+}
+
+// ------------------------------------------------------- loja / pacotes
+
+/** Boosters expostos na Loja (marcados com inShop e com pelo menos 1 carta). */
+export function listShopBoosters() {
+  return read()
+    .map((b, index) => ({ ...b, index }))
+    .filter((b) => b.inShop && boosterSize(b) > 0);
+}
+
+/** Liga/desliga a exposição de um booster na Loja (por índice). Persiste. */
+export function setInShop(index, on) {
+  const list = read();
+  if (index < 0 || index >= list.length) return false;
+  list[index].inShop = !!on;
+  write(list);
+  return true;
+}
+
+/**
+ * Abre um pacote: sorteia PACK_SIZE cartas do booster. A raridade é sorteada
+ * pelos pesos de PACK_ODDS, mas só entre as raridades que o booster REALMENTE
+ * tem (renormalizando), senão um booster só de N nunca daria carta. Cartas
+ * podem repetir (é um sorteio com reposição, como pacote de verdade).
+ */
+export function openPack(booster, n = PACK_SIZE, { guaranteeSR = false } = {}) {
+  const buckets = RARITIES.filter((r) => booster.cards[r]?.length);
+  if (!buckets.length) return [];
+  const total = buckets.reduce((s, r) => s + PACK_ODDS[r], 0);
+  const pulls = [];
+  for (let i = 0; i < n; i++) {
+    let roll = Math.random() * total;
+    let chosen = buckets[buckets.length - 1];
+    for (const r of buckets) { roll -= PACK_ODDS[r]; if (roll <= 0) { chosen = r; break; } }
+    const pool = booster.cards[chosen];
+    pulls.push({ id: pool[Math.floor(Math.random() * pool.length)], rarity: chosen });
+  }
+  if (guaranteeSR) aplicarSRGarantida(booster, pulls);
+  return pulls;
+}
+
+/**
+ * Garante uma SR no pacote SUBSTITUINDO a carta de menor raridade (N; se não
+ * houver N, uma R) — NUNCA uma SR ou UR. Se o pacote já trouxe SR/UR (ou o
+ * booster não tem SR), não faz nada: a garantia (nível SR+) já está satisfeita.
+ */
+function aplicarSRGarantida(booster, pulls) {
+  const sr = booster.cards.SR;
+  if (!sr?.length) return;
+  if (pulls.some((p) => p.rarity === 'SR' || p.rarity === 'UR')) return;
+  for (const r of ['N', 'R']) {                       // preferir N, depois R
+    const i = pulls.findIndex((p) => p.rarity === r);
+    if (i >= 0) {
+      pulls[i] = { id: sr[Math.floor(Math.random() * sr.length)], rarity: 'SR', guaranteed: true };
+      return;
+    }
+  }
+}
+
+// ------------------------------------------------------- raridade das cartas
+
+/**
+ * Índice cartaId → { rarity, boosters:[nomes] } considerando TODOS os boosters
+ * salvos. `rarity` é a MAIOR raridade em que a carta aparece (para o selo).
+ */
+export function rarityIndex() {
+  const idx = new Map();
+  for (const b of read()) {
+    for (const r of RARITIES) {
+      for (const id of b.cards[r]) {
+        const cur = idx.get(id);
+        if (!cur) {
+          idx.set(id, { rarity: r, boosters: [b.name] });
+        } else {
+          if (!cur.boosters.includes(b.name)) cur.boosters.push(b.name);
+          // mantém a MAIOR raridade (menor índice em RARITIES)
+          if (RARITIES.indexOf(r) < RARITIES.indexOf(cur.rarity)) cur.rarity = r;
+        }
+      }
+    }
+  }
+  return idx;
+}
+
+/** A maior raridade da carta, ou null se ela não está em nenhum booster. */
+export function rarityOf(id) {
+  return rarityIndex().get(Number(id))?.rarity ?? null;
+}
+
+/** As tags que uma carta ganha dos boosters: nomes dos boosters + raridades. */
+export function tagsForCard(id, idx = rarityIndex()) {
+  const info = idx.get(Number(id));
+  if (!info) return [];
+  return [...info.boosters.map(tagify), info.rarity.toLowerCase()];
+}
+
+/** Todas as tags que os boosters introduzem (para popular o select de tags). */
+export function allBoosterTags() {
+  const tags = new Set();
+  for (const b of read()) {
+    if (boosterSize(b) > 0) tags.add(tagify(b.name));
+    for (const r of RARITIES) if (b.cards[r].length) tags.add(r.toLowerCase());
+  }
+  return [...tags];
+}
+
+/**
+ * Anota as entradas do índice em memória (`db`) com as tags de raridade/booster,
+ * mesclando com quaisquer tags que a carta já tenha (ex.: customizadas). Assim o
+ * filtro por tag e o selo funcionam de forma uniforme, sem o builder saber de
+ * onde a tag veio. Chame depois de carregar o db (e após salvar um booster).
+ */
+export function annotateDb(db) {
+  const idx = rarityIndex();
+  for (const [id, info] of idx) {
+    const brief = db.brief(id);
+    if (!brief) continue;
+    const extra = [...info.boosters.map(tagify), info.rarity.toLowerCase()];
+    const base = (brief.tags ?? []).filter((t) => !RARITIES.some((r) => r.toLowerCase() === t));
+    brief.tags = [...new Set([...base, ...extra])];
+    brief.rarity = info.rarity;
+  }
+}
+
+/** Nome de booster → tag (minúsculo, como as demais tags). */
+function tagify(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+// ------------------------------------------------------- export / import
+
+/** Dispara o download do booster como `.json` (sobrevive fora do navegador). */
+export function downloadBooster(booster) {
+  const rec = normalize(booster);
+  const safe = (rec.name || 'booster').replace(/[^\w\-. ]+/g, '_').trim() || 'booster';
+  const blob = new Blob([JSON.stringify(rec, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safe}.booster.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Abre um seletor de arquivo e devolve o booster lido (ou null). */
+export function importBoosterFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(null);
+      try {
+        const rec = normalize(JSON.parse(await file.text()));
+        if (!rec.name || rec.name === 'Novo Booster') {
+          rec.name = file.name.replace(/\.(booster\.)?json$/i, '') || 'Booster importado';
+        }
+        resolve(rec);
+      } catch {
+        resolve(null);
+      }
+    };
+    input.click();
+  });
+}

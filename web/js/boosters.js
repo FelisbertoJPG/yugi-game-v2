@@ -9,7 +9,7 @@
  * Quando houver backend, só esta camada muda. Espelha o papel de storage.js.
  */
 
-import { pushFile, hydrate } from '/web/js/projectstore.js';
+import { pushFile, pullFileEx } from '/web/js/projectstore.js';
 
 /** Raridades, da mais alta para a mais baixa (a ordem importa: define a "maior"). */
 export const RARITIES = ['UR', 'SR', 'R', 'N'];
@@ -33,10 +33,18 @@ function read() {
   }
 }
 
+/**
+ * Mesma trava da carteira: só espelha depois de ter lido o disco. Um booster
+ * criado antes disso ficaria só no navegador — que foi exatamente como o
+ * "Origem do Caos" se perdeu na primeira transferência de máquina.
+ */
+let leuODisco = false;
+
 function write(list) {
   try {
     localStorage.setItem(KEY, JSON.stringify(list));
-    pushFile('boosters', list);   // espelha em store/boosters.json (vai no git)
+    if (leuODisco) pushFile('boosters', list);   // store/boosters.json (vai no git)
+    else console.warn('[boosters] gravação não espelhada: o disco ainda não foi lido');
     return true;
   } catch (e) {
     console.error('[boosters] falha ao gravar', e);
@@ -45,8 +53,27 @@ function write(list) {
 }
 
 /** Traz store/boosters.json (disco) para o localStorage. Chame no boot. */
-export function hydrateBoosters() {
-  return hydrate('boosters', KEY);
+export async function hydrateBoosters() {
+  const { alcancou, data } = await pullFileEx('boosters');
+  leuODisco = alcancou;
+  if (!alcancou) {
+    console.warn('[boosters] sem servidor: usando só o localStorage, sem gravar no disco');
+    return false;
+  }
+  if (data === null || data === undefined) return false;
+  try { localStorage.setItem(KEY, JSON.stringify(data)); return true; }
+  catch { return false; }
+}
+
+/**
+ * Devolve ao disco o que já existe no navegador. Serve para RESGATAR boosters
+ * que ficaram só no localStorage (criados antes do espelhamento existir).
+ */
+export function salvarNoProjeto() {
+  const list = read();
+  if (!leuODisco) return { ok: false, motivo: 'o disco ainda não foi lido' };
+  pushFile('boosters', list);
+  return { ok: true, quantos: list.length };
 }
 
 /**

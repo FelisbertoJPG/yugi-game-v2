@@ -10,7 +10,7 @@ import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
   RARITIES, RARITY_LABEL, listBoosters, getBoosterAt, saveBooster, deleteBooster,
   boosterSize, emptyBooster, downloadBooster, importBoosterFile, annotateDb,
-  allBoosterTags, hydrateBoosters,
+  allBoosterTags, hydrateBoosters, salvarNoProjeto,
 } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
 import { inLista1 } from '/web/js/lista1.js';
@@ -455,6 +455,16 @@ $('btn-export').onclick = () => {
   booster.name = $('booster-name').value.trim() || 'booster';
   downloadBooster(booster);
   toast('.json exportado');
+};
+
+// Resgate: manda para store/boosters.json o que estiver só neste navegador.
+// Existe porque a primeira leva de boosters ficou presa no localStorage de outra
+// máquina e não sobreviveu à transferência — o arquivo é o que viaja no git.
+$('btn-rescue').onclick = () => {
+  const r = salvarNoProjeto();
+  toast(r.ok
+    ? `${r.quantos} booster(s) gravados em store/boosters.json — dê commit`
+    : `não deu para gravar: ${r.motivo}`);
 };
 
 $('btn-import').onclick = async () => {

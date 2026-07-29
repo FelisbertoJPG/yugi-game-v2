@@ -7,20 +7,36 @@
  * jeito que os decks vivem em `decks/`. Sem o dev-server no ar, tudo continua
  * funcionando só com o localStorage (o espelhamento é best-effort).
  *
- * Uso: no boot de cada página, `await hydrate('boosters', KEY)` para trazer o
- * arquivo do disco para o localStorage; a cada gravação, `mirror('boosters', v)`
- * para devolver ao disco (fire-and-forget).
+ * Uso: no boot de cada página, `await pullFileEx(nome)` para trazer o arquivo do
+ * disco; a cada gravação, `pushFile(nome, v)` para devolver (fire-and-forget).
+ *
+ * Quem chama deve só espelhar DEPOIS de ter lido — ver a trava em wallet.js e
+ * boosters.js. Gravar antes de ler é como um estado vazio sobrescreve dados bons.
  */
+
+/**
+ * Lê `store/<name>.json` distinguindo os dois "vazios":
+ *   { alcancou: true,  data: {...} }  arquivo existe
+ *   { alcancou: true,  data: null  }  servidor respondeu, arquivo ainda não existe
+ *   { alcancou: false, data: null }  não deu para falar com o servidor
+ *
+ * A diferença importa: sem servidor, gravar por cima é arriscado (o disco pode
+ * ter dados que não conseguimos ler). Com servidor e sem arquivo, criar é o certo.
+ */
+export async function pullFileEx(name) {
+  try {
+    const r = await fetch(`/__store/${name}.json`, { cache: 'no-store' });
+    if (r.status === 404) return { alcancou: true, data: null };
+    if (!r.ok) return { alcancou: false, data: null };
+    return { alcancou: true, data: await r.json() };
+  } catch {
+    return { alcancou: false, data: null };
+  }
+}
 
 /** Lê `store/<name>.json`. Devolve o objeto, ou null se não existe / sem server. */
 export async function pullFile(name) {
-  try {
-    const r = await fetch(`/__store/${name}.json`, { cache: 'no-store' });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch {
-    return null;
-  }
+  return (await pullFileEx(name)).data;
 }
 
 /** Grava `store/<name>.json` (fire-and-forget: falha silenciosa sem server). */

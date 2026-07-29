@@ -7,7 +7,7 @@
  * (pacotes dão duplicatas); o Deck Builder "real" só oferece o que está aqui.
  */
 
-import { pushFile, pullFile } from '/web/js/projectstore.js';
+import { pushFile, pullFileEx } from '/web/js/projectstore.js';
 
 const KEY_DP = 'ygo:dp';
 const KEY_COL = 'ygo:collection';
@@ -25,6 +25,16 @@ function read(key, fallback) {
     return fallback;
   }
 }
+/**
+ * O disco só pode ser sobrescrito DEPOIS de a gente ter lido o disco.
+ *
+ * Sem esta trava, abrir uma página com o localStorage vazio antes de a leitura
+ * terminar (ou quando ela falha) faz o `getDP()` semear 2000 DP e espelhar o
+ * padrão por cima de uma carteira real. É perda de dado silenciosa, e o arquivo
+ * é a única cópia que viaja entre máquinas.
+ */
+let leuODisco = false;
+
 function write(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
@@ -35,6 +45,11 @@ function write(key, value) {
 
 /** Junta os 3 pedaços da carteira num arquivo só e devolve ao disco. */
 function mirrorWallet() {
+  if (!leuODisco) {
+    console.warn('[wallet] gravação ignorada: o disco ainda não foi lido '
+               + '(chame hydrateWallet() no boot antes de mexer na carteira)');
+    return;
+  }
   pushFile('wallet', {
     dp: read(KEY_DP, START_DP),
     collection: read(KEY_COL, {}),
@@ -42,9 +57,20 @@ function mirrorWallet() {
   });
 }
 
-/** Traz store/wallet.json (disco) para o localStorage. Chame no boot. */
+/**
+ * Traz store/wallet.json (disco) para o localStorage. Chame no boot.
+ *
+ * Libera o espelhamento mesmo quando o arquivo ainda não existe — aí criá-lo é
+ * justamente o certo. Só continua travado se a leitura falhar de vez (sem
+ * servidor), caso em que gravar por cima seria arriscado.
+ */
 export async function hydrateWallet() {
-  const data = await pullFile('wallet');
+  const { alcancou, data } = await pullFileEx('wallet');
+  leuODisco = alcancou;          // só libera o espelho se o disco respondeu
+  if (!alcancou) {
+    console.warn('[wallet] sem servidor: usando só o localStorage, sem gravar no disco');
+    return false;
+  }
   if (!data || typeof data !== 'object') return false;
   if ('dp' in data) localStorage.setItem(KEY_DP, JSON.stringify(data.dp));
   if ('collection' in data) localStorage.setItem(KEY_COL, JSON.stringify(data.collection));

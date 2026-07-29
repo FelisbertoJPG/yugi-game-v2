@@ -23,12 +23,20 @@ namespace DuelServer
         readonly DuelSession _s;
         Question _pending;
         readonly int[] _lp = { 8000, 8000 }; // pontos de vida dos 2 jogadores
+        bool _gameOver;                      // MSG_WIN visto: o host TEM de parar
+        int _winByte = -1;                   // player do MSG_WIN (0/1 vencedor, 2 empate)
 
         // Campo: monstros na zona de monstro, por (jogador, sequência).
         // Alimentado pelo MSG_MOVE — é o que a IA do NPC usa para "ver" a mesa.
         readonly Dictionary<(int player, int seq), (uint code, int pos)> _board = new();
 
         const byte LOCATION_MZONE = 0x4;
+
+        /// <summary>A carta está OCULTA para você? Virada (pos &amp; 0xa = face-down)
+        /// e do oponente (ctrl != HUMAN). O front nunca deve receber o código dela —
+        /// senão dá para espiar o que o adversário setou. Confia no core: é ele que
+        /// diz a posição. (O código real fica só no `_board`, para a IA enxergar.)</summary>
+        static bool Oculta(int pos, int ctrl) => (pos & 0xa) != 0 && ctrl != HUMAN;
         const int POS_FACEUP = 0x1 | 0x4;   // ataque OU defesa com a face para cima
 
         readonly NpcBrain _npc;
@@ -56,6 +64,7 @@ namespace DuelServer
             public bool cancelable;
             public bool canFinish;               // selectunselect: já dá para encerrar
             public int sumNeeded;                // selectsum: quanto ainda falta somar
+            public bool sumOverflow;             // selectsum: soma "OU MAIS" (ritual) vs exata
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
@@ -78,6 +87,7 @@ namespace DuelServer
             public byte controller, location; public int sequence;
             public byte release;   // quantos tributos esta carta vale
             public int param;      // select_sum: quanto esta carta soma (nível)
+            public bool hidden;    // carta virada do oponente: código omitido (code=0)
         }
 
         public sealed class Result
@@ -109,6 +119,16 @@ namespace DuelServer
             return list;
         }
 
+        /// <summary>Vencedor do duelo: 0/1, ou -1 para empate. LP zerado manda; se
+        /// ninguém zerou (ex.: deckout), usa o player do MSG_WIN (2 = empate).</summary>
+        int Winner()
+        {
+            bool p0dead = _lp[0] <= 0, p1dead = _lp[1] <= 0;
+            if (p1dead && !p0dead) return 0;
+            if (p0dead && !p1dead) return 1;
+            return _winByte == 0 || _winByte == 1 ? _winByte : -1;
+        }
+
         /// <summary>Avança até a sua vez de decidir (ou o fim). Resolve oponente/correntes.</summary>
         public Result Advance()
         {
@@ -119,7 +139,14 @@ namespace DuelServer
                 int status = YgoCoreAPI.OCG_DuelProcess(_s.Handle);
                 DrainInto(r.events);
 
-                if (status == END) { r.events.Add(new { type = "end" }); r.ended = true; return r; }
+                // O ocgcore avisa o fim pelo MSG_WIN (não por um status de END quando
+                // o LP zera no meio da fase). Ao vê-lo, o host TEM de parar — senão o
+                // duelo segue com o LP travado em 0, sem nunca encerrar.
+                if (status == END || _gameOver)
+                {
+                    r.events.Add(new { type = "end", winner = Winner() });
+                    r.ended = true; return r;
+                }
                 if (status != AWAITING) continue;
 
                 var q = _pending;
@@ -360,6 +387,10 @@ namespace DuelServer
                     ev.Add(new { type = "draw", player = pl, cards });
                     break;
                 }
+                case 5: // MSG_WIN — o duelo ACABOU. player(1)=vencedor (2=empate), reason(1).
+                    _gameOver = true;
+                    _winByte = d[o + 1];
+                    break;
                 case 40: ev.Add(new { type = "turn", player = d[o + 1] }); break;
                 case 41: ev.Add(new { type = "phase", phase = (int)BitConverter.ToInt16(d, o + 1) }); break;
                 case 60: ev.Add(new { type = "summoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF }); break;
@@ -369,9 +400,11 @@ namespace DuelServer
                     uint code = BitConverter.ToUInt32(d, p) & 0x7FFFFFFF; p += 4;
                     byte pc = d[p++], pl = d[p++]; int ps = BitConverter.ToInt32(d, p); p += 4; int ppo = BitConverter.ToInt32(d, p); p += 4;
                     byte cc = d[p++], cl = d[p++]; int cs = BitConverter.ToInt32(d, p); p += 4; int cpo = BitConverter.ToInt32(d, p); p += 4;
-                    ev.Add(new { type = "move", code, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
+                    // Carta que ASSENTA virada no campo do oponente sai sem código.
+                    bool ocultaMv = Oculta(cpo, cc);
+                    ev.Add(new { type = "move", code = ocultaMv ? 0u : code, hidden = ocultaMv, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
 
-                    // Mantém o modelo de campo em dia para a IA enxergar a mesa.
+                    // Mantém o modelo de campo em dia (com o código REAL) para a IA.
                     if (pl == LOCATION_MZONE) _board.Remove((pc, ps));
                     if (cl == LOCATION_MZONE) _board[(cc, cs)] = (code, cpo);
                     break;
@@ -384,10 +417,12 @@ namespace DuelServer
                     uint code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF;
                     byte ctrl = d[o + 5], loc = d[o + 6], seq = d[o + 7];
                     byte anterior = d[o + 8], atual = d[o + 9];
+                    // Se PASSA a ficar virada no campo do oponente, some com o código.
+                    bool ocultaPos = Oculta(atual, ctrl);
                     ev.Add(new
                     {
-                        type = "pos", code, controller = ctrl, loc,
-                        seq = (int)seq, pos = (int)atual, prevPos = (int)anterior,
+                        type = "pos", code = ocultaPos ? 0u : code, hidden = ocultaPos,
+                        controller = ctrl, loc, seq = (int)seq, pos = (int)atual, prevPos = (int)anterior,
                     });
                     if (loc == LOCATION_MZONE && _board.TryGetValue((ctrl, seq), out var antes))
                         _board[(ctrl, seq)] = (antes.code, atual);
@@ -590,13 +625,22 @@ namespace DuelServer
                 {
                     int p = o + header + i * entry;
                     if (p + entry > o + mlen) break;
+                    uint rawCode = BitConverter.ToUInt32(d, p);
+                    byte cc = d[p + 4], cl = d[p + 5];
+                    int cseq = BitConverter.ToInt32(d, p + 6);
+                    // Alvo de ataque virado do oponente: o SELECT_CARD não traz a
+                    // posição, então consulto o _board (que o core mantém). Sem isto,
+                    // o overlay de seleção mostrava a arte real da carta setada.
+                    bool oculta = cl == LOCATION_MZONE && cc != HUMAN
+                        && _board.TryGetValue((cc, cseq), out var bi) && Oculta(bi.pos, cc);
                     q.choices.Add(new Sel
                     {
-                        code = BitConverter.ToUInt32(d, p),
+                        code = oculta ? 0u : rawCode,
+                        hidden = oculta,
                         index = i,
-                        controller = d[p + 4],
-                        location = d[p + 5],
-                        sequence = BitConverter.ToInt32(d, p + 6),
+                        controller = cc,
+                        location = cl,
+                        sequence = cseq,
                         release = entry >= 11 ? d[p + 10] : (byte)1,
                     });
                 }
@@ -723,6 +767,10 @@ namespace DuelServer
         Question ParseSelectSum(byte[] d, int o, int mlen)
         {
             var q = new Question { kind = "selectsum", player = d[o + 1] };
+            // Byte de modo (medido: 0x17 00 [modo] [acc..]). modo=1 → "soma OU MAIS"
+            // (ritual "nível 8 ou mais"); modo=0 → soma exata. Ignorar isto fazia
+            // o ritual falhar sempre que os tributos não somavam o valor cravado.
+            q.sumOverflow = d[o + 2] != 0;
             int acc = BitConverter.ToInt32(d, o + 3);
             q.selMin = BitConverter.ToInt32(d, o + 7);
             q.selMax = BitConverter.ToInt32(d, o + 11);
@@ -759,69 +807,77 @@ namespace DuelServer
         }
 
         /// <summary>
-        /// Acha um subconjunto cujos níveis somem exatamente o alvo. As listas
-        /// aqui são pequenas (cartas em campo/mão), então busca exaustiva basta e
-        /// evita a heurística gulosa errar quando os níveis não são uniformes.
+        /// Enumera as combinações de tributos VÁLIDAS de um SELECT_SUM, chamando
+        /// `aceita` para cada uma (devolve false para parar a busca). As listas são
+        /// pequenas (campo + mão), então busca exaustiva basta.
+        ///
+        /// Dois modos, decididos pelo byte de modo do motor:
+        ///   • exato    → a soma tem de bater `target` cravado.
+        ///   • ou mais  → ritual ("nível 8 OU MAIS"): a soma passa de `target`, mas
+        ///                sem carta dispensável — tirar a de MENOR nível já derruba
+        ///                abaixo de `target` (`soma - menor &lt; target`). É a mesma
+        ///                regra que o EDOPro aplica: não deixa sobrar tributo.
         /// </summary>
-        static List<int> SubsetForSum(List<Sel> items, int target, int minCount, int maxCount)
+        static void EnumeraSomas(List<Sel> items, int target, int min, int max,
+                                 bool overflow, Func<List<int>, bool> aceita)
         {
-            var best = new List<int>();
-            var cur = new List<int>();
+            var cur = new List<int>();   // posições em items
 
-            bool Search(int i, int sum)
+            int Soma() { int s = 0; foreach (int p in cur) s += Math.Max(1, items[p].param); return s; }
+
+            bool Valida(int soma)
             {
-                if (sum == target &&
-                    cur.Count >= Math.Max(1, minCount) &&
-                    (maxCount <= 0 || cur.Count <= maxCount))
-                {
-                    best = new List<int>(cur);
-                    return true;
-                }
-                if (sum > target || i >= items.Count) return false;
-                if (maxCount > 0 && cur.Count > maxCount) return false;
-
-                cur.Add(items[i].index);
-                if (Search(i + 1, sum + Math.Max(1, items[i].param))) return true;
-                cur.RemoveAt(cur.Count - 1);
-
-                return Search(i + 1, sum);
+                if (cur.Count < Math.Max(1, min)) return false;
+                if (max > 0 && cur.Count > max) return false;
+                if (!overflow) return soma == target;
+                int menor = int.MaxValue;
+                foreach (int p in cur) menor = Math.Min(menor, Math.Max(1, items[p].param));
+                return soma >= target && soma - menor < target;
             }
 
-            Search(0, 0);
-            return best;
+            // devolve false = "pare tudo" (aceita pediu para encerrar).
+            bool Rec(int i)
+            {
+                int soma = Soma();
+                if (Valida(soma))
+                    return aceita(cur.ConvertAll(p => items[p].index)); // achou; não estende (superset é inválido)
+                if (soma >= target || i >= items.Count) return true;    // não dá para crescer útil
+                if (max > 0 && cur.Count >= max) return true;
+
+                cur.Add(i);
+                if (!Rec(i + 1)) return false;
+                cur.RemoveAt(cur.Count - 1);
+                return Rec(i + 1);
+            }
+            Rec(0);
         }
 
         /// <summary>
-        /// Há mais de uma forma de somar o alvo? Só então vale perguntar ao jogador.
-        /// Conta as combinações até achar a segunda — não precisa enumerar todas.
+        /// Há mais de uma combinação de tributos válida? Só então vale perguntar ao
+        /// jogador — para uma decisão única, resolver sozinho poupa um clique.
         /// </summary>
         static bool SomaTemEscolha(Question q)
         {
             if (q.choices.Count == 0) return false;
             int achadas = 0;
-
-            void Busca(int i, int soma, int usados)
-            {
-                if (achadas >= 2) return;
-                if (soma == q.sumNeeded && usados > 0) { achadas++; return; }
-                if (soma > q.sumNeeded || i >= q.choices.Count) return;
-                Busca(i + 1, soma + Math.Max(1, q.choices[i].param), usados + 1);
-                Busca(i + 1, soma, usados);
-            }
-            Busca(0, 0, 0);
+            EnumeraSomas(q.choices, q.sumNeeded, q.selMin, q.selMax, q.sumOverflow,
+                         _ => { achadas++; return achadas < 2; });
             return achadas >= 2;
         }
 
         /// <summary>Resolve o SELECT_SUM sozinho quando não há escolha interessante.</summary>
         byte[] AutoSum(Question q)
         {
-            var pick = SubsetForSum(q.choices, q.sumNeeded, q.selMin, q.selMax);
-            if (pick.Count == 0)
+            List<int> pick = null;
+            EnumeraSomas(q.choices, q.sumNeeded, q.selMin, q.selMax, q.sumOverflow,
+                         p => { pick = p; return false; });
+            if (pick == null || pick.Count == 0)
             {
-                // Não achou combinação exata: manda o mínimo e deixa o motor reclamar,
+                // Nenhuma combinação válida: manda o mínimo e deixa o motor reclamar,
                 // em vez de travar o duelo em silêncio.
-                Log.Err($"[selectsum] nenhum subconjunto soma {q.sumNeeded} " +
-                        $"entre {q.choices.Count} cartas");
+                Log.Err($"[selectsum] nenhuma combinacao {(q.sumOverflow ? ">=" : "==")} " +
+                        $"{q.sumNeeded} entre {q.choices.Count} cartas");
+                pick = new List<int>();
                 for (int i = 0; i < Math.Max(1, q.selMin) && i < q.choices.Count; i++)
                     pick.Add(q.choices[i].index);
             }

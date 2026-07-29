@@ -27,6 +27,9 @@ namespace DuelServer
         const uint BLS = 5405694;            // Black Luster Soldier — Ritual Nv8
         const uint BLS_RITUAL = 55761792;    // Black Luster Ritual — a magia
 
+        const uint GARMA = 90844184;         // Garma Sword — Ritual Nv7 (nível ÍMPAR)
+        const uint GARMA_OATH = 78577570;    // Garma Sword Oath — a magia ("nível 7 ou mais")
+
         public static int Run(string sa)
         {
             Log.Info("=== teste: invocacao por tributo ===\n");
@@ -35,8 +38,108 @@ namespace DuelServer
             RitualSummon(sa);
             Log.Info("\n=== teste: monstro em defesa serve de tributo ===\n");
             TributoEmDefesa(sa);
+            Log.Info("\n=== teste: ritual por SOMA MAIOR (overshoot) ===\n");
+            RitualOverflow(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
             return _fail == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regressão do bug "ativa a magia mas não tributa": um ritual de nível
+        /// ÍMPAR (Garma Sword, Nv7) tributado só com monstros Nv4. Não existe soma
+        /// EXATA de 7 com Nv4 — o único caminho legal é passar (4+4=8 ≥ 7). Antes
+        /// do fix o motor recusava a resposta (só aceitávamos soma cravada) e o
+        /// ritual não saía. Ver [[ocgcore-protocolo]] (byte de modo do SELECT_SUM).
+        /// </summary>
+        static void RitualOverflow(string sa)
+        {
+            var deck = new List<uint>();
+            for (int i = 0; i < 6; i++) deck.Add(GARMA_OATH);
+            for (int i = 0; i < 6; i++) deck.Add(GARMA);
+            uint[] lv4 = { BATTLE_OX, MYSTICAL_ELF, CELTIC };
+            while (deck.Count < 40) deck.Add(lv4[deck.Count % lv4.Length]);
+
+            using var duel = new InteractiveDuel(sa, deck.ToArray(), 13579UL, 0x1000000UL, npc: false);
+            var r = duel.Advance();
+
+            int guard = 0, alvoVisto = -1;
+            bool overflowVisto = false, activated = false, summoned = false;
+            var tributed = new List<uint>();
+
+            while (!r.ended && guard++ < 300 && !summoned)
+            {
+                foreach (var e in r.events)
+                {
+                    var t = e.GetType();
+                    if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
+                    uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
+                    byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                    byte from = Convert.ToByte(t.GetProperty("fromLoc")?.GetValue(e) ?? (byte)0);
+                    if (code == GARMA && loc == LOC_MZONE) summoned = true;
+                    if (loc == LOC_GRAVE && (from == LOC_MZONE || from == LOC_HAND)
+                        && code != GARMA_OATH && code != GARMA)
+                        tributed.Add(code);
+                }
+                if (summoned) break;
+
+                var q = r.question;
+                if (q == null) break;
+
+                switch (q.kind)
+                {
+                    case "idle":
+                    {
+                        var oath = q.activatable.FirstOrDefault(a => a.code == GARMA_OATH);
+                        if (oath.code == GARMA_OATH) { activated = true; r = duel.Respond("activate", oath.index); }
+                        else if (q.summonable.Count > 0) r = duel.Respond("summon", q.summonable[0].index);
+                        else r = duel.Respond("endturn", 0);
+                        break;
+                    }
+                    case "place":
+                        r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0);
+                        break;
+                    case "selectsum":
+                    {
+                        alvoVisto = q.sumNeeded;
+                        overflowVisto = q.sumOverflow;
+                        // Guloso: junta tributos até cobrir o alvo (aqui só há Nv4,
+                        // então fecha em 8 para um alvo 7 — exatamente o overshoot).
+                        var pick = new List<int>(); int soma = 0;
+                        foreach (var c in q.choices)
+                        {
+                            if (soma >= q.sumNeeded) break;
+                            pick.Add(c.index); soma += c.param;
+                        }
+                        Log.Info($"  > selectsum: alvo={q.sumNeeded} ouMais={q.sumOverflow} " +
+                                 $"opcoes={q.choices.Count} escolhi=[{string.Join(",", pick)}] soma={soma}");
+                        r = duel.Respond("select", 0, pick);
+                        break;
+                    }
+                    case "selectcard":
+                    case "selecttribute":
+                        r = duel.Respond("select", 0,
+                            q.choices.Take(Math.Max(1, q.selMin)).Select(c => c.index).ToList());
+                        break;
+                    case "selectunselect":
+                        r = q.canFinish && q.choices.Count == 0
+                            ? duel.Respond("finishselect", 0)
+                            : duel.Respond("pick", q.choices[0].index);
+                        break;
+                    case "battle":
+                        r = duel.Respond("endbattle", 0);
+                        break;
+                    default:
+                        r = duel.Respond("endturn", 0);
+                        break;
+                }
+            }
+
+            Check("a magia de ritual (Garma) pode ser ativada", activated);
+            Check("o motor pediu a soma no modo OU MAIS", overflowVisto, $"(alvo={alvoVisto})");
+            Check("Garma Sword (Nv7) foi invocado tributando Nv4 (soma 8 > 7)", summoned);
+            Log.Info($"  tributados: [{string.Join(", ", tributed)}] ({tributed.Count} monstros)");
+            Check("o overshoot consumiu tributos que somam mais que 7", tributed.Count * 4 >= 7,
+                  $"(vieram {tributed.Count} Nv4 = {tributed.Count * 4})");
         }
 
         /// <summary>

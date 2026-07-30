@@ -74,6 +74,33 @@
   .zone.target.over { outline-style: solid; background: #3a1a1e; }
   .zone.attacking { opacity: .45; }
 
+  /* ---------- camada de animação (cartas em movimento) ---------- */
+  #fx { position: fixed; inset: 0; pointer-events: none; z-index: 55; overflow: hidden; }
+  #fx .ghost {
+    position: fixed; border-radius: 2px; overflow: hidden;
+    box-shadow: 0 4px 14px #000a; will-change: transform, opacity;
+    transition: transform var(--fxdur, .28s) cubic-bezier(.4,.1,.2,1), opacity .2s;
+  }
+  #fx .ghost img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #fx .ghost .back {
+    width: 100%; height: 100%; box-sizing: border-box; border: 1px solid #2a1c08;
+    background:
+      radial-gradient(circle at 50% 42%, #b8863a 0 18%, #7c5417 19% 34%, #59380d 35% 100%),
+      linear-gradient(135deg,#6b4a1e,#3a260c);
+  }
+  /* tremor do alvo quando é atingido por um ataque */
+  @keyframes fx-shake {
+    0%,100% { transform: translate(0,0); }
+    20% { transform: translate(-3px,2px) rotate(-2deg); }
+    40% { transform: translate(3px,-2px) rotate(2deg); }
+    60% { transform: translate(-2px,1px) rotate(-1deg); }
+    80% { transform: translate(2px,-1px) rotate(1deg); }
+  }
+  .fx-hit { animation: fx-shake .28s ease-in-out; }
+  /* brilho rápido quando uma carta ativa seu efeito */
+  @keyframes fx-flash { 0%,100% { box-shadow: 0 0 0 0 #e8c46a00; } 50% { box-shadow: 0 0 10px 3px #e8c46acc; } }
+  .fx-activate { animation: fx-flash .5s ease-in-out; }
+
   /* soltar SOBRE um monstro = tributá-lo */
   .zone.drop-tribute { outline: 2px dashed #c98b2e; outline-offset: -2px; }
   .zone.drop-tribute.over { outline-style: solid; background: #3a2a12; }
@@ -315,6 +342,8 @@
 
 <div id="phase-toast"></div>
 
+<div id="fx"></div>
+
 <div class="arena">
   <div class="handrow opp" id="hand-opp"></div>
 
@@ -337,7 +366,7 @@
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, listDecks, getActiveIndex } from '/web/js/storage.js';
-import { getNpc, loadNpcDecks, getNpcActiveDeck } from '/web/js/npcs.js';
+import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/js/npcs.js';
 import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
@@ -413,6 +442,7 @@ function chosenDeck() {
 }
 
 async function start() {
+  busy = false; $('fx').replaceChildren();   // aborta qualquer animação em curso
   const deck = chosenDeck();
   const ids = deck ? deck.main : [];
   if (!ids.length) { warn('Nenhum deck com cartas. Monte/selecione um deck no Deck Builder.'); return; }
@@ -438,7 +468,7 @@ async function start() {
 }
 
 async function act(action, arg, label, args) {
-  if (ended) return;
+  if (ended || busy) return;   // busy = animação rolando; ignora cliques até assentar
   turnPlays.push({ action, arg, label, turn: turnNo });
   try { apply(await rpc('/respond', args ? { action, arg, args } : { action, arg })); }
   catch (e) { conn(false); warn('perdi a conexão com o servidor.'); }
@@ -588,69 +618,174 @@ function renderYesno() {
 }
 
 // ---------- aplicar a resposta do servidor ----------
-function apply(j) {
+// ---------------- animação (camada #fx) ----------------
+// Enhancement PURO: se faltar posição/elemento, cai no instantâneo — nunca
+// quebra o duelo. `busy` trava os cliques do jogador enquanto uma sequência roda.
+let busy = false;
+const prefersReduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+function anchorRect(anchor) {
+  if (!anchor) return null;
+  const el = document.querySelector(`[data-anchor="${anchor}"]`);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width && r.height ? r : null;
+}
+function containerRect(id) {
+  const el = document.getElementById(id);
+  const r = el && el.getBoundingClientRect();
+  return r && r.width ? r : null;
+}
+/** loc do motor → âncora de zona/pilha. */
+function locAnchor(ctrl, loc, seq) {
+  if (loc === 4) return `${ctrl}:4:${seq}`;
+  if (loc === 8) return `${ctrl}:8:${seq}`;
+  if (loc === 0x100) return `${ctrl}:8:5`;   // zona de campo
+  if (loc === 0x10) return `${ctrl}:gy`;
+  if (loc === 1) return `${ctrl}:deck`;
+  return null;
+}
+function spawnGhost(rect, code, face) {
+  const g = document.createElement('div');
+  g.className = 'ghost';
+  g.style.left = rect.left + 'px'; g.style.top = rect.top + 'px';
+  g.style.width = rect.width + 'px'; g.style.height = rect.height + 'px';
+  g.innerHTML = (face === 'back' || !code) ? '<div class="back"></div>' : `<img src="${ART(code)}" alt="">`;
+  $('fx').append(g);
+  return g;
+}
+/** Lança um fantasma de `from` até `to` (centro→centro). `endScale` encolhe o
+ *  fantasma na chegada — útil pra "encaixar" numa pilha pequena (cemitério). */
+async function flyGhost(from, to, code, face, dur = 280, endScale = 1) {
+  if (prefersReduced || !from || !to) return;
+  const g = spawnGhost(from, code, face);
+  const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+  const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+  g.style.setProperty('--fxdur', dur + 'ms');
+  await nextFrame();                     // firma a posição inicial antes de transicionar
+  g.style.transform = `translate(${dx}px, ${dy}px) scale(${endScale})`;
+  await sleep(dur);
+  g.remove();
+}
+function flashZone(anchor, cls = 'fx-activate', ms = 500) {
+  const el = anchor && document.querySelector(`[data-anchor="${anchor}"]`);
+  if (!el) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), ms);
+}
+
+/** Animação de UM evento, ANTES de mutar o estado (a origem ainda está na tela). */
+async function animateEvent(ev) {
+  try {
+    if (ev.type === 'draw') {
+      const from = anchorRect(`${ev.player}:deck`);
+      const cont = containerRect(ev.player === 0 ? 'hand-you' : 'hand-opp');
+      const w = from?.width || 54, h = from?.height || 78;
+      // Mira o CENTRO da mão (as cartas ficam centralizadas), não a borda.
+      const to = cont ? { left: cont.left + cont.width / 2 - w / 2, top: cont.top, width: w, height: h } : from;
+      const n = ev.cards?.length || 1;
+      for (let i = 0; i < n; i++) { flyGhost(from, to, 0, 'back', 240); await sleep(130); }
+      await sleep(150);
+      return;
+    }
+    if (ev.type === 'move') {
+      let fromAnchor;
+      if (ev.fromLoc === 2) {                              // da mão
+        if (ev.fromCtrl === 0) { const hh = hand[0].indexOf(ev.code); fromAnchor = hh >= 0 ? `0:hand:${hh}` : null; }
+        else fromAnchor = '1:hand:0';
+      } else fromAnchor = locAnchor(ev.fromCtrl, ev.fromLoc, ev.fromSeq);
+      const from = anchorRect(fromAnchor)
+        || (ev.fromLoc === 2 ? containerRect(ev.fromCtrl === 0 ? 'hand-you' : 'hand-opp') : null);
+      const to = anchorRect(locAnchor(ev.controller, ev.loc, ev.seq));
+      const face = (ev.hidden || !ev.code) ? 'back' : 'art';
+      // Indo pro cemitério (pilha pequena): encolhe na chegada pra "encaixar".
+      const endScale = ev.loc === 0x10 ? 0.55 : 1;
+      await flyGhost(from, to, ev.code, face, 300, endScale);
+      return;
+    }
+    if (ev.type === 'attack') {
+      const from = anchorRect(`${ev.atkCtrl}:4:${ev.atkSeq}`);
+      const to = ev.direct
+        ? containerRect(ev.atkCtrl === 0 ? 'hand-opp' : 'hand-you')
+        : anchorRect(`${ev.defCtrl}:4:${ev.defSeq}`);
+      const code = field[ev.atkCtrl]?.m?.[ev.atkSeq]?.code || 0;
+      if (prefersReduced || !from || !to) return;
+      const g = spawnGhost(from, code, 'art');
+      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+      const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+      g.style.setProperty('--fxdur', '170ms');
+      await nextFrame(); g.style.transform = `translate(${dx}px, ${dy}px)`;
+      await sleep(170);
+      if (!ev.direct) flashZone(`${ev.defCtrl}:4:${ev.defSeq}`, 'fx-hit', 280);
+      await sleep(140);
+      g.style.transform = 'translate(0,0)';
+      await sleep(170); g.remove();
+      return;
+    }
+  } catch { /* animação nunca derruba o duelo */ }
+}
+
+async function apply(j) {
+  busy = true;
   try {
     $('warn').hidden = true;
-    for (const ev of j.events || []) handle(ev);
+    for (const ev of j.events || []) {
+      await animateEvent(ev);   // move o fantasma (origem ainda visível)
+      handle(ev);               // muta o estado
+      render();                 // a carta "assenta" no lugar
+      // magia/armadilha ATIVADA (face-up na zona S/campo): brilho + meio segundo
+      // até resolver — é o que dá o fluxo "vivo" (Pote fica no campo, depois compra).
+      if (ev.type === 'move' && (ev.loc === 8 || ev.loc === 0x100) && ev.code && !(ev.pos & 0xa)) {
+        flashZone(locAnchor(ev.controller, ev.loc, ev.seq));
+        await sleep(500);
+      }
+    }
     question = j.question || null;
     ended = !!j.ended;
     picked.clear();
     selectedField = null;   // a pergunta mudou: a seleção de campo não vale mais
-
-    // Tributo já indicado pelo arrasto: escolhe sozinho o monstro sobre o qual a
-    // carta foi solta. Se o motor pedir mais de um, o resto fica com o jogador.
-    if (pendingTribute != null && question && question.player === 0
-        && ['selecttribute', 'selectunselect'].includes(question.kind)) {
-      const alvo = pendingTribute;
-      pendingTribute = null;
-      const c = (question.choices || []).find((x) => x.location === 4 && x.sequence === alvo);
-      if (c) {
-        act(question.kind === 'selectunselect' ? 'pick' : 'select',
-            c.index, 'tributo escolhido no arrasto',
-            question.kind === 'selectunselect' ? undefined : [c.index]);
-        return;
-      }
-    }
-
-    // Alvo já escolhido no arrasto: responde o SELECT_CARD do ataque sem abrir o
-    // modal. Vale para UMA pergunta só, senão sobraria pendurado para a próxima.
-    if (pendingTarget) {
-      const alvo = pendingTarget;
-      pendingTarget = null;
-      if (question && question.kind === 'selectcard' && question.player === 0) {
-        const i = (question.choices || []).findIndex(
-          (c) => c.location === alvo.loc && c.sequence === alvo.seq);
-        if (i >= 0) {
-          act('select', 0, 'alvo do ataque', [question.choices[i].index]);
-          return;
-        }
-        log('o alvo arrastado não está entre as opções — escolha na janela.');
-      }
-    }
-
-    // Zona já escolhida no arrasto: responde o SELECT_PLACE sem perguntar de novo.
-    // O destino vale para UMA pergunta só — se a próxima não for de zona (há
-    // cartas que o motor coloca sozinho), ele é descartado, senão sobraria
-    // pendurado e cairia na carta seguinte.
-    if (pendingZone) {
-      const alvo = pendingZone;
-      pendingZone = null;
-      if (question && question.kind === 'place' && question.player === 0) {
-        if (question.zoneType === alvo.type && (question.zones || []).includes(alvo.index)) {
-          act('place', alvo.index, `colocar na zona ${alvo.type.toUpperCase()}${alvo.index}`);
-          return;
-        }
-        log('a zona arrastada não está mais livre — escolha uma destacada.');
-      }
-    }
-
     render();
     renderSelection();
     renderChain();
     renderYesno();
+
+    // Auto-respostas do arrasto (tributo/alvo/zona) — liberam a trava antes de
+    // reenviar, para o act() interno passar pelo guardião de `busy`.
+    if (pendingTribute != null && question && question.player === 0
+        && ['selecttribute', 'selectunselect'].includes(question.kind)) {
+      const alvo = pendingTribute; pendingTribute = null;
+      const c = (question.choices || []).find((x) => x.location === 4 && x.sequence === alvo);
+      if (c) {
+        busy = false;
+        act(question.kind === 'selectunselect' ? 'pick' : 'select', c.index,
+            'tributo escolhido no arrasto', question.kind === 'selectunselect' ? undefined : [c.index]);
+        return;
+      }
+    }
+    if (pendingTarget) {
+      const alvo = pendingTarget; pendingTarget = null;
+      if (question && question.kind === 'selectcard' && question.player === 0) {
+        const i = (question.choices || []).findIndex((c) => c.location === alvo.loc && c.sequence === alvo.seq);
+        if (i >= 0) { busy = false; act('select', 0, 'alvo do ataque', [question.choices[i].index]); return; }
+        log('o alvo arrastado não está entre as opções — escolha na janela.');
+      }
+    }
+    if (pendingZone) {
+      const alvo = pendingZone; pendingZone = null;
+      if (question && question.kind === 'place' && question.player === 0) {
+        if (question.zoneType === alvo.type && (question.zones || []).includes(alvo.index)) {
+          busy = false; act('place', alvo.index, `colocar na zona ${alvo.type.toUpperCase()}${alvo.index}`); return;
+        }
+        log('a zona arrastada não está mais livre — escolha uma destacada.');
+      }
+    }
   } catch (e) {
     console.error('[apply]', e, j);
     warn('ERRO na tela: ' + (e && e.message ? e.message : e) + ' — abra o console (F12) e/ou dê "novo duelo".');
+  } finally {
+    busy = false;
   }
 }
 
@@ -766,6 +901,7 @@ let SELECIONAVEIS = new Map();   // recalculado a cada render
 function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
+  if (selKey) z.dataset.anchor = selKey;   // p/ animações localizarem a zona
   z.innerHTML = `<span class="zl">${label}</span>`;
   // A arte vem primeiro: as ramificações abaixo podem sair da função cedo
   // (durante uma seleção, por exemplo) e a carta precisa aparecer de qualquer jeito.
@@ -1216,15 +1352,15 @@ function render() {
 
   // mão do oponente (verso)
   const oh = document.createElement('div'); oh.style.display='contents';
-  $('hand-opp').replaceChildren(...Array.from({length: hand[1]}, () => {
-    const c=document.createElement('div'); c.className='card'; c.innerHTML='<div class="back"></div>'; return c;
+  $('hand-opp').replaceChildren(...Array.from({length: hand[1]}, (_, i) => {
+    const c=document.createElement('div'); c.className='card'; c.dataset.anchor='1:hand:'+i; c.innerHTML='<div class="back"></div>'; return c;
   }));
 
   // sua mão (selecionável quando há ação disponível)
   rebuildMaps();
   if (selectedHand != null && actionsFor(selectedHand).length === 0) selectedHand = null;
   $('hand-you').replaceChildren(...hand[0].map((code, h) => {
-    const c = document.createElement('div'); c.className = 'card';
+    const c = document.createElement('div'); c.className = 'card'; c.dataset.anchor = '0:hand:' + h;
     c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}\nsegurar: ver detalhes" alt="" draggable="false">`;
 
     // Segurar abre os detalhes — vale para toda carta da mão, jogável ou não.
@@ -1333,6 +1469,7 @@ function botoesDeFase() {
 function pileEl(player, label, cards) {
   const d = document.createElement('div');
   d.className = 'pilezone' + (cards.length ? ' has' : '');
+  d.dataset.anchor = player + ':gy';
   d.innerHTML = `<span class="n">${cards.length}</span>${label}`;
   if (cards.length) d.onclick = () => openGrave(player);
   return d;
@@ -1343,6 +1480,7 @@ function deckEl(player) {
   const n = deckCount[player];
   const d = document.createElement('div');
   d.className = 'pilezone';
+  d.dataset.anchor = player + ':deck';
   d.title = `Deck de ${player === 0 ? 'você' : 'oponente'}: ${n} carta(s)`;
   if (n > 0) {
     d.style.borderStyle = 'solid';
@@ -1454,6 +1592,10 @@ $('gv-close').onclick = () => $('gv-back').classList.remove('show');
 $('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $('gv-back').classList.remove('show'); });
 
 await hydrateWallet();   // carteira do projeto antes de premiar vitórias
+await hydrateCustomNpcs();
+// Um adversário criado noutra máquina só existe no disco: refaz a busca agora
+// que o hydrate sincronizou (a busca lá em cima rodou antes de qualquer await).
+if (advId && !advNpc) advNpc = getNpc(advId);
 
 // Modo Adversário: carrega o deck e a assinatura do NPC antes do 1º duelo.
 if (advNpc) {

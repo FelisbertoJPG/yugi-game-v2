@@ -16,7 +16,7 @@ import {
   renderFramedCard, RACES, ATTRIBUTES, MONSTER_KINDS, SUBTYPES, isExtraKind,
 } from '/web/js/customcards.js';
 import {
-  getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks,
+  getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks, hydrateCustomNpcs,
 } from '/web/js/npcs.js';
 import { saveProjectDeck, playerDeckPath } from '/web/js/projectdecks.js';
 import { inLista1 } from '/web/js/lista1.js';
@@ -928,6 +928,7 @@ configureCardDetail({
 // Boosters + carteira do projeto (store/*.json) antes de ler raridade/coleção.
 await hydrateBoosters();
 await hydrateWallet();
+await hydrateCustomNpcs();   // adversários criados na Área de Teste (outra máquina inclusive)
 
 for (const c of listCustom()) injectCustom(c);
 // Marca as cartas com a raridade/booster salvos (tags + selo).

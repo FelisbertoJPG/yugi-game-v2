@@ -31,6 +31,44 @@
   .pill.err { color: var(--red); border-color: var(--red); }
   .pill.empty { color: var(--dim); border-color: var(--line); }
   .npc .acts { margin-top: auto; display: flex; gap: 6px; padding-top: 6px; }
+  .npc .rm {
+    position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; padding: 0;
+    line-height: 18px; font-size: 12px; border-radius: 2px;
+  }
+  .npc { position: relative; }
+
+  /* quadro de criar adversário: mesmo formato dos cards, borda tracejada */
+  .npc.new {
+    align-items: center; justify-content: center; cursor: pointer;
+    border-style: dashed; border-color: var(--line2); color: var(--dim);
+    min-height: 96px; text-align: center; gap: 4px; flex-direction: column;
+  }
+  .npc.new:hover { border-color: var(--gold); color: var(--gold); background: var(--panel2); }
+  .npc.new .plus { font-size: 22px; line-height: 1; }
+  .npc .sig.empty {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim); font-size: 9px; text-align: center;
+  }
+
+  /* ---------- modal: criar adversário ---------- */
+  .modal-back {
+    position: fixed; inset: 0; z-index: 60; display: none;
+    align-items: center; justify-content: center; background: #000a; padding: 16px;
+  }
+  .modal-back.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 2px solid var(--gold);
+    width: min(360px, 100%); padding: 16px; box-shadow: 0 8px 32px #000c;
+  }
+  .modal h2 { margin: 0 0 4px; font-size: 14px; color: var(--gold); letter-spacing: 1px; }
+  .modal .lead { font-size: 10px; color: var(--dim); margin-bottom: 12px; }
+  .modal label { display: block; font-size: 10px; color: var(--dim); margin: 8px 0 2px; letter-spacing: .5px; }
+  .modal input {
+    width: 100%; padding: 5px 6px; font-size: 12px; box-sizing: border-box;
+    background: var(--bg2); color: var(--ink); border: 1px solid var(--line);
+  }
+  .modal .err { color: var(--red); font-size: 11px; min-height: 14px; margin-top: 8px; }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -50,12 +88,30 @@
   <div class="npc-grid" id="grid"></div>
 </div>
 
+<!-- modal: criar adversário -->
+<div class="modal-back" id="new-back">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="new-title">
+    <h2 id="new-title">Criar adversário</h2>
+    <div class="lead">Um NPC novo, sem deck ainda — monte o primeiro deck dele em seguida, como os outros.</div>
+    <label>Nome</label>
+    <input type="text" id="new-name" maxlength="40" placeholder="ex.: Mai Valentine">
+    <label>Tema (opcional)</label>
+    <input type="text" id="new-theme" maxlength="40" placeholder="ex.: Harpias">
+    <div class="err" id="new-err"></div>
+    <div class="actions">
+      <button id="new-cancel">cancelar</button>
+      <button id="new-save" class="btn-primary">criar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script type="module">
 import {
   listNpcState, setNpcActiveIndex, deleteNpcDeck,
   loadNpcDecks, canPersistToProject, migrateLegacyToProject,
+  hydrateCustomNpcs, createNpc, deleteNpc,
 } from '/web/js/npcs.js';
 
 const $ = (id) => document.getElementById(id);
@@ -70,6 +126,13 @@ function toast(msg) {
 
 function render() {
   const frag = document.createDocumentFragment();
+
+  // Quadro de criar adversário — sempre o primeiro, mesmo formato dos NPCs.
+  const novo = document.createElement('div');
+  novo.className = 'npc new';
+  novo.innerHTML = '<span class="plus">＋</span><span>criar adversário</span>';
+  novo.onclick = abrirCriarAdversario;
+  frag.append(novo);
 
   for (const npc of listNpcState()) {
     const { decks, activeIndex, active } = npc;
@@ -96,17 +159,26 @@ function render() {
     const delBtn = decks.length > 1
       ? '<button data-del class="btn-danger">excluir</button>' : '';
     const editLabel = active ? 'editar deck ativo' : 'montar 1º deck';
+    // Adversário recém-criado ainda não tem carta nenhuma (sem deck): sem
+    // moldura pra mostrar. Um "×" no canto some com ele por completo (só para
+    // customizados — os 3 fixos da fase não têm esse botão).
+    const sigImg = cover
+      ? `<img class="sig" src="${ART(cover)}" alt="" loading="lazy">`
+      : `<div class="sig empty">sem<br>carta</div>`;
+    const rmBtn = npc.custom
+      ? '<button data-rm class="rm btn-danger" title="excluir este adversário">×</button>' : '';
 
     const card = document.createElement('div');
     card.className = 'npc';
     card.innerHTML = `
-      <img class="sig" src="${ART(cover)}" alt="" loading="lazy">
+      ${rmBtn}
+      ${sigImg}
       <div class="body">
         <h3>${npc.name}</h3>
-        <div class="theme">${npc.theme}</div>
+        <div class="theme">${npc.theme || ' '}</div>
         <div class="counts">${counts}</div>
         <div>${state}</div>
-        <div class="drop">dropa: <b>${sig}</b></div>
+        <div class="drop">dropa: <b>${sig ?? '—'}</b></div>
         ${pickHtml}
         <div class="acts">
           <button data-edit class="btn-primary">${editLabel}</button>
@@ -135,11 +207,40 @@ function render() {
       toast('deck excluído');
       render();
     };
+    const rm = card.querySelector('[data-rm]');
+    if (rm) rm.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Excluir o adversário "${npc.name}" e todos os seus decks? Isso não pode ser desfeito.`)) return;
+      await deleteNpc(npc.id);
+      toast(`"${npc.name}" excluído`);
+      render();
+    };
     frag.append(card);
   }
   $('grid').replaceChildren(frag);
   renderOrigin();
 }
+
+// ---------------------------------------------------------------- criar adversário
+function abrirCriarAdversario() {
+  $('new-name').value = '';
+  $('new-theme').value = '';
+  $('new-err').textContent = '';
+  $('new-back').classList.add('show');
+  $('new-name').focus();
+}
+function fecharCriarAdversario() { $('new-back').classList.remove('show'); }
+
+$('new-cancel').onclick = fecharCriarAdversario;
+$('new-back').addEventListener('click', (e) => { if (e.target === $('new-back')) fecharCriarAdversario(); });
+$('new-save').onclick = () => {
+  const r = createNpc($('new-name').value, $('new-theme').value);
+  if (!r.ok) { $('new-err').textContent = r.error; return; }
+  fecharCriarAdversario();
+  toast(`adversário "${r.npc.name}" criado — monte o deck dele`);
+  render();
+};
+$('new-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('new-save').click(); });
 
 /** Deixa explícito onde os decks estão guardados — e avisa se ainda for local. */
 function renderOrigin() {
@@ -183,6 +284,7 @@ function renderOrigin() {
 
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 
+await hydrateCustomNpcs();
 await loadNpcDecks();
 render();
 </script>

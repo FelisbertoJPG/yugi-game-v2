@@ -21,6 +21,9 @@ Arquivos (criados no primeiro save com o servidor no ar):
 - `boosters.json` — os boosters (raridades, capa, preço, se está na Loja).
 - `wallet.json` — `{ dp, collection, pity }` do jogador (DP, cartas possuídas,
   contador da SR garantida por booster).
+- `npcs.json` — os adversários CRIADOS na Área de Teste (além dos 3 fixos do
+  código): `[{ id, name, theme, signatureId, custom: true }]`. Os decks deles
+  continuam em `decks/npc/<id>/`, como os NPCs fixos.
 
-Depois de mexer nesses (montar booster, comprar, ganhar duelo), é só
+Depois de mexer nesses (montar booster, comprar, ganhar duelo, criar adversário), é só
 `git add store/ && git commit` para levar para outra máquina.

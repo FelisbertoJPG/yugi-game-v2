@@ -17,11 +17,12 @@
 
 import { Deck } from './deck.js';
 import {
-  listProjectDecks, saveProjectDeck, deleteProjectDeck, npcDeckPath, canWrite,
+  listProjectDecks, saveProjectDeck, deleteProjectDeck, npcDeckPath, canWrite, slugify,
 } from './projectdecks.js';
+import { pushFile, pullFileEx } from './projectstore.js';
 
 /** Os 3 NPCs fixos desta fase. `signatureId` é o drop padrão de um deck novo. */
-export const NPCS = [
+const BASE_NPCS = [
   { id: 'kaiba', name: 'Seto Kaiba', theme: 'Blue-Eyes', signatureId: 89631139 },
   { id: 'joey', name: 'Joey Wheeler', theme: 'Red-Eyes', signatureId: 74677422 },
   { id: 'yugi', name: 'Yugi Muto', theme: 'Dark Magician', signatureId: 46986414 },
@@ -29,11 +30,25 @@ export const NPCS = [
 
 const KEY = 'ygo:npcDecks';       // legado: decks que ficaram só no navegador
 const KEY_ACTIVE = 'ygo:npcActive';  // preferência local de qual deck está ativo
+const KEY_CUSTOM = 'ygo:customNpcs'; // adversários criados na Área de Teste
 
 // Recompensa padrão (DP) por vencer um deck de NPC, quando o deck não define a
 // sua. Espelha o WIN_REWARD da carteira — repetido aqui para não acoplar os NPCs
 // (conteúdo do jogo) ao módulo de economia.
 const DEFAULT_REWARD = 100;
+
+/**
+ * NPCs = os 3 fixos + os adversários criados na Área de Teste ("+ criar
+ * adversário"). Exportado como array MUTÁVEL (em vez de função) porque várias
+ * páginas fazem `for (const npc of NPCS)` depois de um `await hydrate...()` —
+ * dá para simplesmente adicionar/remover itens aqui que todo mundo já importou
+ * enxerga a mudança (mesma referência de array). A leitura inicial do
+ * localStorage é SÍNCRONA (não espera o disco) para o `getNpc(id)` já funcionar
+ * de cara nas páginas que resolvem o NPC da URL antes de qualquer `await`
+ * (ex.: duel.html); `hydrateCustomNpcs()` sincroniza com `store/npcs.json`
+ * depois, para os adversários criados em outra máquina aparecerem também.
+ */
+export const NPCS = [...BASE_NPCS, ...readCustom()];
 
 /**
  * Cache em memória, hidratado por `loadNpcDecks()`.
@@ -61,6 +76,79 @@ function readJson(key, fallback) {
 function writeJson(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); return true; }
   catch (e) { console.error('[npcs] falha ao gravar', key, e); return false; }
+}
+
+function readCustom() {
+  const arr = readJson(KEY_CUSTOM, []);
+  return Array.isArray(arr) ? arr : [];
+}
+
+// Mesma trava do wallet.js/boosters.js: só espelha no projeto depois de ter
+// lido o disco, senão um "criar adversário" antes do hydrate correria o risco
+// de um pull posterior sobrescrever o próprio adversário recém-criado.
+let leuCustomDisco = false;
+
+function writeCustom(list) {
+  writeJson(KEY_CUSTOM, list);
+  if (leuCustomDisco) pushFile('npcs', list);   // store/npcs.json (vai no git)
+  else console.warn('[npcs] gravação de adversário customizado não espelhada: disco ainda não foi lido');
+}
+
+/** Reconstrói NPCS = fixos + customizados, preservando a MESMA referência de array. */
+function rebuildNpcList() {
+  NPCS.length = 0;
+  NPCS.push(...BASE_NPCS, ...readCustom());
+}
+
+/** Traz store/npcs.json (disco) para o localStorage. Chame no boot de cada página. */
+export async function hydrateCustomNpcs() {
+  const { alcancou, data } = await pullFileEx('npcs');
+  leuCustomDisco = alcancou;
+  if (alcancou && Array.isArray(data)) writeJson(KEY_CUSTOM, data);
+  rebuildNpcList();
+  return alcancou;
+}
+
+/**
+ * Cria um novo adversário (id gerado a partir do nome, único entre os
+ * existentes). Sem deck ainda — o jogador monta o 1º deck normalmente, como
+ * com os NPCs fixos. `signatureId`/cover ficam null até existir um deck.
+ */
+export function createNpc(name, theme) {
+  const finalName = (name ?? '').trim();
+  if (!finalName) return { ok: false, error: 'dê um nome ao adversário' };
+
+  const ids = new Set(NPCS.map((n) => n.id));
+  let id = slugify(finalName, 'npc');
+  if (ids.has(id)) {
+    let n = 2;
+    while (ids.has(`${id}-${n}`)) n++;
+    id = `${id}-${n}`;
+  }
+
+  const npc = { id, name: finalName, theme: (theme ?? '').trim(), signatureId: null, custom: true };
+  writeCustom([...readCustom(), npc]);
+  NPCS.push(npc);
+  cache[id] = [];
+  return { ok: true, npc };
+}
+
+/** Remove um adversário CUSTOMIZADO (os 3 fixos não podem ser excluídos), com seus decks. */
+export async function deleteNpc(id) {
+  const npc = NPCS.find((n) => n.id === id);
+  if (!npc || !npc.custom) return { ok: false, error: 'não é um adversário customizado' };
+
+  for (const d of cache[id] ?? []) if (d.path) await deleteProjectDeck(d.path);
+  delete cache[id];
+
+  writeCustom(readCustom().filter((n) => n.id !== id));
+  const i = NPCS.findIndex((n) => n.id === id);
+  if (i >= 0) NPCS.splice(i, 1);
+
+  const active = readJson(KEY_ACTIVE, {});
+  delete active[id];
+  writeJson(KEY_ACTIVE, active);
+  return { ok: true };
 }
 
 /** Decks que ficaram no localStorage antes de existir a pasta decks/. */

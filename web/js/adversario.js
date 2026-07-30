@@ -4,7 +4,7 @@
  * recompensa (+100 DP e a carta-assinatura) ao vencer.
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { NPCS, loadNpcDecks, getNpcActiveDeck } from '/web/js/npcs.js';
+import { NPCS, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/js/npcs.js';
 import { getDP, hydrateWallet } from '/web/js/wallet.js';
 
 const $ = (id) => document.getElementById(id);
@@ -34,11 +34,11 @@ function render() {
     const el = document.createElement('div');
     el.className = 'npc';
     el.innerHTML =
-      `<div class="art" style="background-image:url('${ART(cover)}')"></div>` +
+      `<div class="art" style="${cover ? `background-image:url('${ART(cover)}')` : ''}"></div>` +
       `<div class="body">` +
         `<span class="name">${npc.name}</span>` +
         `<span class="theme">${npc.theme}</span>` +
-        `<span class="reward">recompensa: ${nameOf(sig)}</span>` +
+        `<span class="reward">recompensa: ${sig ? nameOf(sig) : '—'}</span>` +
         `<button class="go btn-primary" ${temDeck ? '' : 'disabled'}>` +
           (temDeck ? 'duelar' : 'sem deck (monte na Área de Teste)') +
         `</button>` +
@@ -59,5 +59,6 @@ await hydrateWallet();
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });
 } catch { /* segue sem nomes */ }
+await hydrateCustomNpcs();
 await loadNpcDecks();
 render();

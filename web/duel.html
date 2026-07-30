@@ -191,6 +191,34 @@
   .pos-acts { display: flex; flex-direction: column; gap: 7px; }
   .pos-acts button { padding: 9px 14px; font-size: 13px; text-align: left; }
 
+  /* ---------- popup de corrente (ativar armadilha em resposta) ---------- */
+  #chain-overlay {
+    position: fixed; inset: 0; background: #000c; z-index: 80;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #chain-overlay[hidden], #yn-overlay[hidden] { display: none; }
+  #yn-overlay {
+    position: fixed; inset: 0; background: #000c; z-index: 80;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .chain-box {
+    background: var(--panel); border: 2px solid var(--gold);
+    padding: 18px 20px; max-width: 460px; width: 92%;
+  }
+  .chain-box h3 { margin: 0 0 2px; color: var(--gold); font-size: 15px; }
+  .chain-box .sub { font-size: 11px; color: var(--dim); margin-bottom: 12px; }
+  .chain-cards {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 8px; margin-bottom: 12px;
+  }
+  .chain-card {
+    border: 2px solid var(--line); cursor: pointer; aspect-ratio: 59/86;
+    overflow: hidden; background: var(--panel2); position: relative;
+  }
+  .chain-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .chain-card:hover { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+  .chain-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
   /* ---------- popup de fim de duelo (vitória/derrota) ---------- */
   #end-overlay {
     position: fixed; inset: 0; background: #000d; z-index: 90;
@@ -251,6 +279,28 @@
   </div>
 </div>
 
+<div id="chain-overlay" hidden>
+  <div class="chain-box">
+    <h3 id="chain-title">Ativar em resposta?</h3>
+    <div class="sub" id="chain-sub"></div>
+    <div class="chain-cards" id="chain-cards"></div>
+    <div class="chain-acts">
+      <button id="chain-pass">não ativar</button>
+    </div>
+  </div>
+</div>
+
+<div id="yn-overlay" hidden>
+  <div class="chain-box">
+    <h3 id="yn-title">Efeito opcional</h3>
+    <div class="sub" id="yn-sub"></div>
+    <div class="chain-acts">
+      <button id="yn-no">não</button>
+      <button id="yn-yes" class="btn-primary">sim</button>
+    </div>
+  </div>
+</div>
+
 <div id="end-overlay" hidden>
   <div class="end-box">
     <div id="end-emoji">🏆</div>
@@ -293,12 +343,13 @@ import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
 // Modo Adversário: duel.html?npc=<id>. Sem npc = Treino (Área de Teste, sem
-// recompensa). Com npc, o NPC usa o próprio deck e vencer dá +100 DP e a
-// carta-assinatura dele.
+// recompensa). Com npc, o NPC usa o próprio deck e vencer dá o prêmio em DP
+// definido no deck (padrão 100) + a carta-assinatura dele.
 const advId = new URLSearchParams(location.search).get('npc');
 let advNpc = advId ? getNpc(advId) : null;
 let advDeck = null;        // deck do NPC (main ids), carregado no boot
 let advSignature = null;
+let advReward = WIN_REWARD; // DP que este deck do NPC dá ao ser vencido
 let rewardGiven = false;   // trava para não premiar duas vezes no mesmo duelo
 
 const SRV = 'http://localhost:8770';
@@ -500,6 +551,42 @@ function renderSelection() {
   $('sel-finish').onclick = () => { picked.clear(); act('finishselect', 0, 'finish'); };
 }
 
+// ---------- corrente: ativar armadilha/efeito em resposta ----------
+function renderChain() {
+  const q = (question && question.kind === 'chain' && question.player === 0
+             && question.choices && question.choices.length) ? question : null;
+  const box = $('chain-overlay');
+  if (!q) { box.hidden = true; return; }
+  box.hidden = false;
+
+  $('chain-sub').textContent = q.chainForced
+    ? 'Você precisa ativar uma destas cartas.'
+    : 'Você pode ativar uma carta em resposta — ou passar.';
+
+  const frag = document.createDocumentFragment();
+  for (const c of q.choices) {
+    const el = document.createElement('div');
+    el.className = 'chain-card';
+    el.innerHTML = `<img src="${ART(c.code)}" alt="">`;
+    el.title = `ativar ${nameOf(c.code)}`;
+    el.onclick = () => { box.hidden = true; act('chain', c.index, `ativar ${nameOf(c.code)}`); };
+    frag.append(el);
+  }
+  $('chain-cards').replaceChildren(frag);
+  $('chain-pass').hidden = !!q.chainForced;
+}
+
+// ---------- sim/não: efeito opcional (Dust Tornado, etc.) ----------
+function renderYesno() {
+  const q = (question && question.kind === 'yesno' && question.player === 0) ? question : null;
+  const box = $('yn-overlay');
+  if (!q) { box.hidden = true; return; }
+  box.hidden = false;
+  $('yn-sub').innerHTML = q.askCode
+    ? `Ativar o efeito de <b>${nameOf(q.askCode)}</b>?`
+    : 'O efeito permite uma ação opcional (ex.: Dust Tornado — setar 1 carta da mão). Aceitar?';
+}
+
 // ---------- aplicar a resposta do servidor ----------
 function apply(j) {
   try {
@@ -559,6 +646,8 @@ function apply(j) {
 
     render();
     renderSelection();
+    renderChain();
+    renderYesno();
   } catch (e) {
     console.error('[apply]', e, j);
     warn('ERRO na tela: ' + (e && e.message ? e.message : e) + ' — abra o console (F12) e/ou dê "novo duelo".');
@@ -570,7 +659,10 @@ function handle(ev) {
     // O NPC anuncia a jogada e o motivo — é como dá para conferir se ele está
     // seguindo as regras sem abrir o log do servidor.
     case 'npc':
-      log(`🤖 NPC: ${ev.action} — ${ev.why}`, true);
+      if (ev.action === 'chain' && ev.code)
+        log(`🤖 NPC ativou ${nameOf(ev.code)} em resposta!`, true);
+      else
+        log(`🤖 NPC: ${ev.action} — ${ev.why}`, true);
       return;
     case 'draw':
       if (ev.player === 0) { for (const c of ev.cards) hand[0].push(c.code); }
@@ -1326,9 +1418,9 @@ function savePlays() {
 function concederRecompensa(venci) {
   if (!advNpc || !venci || rewardGiven) return null;
   rewardGiven = true;
-  addDP(WIN_REWARD);
+  if (advReward > 0) addDP(advReward);
   if (advSignature) addCards([advSignature]);
-  return { dp: WIN_REWARD, cardId: advSignature };
+  return { dp: advReward, cardId: advSignature };
 }
 
 /** Popup de fim de duelo: quem venceu + recompensa + botão para voltar à home. */
@@ -1352,6 +1444,9 @@ $('btn-start').onclick = start;
 $('btn-end').onclick = () => act('endturn', 0, 'encerrar turno');
 $('btn-save').onclick = savePlays;
 $('btn-home').onclick = () => (location.href = '/web/index.html');
+$('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
+$('yn-yes').onclick = () => { $('yn-overlay').hidden = true; act('yesno', 1, 'sim'); };
+$('yn-no').onclick = () => { $('yn-overlay').hidden = true; act('yesno', 0, 'não'); };
 $('end-home').onclick = () => (location.href = '/web/index.html');
 $('end-again').onclick = () => { fecharFimDuelo(); start(); };
 $('deck-sel').onchange = start;                 // trocar de deck começa novo duelo
@@ -1369,6 +1464,7 @@ if (advNpc) {
     const active = getNpcActiveDeck(advId);
     advDeck = active?.deck?.main?.length ? active.deck.main : null;
     advSignature = active?.signatureId ?? advNpc.signatureId;
+    advReward = Number.isFinite(Number(active?.rewardDp)) ? Number(active.rewardDp) : WIN_REWARD;
   } catch { advSignature = advNpc.signatureId; }
 }
 

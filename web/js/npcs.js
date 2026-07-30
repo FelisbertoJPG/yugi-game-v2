@@ -30,6 +30,11 @@ export const NPCS = [
 const KEY = 'ygo:npcDecks';       // legado: decks que ficaram só no navegador
 const KEY_ACTIVE = 'ygo:npcActive';  // preferência local de qual deck está ativo
 
+// Recompensa padrão (DP) por vencer um deck de NPC, quando o deck não define a
+// sua. Espelha o WIN_REWARD da carteira — repetido aqui para não acoplar os NPCs
+// (conteúdo do jogo) ao módulo de economia.
+const DEFAULT_REWARD = 100;
+
 /**
  * Cache em memória, hidratado por `loadNpcDecks()`.
  * `{ [npcId]: [{ name, main, extra, signatureId, updatedAt, path }] }`
@@ -97,6 +102,8 @@ export async function loadNpcDecks() {
       signatureId: sig,
       // A moldura é só ilustração; sem ela, a carta que dropa serve de capa.
       coverId: Number(meta.cover) || sig,
+      // Quanto DP este deck dá ao ser vencido (0 é válido: um NPC sem prêmio).
+      rewardDp: Number.isFinite(Number(meta.reward)) ? Number(meta.reward) : DEFAULT_REWARD,
       updatedAt: meta.updated ?? null,
       path,
     });
@@ -136,6 +143,7 @@ export function getNpcDecks(id) {
     index: i, name: d.name, deck: toDeck(npc, d),
     signatureId: d.signatureId ?? npc.signatureId, updatedAt: d.updatedAt ?? null,
     coverId: d.coverId ?? d.signatureId ?? npc.signatureId,
+    rewardDp: Number.isFinite(Number(d.rewardDp)) ? Number(d.rewardDp) : DEFAULT_REWARD,
     // `path` null = o deck ainda não está versionado no projeto (só no navegador).
     path: d.path ?? null,
   }));
@@ -163,7 +171,7 @@ export function getNpcActiveDeck(id) {
  *
  * @returns {Promise<{index:number, path?:string, downloaded?:boolean, error?:string}>}
  */
-export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverId }) {
+export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverId, rewardDp }) {
   const npc = getNpc(id);
   if (!npc) return { index: -1, error: 'NPC inexistente' };
 
@@ -171,12 +179,16 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverI
   const finalName = (name || '').trim() || `Deck ${list.length + 1}`;
   const sig = Number(signatureId) || npc.signatureId;
   const cover = Number(coverId) || sig;
+  // 0 é um prêmio válido (NPC que não dá DP), então só cai no padrão quando o
+  // valor não é um número — não use `||`, que trocaria 0 por 100.
+  const reward = Number.isFinite(Number(rewardDp)) ? Math.max(0, Number(rewardDp)) : DEFAULT_REWARD;
   const entry = {
     name: finalName,
     main: [...deck.main],
     extra: [...deck.extra],
     signatureId: sig,
     coverId: cover,
+    rewardDp: reward,
     updatedAt: new Date().toISOString(),
     path: null,
   };
@@ -185,7 +197,7 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverI
   const path = npcDeckPath(id, finalName);
 
   const r = await saveProjectDeck(path, deck, {
-    name: finalName, npc: id, signature: sig, cover, updated: entry.updatedAt,
+    name: finalName, npc: id, signature: sig, cover, reward, updated: entry.updatedAt,
   });
   entry.path = r.ok ? r.path : null;
 

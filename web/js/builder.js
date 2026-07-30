@@ -318,9 +318,12 @@ function tryPickCover(id) {
 async function saveNpcDeckFromUI() {
   const sig = Number($('npc-drop').value) || npcSignature;
   const name = $('deck-name').value.trim() || `Deck ${npcMode.name}`;
+  // Prêmio em DP por vencer este deck. Campo vazio = padrão; 0 é válido.
+  const rw = $('npc-reward').value;
+  const rewardDp = rw === '' ? undefined : Math.max(0, Number(rw) || 0);
 
   const r = await saveNpcDeckAt(npcMode.id, npcDeckIndex, {
-    name, deck, signatureId: sig, coverId: npcCover || sig,
+    name, deck, signatureId: sig, coverId: npcCover || sig, rewardDp,
   });
   if (r.index < 0) return void toast(r.error ?? 'falha ao salvar');
   npcDeckIndex = r.index;
@@ -486,13 +489,22 @@ function applyFilters() {
     archetype: $('f-arch').value || undefined,
     levelMin: num('f-lvmin'),
     levelMax: num('f-lvmax'),
-    atkMin: num('f-atk'),
   });
   if (sub) poolResults = poolResults.filter((c) => matchesSub(c, cardType, sub));
+  // ATK/DEF EXATOS (cada um opcional): combina entre si e com o nível. Ex.: nível
+  // 4 + DEF 2000 traz todos os 4 com 2000 de defesa; + ATK 800 afunila p/ 800/2000.
+  const atk = num('f-atk');
+  if (atk != null) poolResults = poolResults.filter((c) => c.atk === atk);
+  const def = num('f-def');
+  if (def != null) poolResults = poolResults.filter((c) => c.def === def);
   // Filtro por tag: customizadas trazem tags próprias; boosters injetam
   // nome+raridade nas entradas do índice (annotateDb).
   const tag = $('f-tag').value;
   if (tag) poolResults = poolResults.filter((c) => (c.tags ?? []).includes(tag));
+  // Raridade (dos boosters): filtra pela raridade explícita atribuída num booster.
+  // Carta fora de qualquer booster não tem raridade e some com qualquer filtro aqui.
+  const rar = $('f-rar').value;
+  if (rar) poolResults = poolResults.filter((c) => rarIdx.get(c.id)?.rarity === rar);
   // Lista 1: restringe ao pool jogável desta fase.
   if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
   // Coleção: no Deck Builder "real", só o que o jogador possui.
@@ -501,16 +513,22 @@ function applyFilters() {
   renderPool();
 }
 
-/** Ordena por maior ATK/DEF/nível (decrescente); cartas sem o valor por último. */
+/**
+ * Ordena por ATK/DEF/nível. O sufixo `-asc` é crescente (menor primeiro); sem
+ * ele, decrescente (maior primeiro). Cartas sem o valor vão sempre para o fim,
+ * independente da direção.
+ */
 function sortPool(list, key) {
   if (!key) return list;
-  const val = (c) => (key === 'atk' ? c.atk : key === 'def' ? c.def : c.lv);
+  const asc = key.endsWith('-asc');
+  const field = key.replace('-asc', '');
+  const val = (c) => (field === 'atk' ? c.atk : field === 'def' ? c.def : c.lv);
   return [...list].sort((a, b) => {
     const va = val(a), vb = val(b);
     if (va == null && vb == null) return 0;
     if (va == null) return 1;
     if (vb == null) return -1;
-    return vb - va;
+    return asc ? va - vb : vb - va;
   });
 }
 
@@ -646,10 +664,11 @@ $('deck-select').onchange = (e) => {
 };
 
 $('deck-name').oninput = () => markDirty();
+$('npc-reward').oninput = () => markDirty();
 
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
-const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-sort',
-                    'f-lvmin', 'f-lvmax', 'f-atk'];
+const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-rar', 'f-sort',
+                    'f-lvmin', 'f-lvmax', 'f-atk', 'f-def'];
 for (const id of [...FILTER_IDS, 'f-lista1']) $(id).addEventListener('input', applyFilters);
 
 // os 3 selects de tipo são mutuamente exclusivos: ativar um zera os outros
@@ -946,6 +965,8 @@ if (npc) {
   npcSignature = slot ? slot.signatureId : npc.signatureId;
   npcCover = slot ? (slot.coverId ?? slot.signatureId) : npc.signatureId;
   $('deck-name').value = deck.name;
+  // prêmio em DP do deck (deixa em branco = usa o padrão ao salvar)
+  $('npc-reward').value = slot && Number.isFinite(Number(slot.rewardDp)) ? slot.rewardDp : '';
   enterNpcModeUI();
   markDirty(false);
 } else {

@@ -209,6 +209,11 @@
     carta que dropa:
     <select id="npc-drop" style="max-width:220px; font-size:11px"></select>
   </label>
+  <label style="display:flex; gap:5px; align-items:center" title="quanto DP o jogador ganha ao vencer este deck (vazio = padrão 100)">
+    prêmio:
+    <input type="number" id="npc-reward" min="0" step="50" placeholder="100"
+           style="width:74px; font-size:11px"> DP
+  </label>
   <button id="npc-copy" title="salvar este deck nos seus decks (ex.: joey 1)">salvar p/ mim</button>
   <button id="npc-back">← NPCs</button>
 </div>
@@ -286,15 +291,26 @@
       <select id="f-race"><option value="">raça: todas</option></select>
       <select id="f-arch"><option value="">arquétipo: todos</option></select>
       <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
+      <select id="f-rar" title="filtrar por raridade (dos boosters)">
+        <option value="">todas as raridades</option>
+        <option value="UR">UR</option>
+        <option value="SR">SR</option>
+        <option value="R">R</option>
+        <option value="N">N</option>
+      </select>
       <select id="f-sort" title="ordenar as cartas">
         <option value="">ordem: padrão</option>
         <option value="atk">maior ATK</option>
+        <option value="atk-asc">menor ATK</option>
         <option value="def">maior DEF</option>
+        <option value="def-asc">menor DEF</option>
         <option value="lv">maior nível</option>
+        <option value="lv-asc">menor nível</option>
       </select>
       <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
       <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
-      <input type="number" id="f-atk" placeholder="ATK⩾" min="0" step="100">
+      <input type="number" id="f-atk" placeholder="ATK =" min="0" step="50" title="ATK exato (vazio = qualquer)">
+      <input type="number" id="f-def" placeholder="DEF =" min="0" step="50" title="DEF exato (vazio = qualquer)">
       <label class="chk" title="só as cartas jogáveis nesta fase: Normais + 7 magia/armadilha">
         <input type="checkbox" id="f-lista1"> Lista 1
       </label>

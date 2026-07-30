@@ -391,9 +391,13 @@ function applyFilters() {
     archetype: $('f-arch').value || undefined,
     levelMin: num('f-lvmin'),
     levelMax: num('f-lvmax'),
-    atkMin: num('f-atk'),
   });
   if (sub) poolResults = poolResults.filter((c) => matchesSub(c, cardType, sub));
+  // ATK/DEF exatos (opcionais), combináveis entre si e com o nível.
+  const atk = num('f-atk');
+  if (atk != null) poolResults = poolResults.filter((c) => c.atk === atk);
+  const def = num('f-def');
+  if (def != null) poolResults = poolResults.filter((c) => c.def === def);
   const tag = $('f-tag').value;
   if (tag) poolResults = poolResults.filter((c) => (c.tags ?? []).includes(tag));
   if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
@@ -569,7 +573,7 @@ document.addEventListener('keydown', (e) => {
 
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
 const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-sort',
-                    'f-lvmin', 'f-lvmax', 'f-atk'];
+                    'f-lvmin', 'f-lvmax', 'f-atk', 'f-def'];
 for (const id of [...FILTER_IDS, 'f-lista1']) $(id).addEventListener('input', applyFilters);
 for (const id of TYPE_IDS) {
   $(id).addEventListener('change', () => {

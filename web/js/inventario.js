@@ -237,13 +237,24 @@ function confirmarVenda() {
   toast(`+${r.total} DP · ${r.vendidas} carta${r.vendidas > 1 ? 's' : ''} vendida${r.vendidas > 1 ? 's' : ''}`);
 }
 
-/** Seleciona tudo o que passa de 1 cópia — a limpeza de duplicatas óbvia. */
-function selecionarDuplicatas() {
+/**
+ * Seleciona tudo o que passa de `limite` cópias, deixando `limite` de cada carta.
+ * `limite = 1` é a limpeza de duplicatas; `limite = 3` deixa um playset completo.
+ * Só marca a seleção — a venda continua no botão "vender selecionadas".
+ */
+function selecionarAcimaDe(limite) {
   selecao.clear();
-  for (const c of listaCards()) if (c.qtd > 1) selecao.set(c.id, c.qtd - 1);
+  for (const c of listaCards()) if (c.qtd > limite) selecao.set(c.id, c.qtd - limite);
   renderCards();
   const { copias } = somaSelecao();
-  toast(copias ? `${copias} duplicata${copias > 1 ? 's' : ''} selecionada${copias > 1 ? 's' : ''}` : 'nenhuma duplicata');
+  if (!copias) {
+    toast(limite === 1 ? 'nenhuma duplicata' : `nada acima de ${limite} cópias`);
+    return;
+  }
+  const s = copias > 1 ? 's' : '';
+  toast(limite === 1
+    ? `${copias} duplicata${s} selecionada${s}`
+    : `${copias} cópia${s} acima de ${limite} selecionada${s}`);
 }
 
 // ------------------------------------------------------------------ Decks
@@ -343,7 +354,8 @@ for (const id of ['f-nome', 'f-rar', 'f-ord']) {
   $(id).addEventListener('input', renderCards);
 }
 $('btn-limpar').onclick = () => { selecao.clear(); renderCards(); };
-$('btn-tudo').onclick = selecionarDuplicatas;
+$('btn-tudo').onclick = () => selecionarAcimaDe(1);
+$('btn-acima3').onclick = () => selecionarAcimaDe(3);
 $('btn-vender').onclick = abrirVenda;
 $('venda-cancelar').onclick = () => $('venda-back').classList.remove('show');
 $('venda-ok').onclick = confirmarVenda;

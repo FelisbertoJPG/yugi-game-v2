@@ -134,6 +134,21 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-battle") >= 0)
                 return TestBattle.Run(streamingAssets);
 
+            if (Array.IndexOf(args, "--test-chain") >= 0)
+                return TestChain.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-equip") >= 0)
+                return TestEquip.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-kaiba") >= 0)
+                return TestKaiba.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-dust") >= 0)
+                return TestDust.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-joey") >= 0)
+                return TestJoey.Run(streamingAssets);
+
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)
             {
@@ -154,6 +169,10 @@ namespace DuelServer
                 ProbeBattle.Run(streamingAssets);
                 return 0;
             }
+
+            // Sonda do SELECT_CHAIN (corrente das armadilhas).
+            if (Array.IndexOf(args, "--probe-chain") >= 0)
+                return ProbeChain.Run(streamingAssets);
 
             // Harness de diagnóstico do protocolo (console).
             if (Array.IndexOf(args, "--selfplay") >= 0)

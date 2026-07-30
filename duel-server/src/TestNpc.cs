@@ -44,6 +44,8 @@ namespace DuelServer
         {
             Log.Info("=== regras do NPC (decisao isolada) ===\n");
             LogicaIsolada(sa);
+            Log.Info("\n=== regras de batalha do NPC (decisao isolada) ===\n");
+            BatalhaIsolada(sa);
             Log.Info("\n=== NPC jogando um duelo de verdade ===\n");
             DueloReal(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
@@ -144,6 +146,52 @@ namespace DuelServer
             campo.Clear();
             p = brain.Decide(Idle(Array.Empty<uint>()), 1);
             Check("sem jogada possivel: encerra o turno", p.Action == "endturn");
+        }
+
+        // ------------------------------------------------------------------
+        // Regra de batalha: monta o SELECT_BATTLECMD na mão e confere a decisão.
+        // ------------------------------------------------------------------
+        static void BatalhaIsolada(string sa)
+        {
+            var db = new DatabaseManager(sa);
+            var campo = new List<uint>();                       // campo do oponente (jogador 0)
+            var brain = new NpcBrain(db, p => p == 0 ? campo : new List<uint>());
+
+            InteractiveDuel.Question Battle(IEnumerable<(uint code, bool direct)> atacantes)
+            {
+                var q = new InteractiveDuel.Question { kind = "battle", player = 1 };
+                int i = 0;
+                foreach (var (code, direct) in atacantes)
+                    q.attackers.Add(new InteractiveDuel.Act { code = code, index = i++, canDirect = direct });
+                return q;
+            }
+
+            // campo vazio: ataque direto, com o de maior ATK
+            campo.Clear();
+            var b = brain.DecideBattle(Battle(new[] { (CELTIC, true), (BATTLE_OX, true) }), 1);
+            Check("battle: campo vazio -> ataque direto com o de maior ATK (Battle Ox idx 1)",
+                  b.Attack && b.Index == 1, $"(veio attack={b.Attack} idx {b.Index})");
+
+            // oponente com monstro fraco: ataca (1700 > 1400)
+            campo.Clear(); campo.Add(CELTIC);                   // 1400
+            b = brain.DecideBattle(Battle(new[] { (BATTLE_OX, false) }), 1);
+            Check("battle: 1700 supera o 1400 do oponente -> ataca", b.Attack, $"(veio {b.Attack})");
+
+            // oponente com monstro forte: nao entrega o monstro
+            campo.Clear(); campo.Add(GAIA);                     // 2300
+            b = brain.DecideBattle(Battle(new[] { (BATTLE_OX, false) }), 1);
+            Check("battle: 1700 nao supera 2300 -> encerra o combate", !b.Attack, $"(veio {b.Attack})");
+
+            // dois atacantes, escolhe o maior que ainda supera a ameaca
+            campo.Clear(); campo.Add(CELTIC);                   // 1400
+            b = brain.DecideBattle(Battle(new[] { (MYSTICAL_ELF, false), (BATTLE_OX, false) }), 1);
+            Check("battle: com ameaca 1400, ataca com o Battle Ox (1700, idx 1)",
+                  b.Attack && b.Index == 1, $"(veio attack={b.Attack} idx {b.Index})");
+
+            // sem atacantes: nada a fazer
+            campo.Clear();
+            b = brain.DecideBattle(Battle(Array.Empty<(uint, bool)>()), 1);
+            Check("battle: sem atacantes -> nao ataca", !b.Attack);
         }
 
         // ------------------------------------------------------------------

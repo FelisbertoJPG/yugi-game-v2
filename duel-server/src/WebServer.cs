@@ -50,6 +50,7 @@ namespace DuelServer
             Log.Info($"Servidor de duelo (treino W2) em {url}");
             if (_webRoot != null) Log.Info($"Servidor do front em {extraUrl}  (raiz: {_webRoot})");
             Log.Info("  POST /start · POST /respond · GET /health · POST /shutdown · Ctrl+C para sair");
+            if (Log.FilePath != null) Log.Info($"  log da sessao: {Log.FilePath}");
 
             try { onReady?.Invoke(); }
             catch (Exception e) { Log.Warn($"[web] onReady: {e.Message}"); }
@@ -134,6 +135,7 @@ namespace DuelServer
             uint[] npcDeck = ReadDeck(body, "npcDeck");
             if (npcDeck.Length == 0) npcDeck = null;
 
+            Log.Info($"[rpc] /start deck={deck.Length} npc={npc} npcDeck={(npcDeck?.Length ?? 0)} seed={seed}");
             lock (_lock)
             {
                 _duel?.Dispose();
@@ -156,6 +158,8 @@ namespace DuelServer
                     if (e.ValueKind == JsonValueKind.Number) args.Add(e.GetInt32());
             }
 
+            Log.Info($"[rpc] /respond {action ?? "endturn"} arg={arg}"
+                     + (args != null ? $" args=[{string.Join(",", args)}]" : ""));
             lock (_lock)
             {
                 if (_duel == null) return new { error = "nenhum duelo ativo — dê /start" };

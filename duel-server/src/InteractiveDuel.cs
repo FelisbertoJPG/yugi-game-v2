@@ -30,7 +30,15 @@ namespace DuelServer
         // Alimentado pelo MSG_MOVE — é o que a IA do NPC usa para "ver" a mesa.
         readonly Dictionary<(int player, int seq), (uint code, int pos)> _board = new();
 
+        // Mão de cada jogador e quantas zonas de magia/armadilha (SZONE) estão
+        // ocupadas — a IA usa para achar o Reborn na mão e não afogar as magias
+        // com armadilhas setadas. Alimentados pelo MSG_DRAW e pelo MSG_MOVE.
+        readonly List<uint>[] _hand = { new(), new() };
+        readonly int[] _st = { 0, 0 };
+
         const byte LOCATION_MZONE = 0x4;
+        const byte LOCATION_HAND = 0x2;
+        const byte LOCATION_SZONE = 0x8;
 
         /// <summary>A carta está OCULTA para você? Virada (pos &amp; 0xa = face-down)
         /// e do oponente (ctrl != HUMAN). O front nunca deve receber o código dela —
@@ -42,6 +50,9 @@ namespace DuelServer
         readonly NpcBrain _npc;
         readonly bool _npcEnabled;
         List<object> _events;   // para o NPC registrar o que fez
+
+        /// <summary>Gancho de diagnóstico do SELECT_CHAIN cru (só o --probe-chain liga).</summary>
+        public static Action<byte[], int, int> ChainProbe;
 
         public sealed class Question
         {
@@ -65,6 +76,8 @@ namespace DuelServer
             public bool canFinish;               // selectunselect: já dá para encerrar
             public int sumNeeded;                // selectsum: quanto ainda falta somar
             public bool sumOverflow;             // selectsum: soma "OU MAIS" (ritual) vs exata
+            public bool chainForced;             // chain: TEM de ativar algo (não pode recusar)
+            public uint askCode;                 // yesno (EFFECTYN): carta cujo efeito é oferecido
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
@@ -102,8 +115,16 @@ namespace DuelServer
         {
             _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags);
             _npcEnabled = npc;
-            _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"));
+            _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
+                                HandOf, StCountOf);
         }
+
+        /// <summary>Cartas na mão de um jogador (para a IA achar Reborn/dragões).</summary>
+        IReadOnlyList<uint> HandOf(int player) =>
+            player >= 0 && player <= 1 ? _hand[player] : (IReadOnlyList<uint>)Array.Empty<uint>();
+
+        /// <summary>Zonas de magia/armadilha ocupadas de um jogador.</summary>
+        int StCountOf(int player) => player >= 0 && player <= 1 ? _st[player] : 0;
 
         /// <summary>
         /// Monstros com a face para cima de um jogador. Só face para cima de
@@ -151,7 +172,16 @@ namespace DuelServer
 
                 var q = _pending;
                 if (q == null) { _s.Respond(I32(-1)); continue; }         // desconhecido: recusa
-                if (q.kind == "chain") { _s.Respond(I32(-1)); continue; }  // ninguém encadeia (vanilla)
+
+                // Corrente (SELECT_CHAIN): janela sem nada some sozinha; com opções,
+                // o NPC decide pela sua regra e o humano decide na tela.
+                if (q.kind == "chain")
+                {
+                    if (q.choices.Count == 0) { _s.Respond(I32(-1)); continue; }
+                    if (q.player != HUMAN) { _s.Respond(NpcChain(q)); continue; }
+                    r.question = q; return r;
+                }
+
                 if (q.player != HUMAN) { AutoPass(q); continue; }          // oponente desligado
 
                 // Seleção de cartas do jogador: se houver escolha real, devolve
@@ -222,8 +252,65 @@ namespace DuelServer
                 "activate" => I32((play.Index << 16) | 5),
                 "summon" => I32(play.Index << 16),
                 "setmonster" => I32((play.Index << 16) | 3),
+                "setspell" => I32((play.Index << 16) | 4),   // seta magia/armadilha
+                "battle" => I32(6),   // vai para a Battle Phase
                 _ => I32(7),   // encerra o turno
             };
+        }
+
+        /// <summary>Seleção do NPC (tributo/alvo/descarte/reborn) pela regra do brain.</summary>
+        byte[] NpcSelect(Question q)
+        {
+            var idx = _npcEnabled ? _npc.DecideSelect(q, q.player) : null;
+            return idx != null && idx.Count > 0 ? EncodeSelect(idx) : AutoSelect(q);
+        }
+
+        /// <summary>
+        /// Soma do ritual (SELECT_SUM) para o NPC: prefere alimentar o cemitério com
+        /// o monstro de MAIOR nível, então ordena as opções por nível decrescente
+        /// antes de procurar a combinação — assim o dragão grande entra como material.
+        /// </summary>
+        byte[] NpcSum(Question q)
+        {
+            if (!_npcEnabled) return AutoSum(q);
+            var ordenado = q.choices.OrderByDescending(c => c.param).ToList();
+            List<int> pick = null;
+            EnumeraSomas(ordenado, q.sumNeeded, q.selMin, q.selMax, q.sumOverflow,
+                         p => { pick = p; return false; });
+            return pick != null && pick.Count > 0 ? EncodeSelect(pick) : AutoSum(q);
+        }
+
+        /// <summary>
+        /// Turno do NPC na Battle Phase. Desligada a IA, encerra o combate (I32(3));
+        /// ligada, o NpcBrain decide se ataca (comando 1, índice do atacante) ou
+        /// encerra. O motor volta a perguntar por atacante, então cada chamada
+        /// resolve um ataque.
+        /// </summary>
+        byte[] NpcBattle(Question q)
+        {
+            if (!_npcEnabled) return I32(3);
+
+            var play = _npc.DecideBattle(q, q.player);
+            _events?.Add(new { type = "npc", action = play.Attack ? "attack" : "endbattle", why = play.Why });
+            Log.Info($"[npc] {(play.Attack ? "attack" : "endbattle")} -> {play.Why}");
+
+            return play.Attack ? I32((play.Index << 16) | 1) : I32(3);
+        }
+
+        /// <summary>
+        /// Corrente do NPC (SELECT_CHAIN com opções). O NpcBrain diz qual índice
+        /// ativar (ou -1 para recusar). Registra o que ativou para o front mostrar.
+        /// </summary>
+        byte[] NpcChain(Question q)
+        {
+            int idx = _npcEnabled ? _npc.DecideChain(q) : -1;
+            if (idx >= 0 && idx < q.choices.Count)
+            {
+                var c = q.choices[idx];
+                _events?.Add(new { type = "npc", action = "chain", code = c.code, why = $"ativa {c.code} em resposta" });
+                Log.Info($"[npc] chain -> ativa {c.code} (idx {idx})");
+            }
+            return I32(idx);
         }
 
         /// <summary>Há mais candidatos do que o necessário? Só então vale perguntar.</summary>
@@ -253,6 +340,8 @@ namespace DuelServer
             ["selectsum"] = new[] { "select" },
             ["selectunselect"] = new[] { "pick", "finishselect" },
             ["position"] = new[] { "position" },
+            ["chain"] = new[] { "chain" },
+            ["yesno"] = new[] { "yesno" },
         };
 
         /// <summary>Aplica a jogada do player e avança de novo.</summary>
@@ -302,6 +391,8 @@ namespace DuelServer
             "attack" => I32((arg << 16) | 1),         // battlecmd, comando 1 = atacar
             "tomain2" => I32(2),                      // battlecmd, comando 2 = ir pra Main2
             "endbattle" => I32(3),                    // battlecmd, comando 3 = End Phase
+            "chain" => I32(arg),                      // corrente: índice a ativar, ou -1 recusa
+            "yesno" => I32(arg),                      // sim/não: 1 = sim, 0 = não
             _ => I32(-1),
         };
 
@@ -310,7 +401,7 @@ namespace DuelServer
             switch (q.kind)
             {
                 case "idle": _s.Respond(NpcIdle(q)); break;
-                case "battle": _s.Respond(I32(3)); break;         // encerra battle
+                case "battle": _s.Respond(NpcBattle(q)); break;   // ataca pelas regras (ou encerra)
                 case "place":
                     // A localização TEM de acompanhar o tipo de zona pedido: uma
                     // magia vai para a zona de magia (0x8), não para a de monstro.
@@ -324,14 +415,19 @@ namespace DuelServer
                     });
                     break;
                 case "position": _s.Respond(I32(0x1)); break;
+                case "yesno":
+                    // Efeito opcional (ex.: Dust Tornado setar da mão): o NPC aceita.
+                    _events?.Add(new { type = "npc", action = "yesno", why = "aceita o efeito opcional" });
+                    _s.Respond(I32(1));
+                    break;
                 case "selectcard":
-                case "selecttribute": _s.Respond(AutoSelect(q)); break;
+                case "selecttribute": _s.Respond(NpcSelect(q)); break;
                 case "selectunselect":
                     // Oponente desligado: escolhe a primeira; se não há o que
                     // escolher, encerra.
                     _s.Respond(q.choices.Count > 0 ? PickOne(q.choices[0].index) : I32(-1));
                     break;
-                case "selectsum": _s.Respond(AutoSum(q)); break;   // NPC não escolhe: resolve
+                case "selectsum": _s.Respond(NpcSum(q)); break;   // ritual: prefere nível alto
                 default: _s.Respond(I32(-1)); break;
             }
         }
@@ -382,7 +478,9 @@ namespace DuelServer
                     {
                         uint c = BitConverter.ToUInt32(d, p); p += 8;
                         bool hidden = (c & 0x80000000) != 0;
-                        cards.Add(new { code = c & 0x7FFFFFFF, hidden });
+                        uint real = c & 0x7FFFFFFF;
+                        cards.Add(new { code = real, hidden });
+                        if (pl <= 1) _hand[pl].Add(real);   // a IA precisa saber a mão do NPC
                     }
                     ev.Add(new { type = "draw", player = pl, cards });
                     break;
@@ -407,6 +505,11 @@ namespace DuelServer
                     // Mantém o modelo de campo em dia (com o código REAL) para a IA.
                     if (pl == LOCATION_MZONE) _board.Remove((pc, ps));
                     if (cl == LOCATION_MZONE) _board[(cc, cs)] = (code, cpo);
+                    // Mão e zonas de magia/armadilha do NPC (código real).
+                    if (pl == LOCATION_HAND && pc <= 1) _hand[pc].Remove(code);
+                    if (cl == LOCATION_HAND && cc <= 1) _hand[cc].Add(code);
+                    if (pl == LOCATION_SZONE && pc <= 1 && _st[pc] > 0) _st[pc]--;
+                    if (cl == LOCATION_SZONE && cc <= 1) _st[cc]++;
                     break;
                 }
                 case 53: // MSG_POS_CHANGE
@@ -466,7 +569,16 @@ namespace DuelServer
                 case 18: _pending = ParsePlace(d, o); break;
                 case 10: _pending = ParseBattle(d, o, mlen); break;
                 case 19: _pending = new Question { kind = "position", player = d[o + 1] }; break;
-                case 16: _pending = new Question { kind = "chain", player = d.Length > o + 1 ? d[o + 1] : (byte)0 }; break;
+                // MSG_SELECT_EFFECTYN (12) e MSG_SELECT_YESNO (13): pergunta de
+                // sim/não. Ex.: Dust Tornado, após destruir, oferece "setar 1 magia/
+                // armadilha da mão?". Resposta = int32 (1=sim, 0=não). O 12 traz o
+                // código da carta cujo efeito é oferecido; o 13 é um sim/não puro.
+                case 12: _pending = new Question { kind = "yesno", player = d[o + 1], askCode = BitConverter.ToUInt32(d, o + 2) & 0x7FFFFFFF }; break;
+                case 13: _pending = new Question { kind = "yesno", player = d[o + 1] }; break;
+                case 16:
+                    ChainProbe?.Invoke(d, o, mlen);   // diagnóstico do layout (--probe-chain)
+                    _pending = ParseSelectChain(d, o, mlen);
+                    break;
                 case 15: _pending = ParseSelectCards(d, o, mlen, "selectcard"); break;
                 case 20: _pending = ParseSelectCards(d, o, mlen, "selecttribute"); break;
                 case 26: _pending = ParseSelectUnselect(d, o, mlen); break;
@@ -604,6 +716,46 @@ namespace DuelServer
         /// quantos tributos a carta vale. Deduzimos o tamanho pelo comprimento
         /// da mensagem em vez de assumir, porque isso já mordeu antes.
         /// </summary>
+        /// <summary>
+        /// SELECT_CHAIN (16). Cabeçalho de 16 bytes:
+        ///   type(1) player(1) speCount(1) forced(1) hintTiming(4) hintOutro(4) count(4)
+        /// e uma entrada de 23 bytes por carta ativável:
+        ///   code(4) ctrl(1) loc(1) seq(4) pos(4) desc(8) flag(1).
+        /// Medido com --probe-chain (Mirror Force setada + ataque do NPC). count 0 =
+        /// janela sem nada para encadear. Deduzo o tamanho da entrada pelo
+        /// comprimento, como no SELECT_CARD, para não desalinhar em silêncio.
+        /// </summary>
+        Question ParseSelectChain(byte[] d, int o, int mlen)
+        {
+            var q = new Question
+            {
+                kind = "chain",
+                player = d[o + 1],
+                chainForced = d[o + 3] != 0,
+            };
+            const int header = 16;
+            int count = mlen >= 16 ? BitConverter.ToInt32(d, o + 12) : 0;
+            int rest = mlen - header;
+            if (count > 0 && rest >= count)
+            {
+                int entry = rest / count;
+                for (int i = 0; i < count; i++)
+                {
+                    int p = o + header + i * entry;
+                    if (p + 10 > o + mlen) break;
+                    q.choices.Add(new Sel
+                    {
+                        code = BitConverter.ToUInt32(d, p),
+                        controller = d[p + 4],
+                        location = d[p + 5],
+                        sequence = BitConverter.ToInt32(d, p + 6),
+                        index = i,
+                    });
+                }
+            }
+            return q;
+        }
+
         Question ParseSelectCards(byte[] d, int o, int mlen, string kind)
         {
             var q = new Question

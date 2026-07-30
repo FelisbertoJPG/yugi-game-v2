@@ -39,14 +39,40 @@ export async function pullFile(name) {
   return (await pullFileEx(name)).data;
 }
 
+/**
+ * Uma gravação em voo por arquivo; se chegarem outras enquanto isso, só a
+ * ÚLTIMA é enviada depois. As demais são descartadas de propósito: cada envio
+ * carrega o estado inteiro, então o mais novo já contém o que os anteriores
+ * diriam.
+ *
+ * Sem isso, uma ação como abrir um pacote (que grava DP, coleção, pity e o
+ * contador da UR em sequência) dispara quatro POSTs simultâneos. Além de
+ * inútil, eles chegam fora de ordem — um estado velho podia sobrescrever um
+ * novo — e concorriam pelo mesmo arquivo no disco.
+ */
+const emVoo = new Map();     // name -> Promise
+const pendente = new Map();  // name -> último payload aguardando
+
+function enviar(name, data) {
+  return fetch(`/__store/${name}.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).catch(() => {});
+}
+
+function drenar(name) {
+  if (!pendente.has(name)) { emVoo.delete(name); return; }
+  const proximo = pendente.get(name);
+  pendente.delete(name);
+  emVoo.set(name, enviar(name, proximo).finally(() => drenar(name)));
+}
+
 /** Grava `store/<name>.json` (fire-and-forget: falha silenciosa sem server). */
 export function pushFile(name, data) {
   try {
-    fetch(`/__store/${name}.json`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }).catch(() => {});
+    if (emVoo.has(name)) { pendente.set(name, data); return; }
+    emVoo.set(name, enviar(name, data).finally(() => drenar(name)));
   } catch { /* sem servidor: só o localStorage guarda */ }
 }
 

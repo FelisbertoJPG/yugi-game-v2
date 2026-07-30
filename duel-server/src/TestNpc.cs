@@ -22,6 +22,18 @@ namespace DuelServer
         const uint POT = 55144522;           // Pote da Ganancia
         const uint AQUA_MADOOR = 85639257;   // 1200 / 2000  <- o caso do exemplo
         const uint GIANT_SOLDIER = 13039848; // 1300 / 2000
+        const uint POLYMERIZATION = 24094653;      // fusao
+        const uint FUSION_SAGE = 26902560;         // busca 1 Polymerization
+        const uint BLACK_LUSTER_RITUAL = 55761792; // magia de ritual (tem TYPE_RITUAL)
+        const uint MONSTER_REBORN_ID = 83764718;
+        const uint GAIA_CHAMPION = 66889139;       // fusao Nv7 2600/2100
+        const uint SUMMONED_SKULL_LIKE = 70781052; // Summoned Skull Nv6 2500/1200 (1 tributo)
+        const uint BLACK_SKULL_DRAGON = 11901678;  // fusao Nv9 3200/2500
+        const uint RED_EYES = 74677422;            // Nv7 2400/2000 (2 tributos)
+        const uint TRAP_HOLE = 4206964;             // Armadilha Normal: destroi o invocado
+        const uint DUST_TORNADO = 60082869;         // remocao de S/T (Armadilha Normal)
+        const uint CALL_HAUNTED = 97077563;        // continua ABERTA: alvo que vale remocao
+        const uint MYSTERY_SHELL_DRAGON = 18108166;// Nv4 2000/0 — ameaca que os Nv4 do NPC nao superam
 
         static int _pass, _fail;
 
@@ -44,6 +56,8 @@ namespace DuelServer
         {
             Log.Info("=== regras do NPC (decisao isolada) ===\n");
             LogicaIsolada(sa);
+            Log.Info("\n=== posicao de batalha e uso de corrente ===\n");
+            PosicaoECorrente(sa);
             Log.Info("\n=== regras de batalha do NPC (decisao isolada) ===\n");
             BatalhaIsolada(sa);
             Log.Info("\n=== NPC jogando um duelo de verdade ===\n");
@@ -111,6 +125,111 @@ namespace DuelServer
             Check("regra 4: Pote da Ganancia antes de qualquer invocacao",
                   p.Action == "activate" && p.Index == 0, $"(veio {p.Action} idx {p.Index})");
 
+            // --- busca especifica ANTES da compra ---------------------------
+            // Com Pote e Fusion Sage na mao, a busca vem primeiro: comprar antes
+            // poderia trazer a propria Polymerization e deixar a Sage morta.
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { BATTLE_OX },
+                                  activatable: new[] { POT, FUSION_SAGE }), 1);
+            Check("busca especifica (Fusion Sage) vem ANTES do Pote da Ganancia",
+                  p.Action == "activate" && p.Index == 1, $"(veio {p.Action} idx {p.Index})");
+
+            // Sozinho, o Pote continua sendo a primeira jogada — a nova regra nao
+            // pode ter empurrado a compra para tras quando nao ha busca.
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { BATTLE_OX }, activatable: new[] { POT }), 1);
+            Check("sem busca na mao, o Pote continua vindo primeiro",
+                  p.Action == "activate" && p.Index == 0, $"(veio {p.Action} idx {p.Index})");
+
+            // A busca tambem vem antes de invocar (é jogada de Main Phase barata).
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { GAIA, BATTLE_OX },
+                                  activatable: new[] { FUSION_SAGE }), 1);
+            Check("busca especifica vem antes de invocar",
+                  p.Action == "activate" && p.Index == 0, $"(veio {p.Action} idx {p.Index})");
+
+            // --- fusao, mesma logica do ritual ------------------------------
+            // A Poly ganha da invocacao pelo mesmo motivo do ritual: poe corpo
+            // grande em campo E enche o cemiterio para o Monster Reborn.
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { BATTLE_OX, GAIA },
+                                  activatable: new[] { POLYMERIZATION }), 1);
+            Check("fusao (Polymerization) tem prioridade sobre invocar",
+                  p.Action == "activate" && p.Index == 0, $"(veio {p.Action} idx {p.Index})");
+
+            // Ritual e fusao sao do mesmo nivel; o ritual foi declarado primeiro,
+            // entao ele resolve antes. O teste fixa essa ordem de propósito.
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { BATTLE_OX },
+                                  activatable: new[] { POLYMERIZATION, BLACK_LUSTER_RITUAL }), 1);
+            Check("com ritual E fusao na mao, o ritual resolve primeiro",
+                  p.Action == "activate" && p.Index == 1, $"(veio {p.Action} idx {p.Index})");
+
+            // O Monster Reborn continua acima das duas: reviver e' de graca,
+            // enquanto ritual/fusao gastam material.
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { BATTLE_OX },
+                                  activatable: new[] { POLYMERIZATION, MONSTER_REBORN_ID }), 1);
+            Check("Monster Reborn continua acima da fusao",
+                  p.Action == "activate" && p.Index == 1, $"(veio {p.Action} idx {p.Index})");
+
+            // --- nao tributar um corpo melhor do que o que entra -------------
+            // A jogada absurda observada em duelo: o NPC tinha uma FUSAO de 2600
+            // em campo e tributou justamente ela para invocar um 2500.
+            //
+            // Repare que `campo` aqui e' o do jogador 0 e o brain decide pelo 1,
+            // entao para simular o campo DO NPC precisamos de um brain proprio
+            // que enxergue o lado 1.
+            var meuCampo = new List<uint>();
+            var brainNpc = new NpcBrain(db, p => p == 1 ? meuCampo : new List<uint>());
+
+            meuCampo.Clear(); meuCampo.Add(GAIA_CHAMPION);   // fusao 2600 em campo
+            p = brainNpc.Decide(Idle(new[] { GAIA }), 1);    // Nv7 2300, pediria 2 tributos
+            Check("NAO tributa a fusao 2600 para invocar um 2300",
+                  p.Action != "summon", $"(veio {p.Action} idx {p.Index})");
+
+            // O caso limite do relato: 2500 entrando contra 2600 saindo.
+            meuCampo.Clear(); meuCampo.Add(GAIA_CHAMPION);
+            p = brainNpc.Decide(Idle(new[] { SUMMONED_SKULL_LIKE }), 1);
+            Check("NAO tributa 2600 para invocar 2500",
+                  p.Action != "summon", $"(veio {p.Action} idx {p.Index})");
+
+            // Mas continua subindo quando a troca MELHORA o campo: dois corpos
+            // fracos viram um Nv7 de 2300.
+            meuCampo.Clear(); meuCampo.Add(CELTIC); meuCampo.Add(MYSTICAL_ELF); // 1400 e 800
+            p = brainNpc.Decide(Idle(new[] { GAIA }), 1);
+            Check("AINDA tributa quando a troca melhora (1400/800 -> Nv7 2300)",
+                  p.Action == "summon", $"(veio {p.Action} idx {p.Index})");
+
+            // Campo vazio: sem tributo visivel, confia no motor (foi ele que ofereceu).
+            meuCampo.Clear();
+            p = brainNpc.Decide(Idle(new[] { GAIA }), 1);
+            Check("campo vazio: nao bloqueia a invocacao oferecida pelo motor",
+                  p.Action == "summon", $"(veio {p.Action} idx {p.Index})");
+
+            // O MESMO erro pela porta de trás: SETAR tambem custa tributo.
+            // Relato: fusao de 3200 tributada para setar um Red-Eyes (2400/2000).
+            meuCampo.Clear(); meuCampo.Add(BLACK_SKULL_DRAGON);   // fusao 3200
+            p = brainNpc.Decide(Idle(Array.Empty<uint>(), settable: new[] { RED_EYES }), 1);
+            Check("NAO tributa a fusao 3200 para SETAR um Red-Eyes (DEF 2000)",
+                  p.Action != "setmonster", $"(veio {p.Action} idx {p.Index})");
+
+            // E com ameaca em campo, que e' quando a regra de defesa empurraria
+            // para o Set — o custo continua pesando mais.
+            meuCampo.Clear(); meuCampo.Add(BLACK_SKULL_DRAGON);
+            campo.Clear(); campo.Add(GAIA_CHAMPION);              // ameaca 2600 do outro lado
+            p = brainNpc.Decide(Idle(Array.Empty<uint>(), settable: new[] { RED_EYES }), 1);
+            Check("nem sob ameaca tributa 3200 para setar 2000 de DEF",
+                  p.Action != "setmonster", $"(veio {p.Action} idx {p.Index})");
+            campo.Clear();
+
+            // Mas o Tribute Set continua valendo quando a DEF que entra supera o
+            // que sai: dois corpos fracos viram uma parede de 2000.
+            meuCampo.Clear(); meuCampo.Add(CELTIC); meuCampo.Add(MYSTICAL_ELF);  // 1400 e 800
+            p = brainNpc.Decide(Idle(Array.Empty<uint>(), settable: new[] { RED_EYES }), 1);
+            Check("AINDA seta com tributo quando a DEF supera o sacrificado (1400 -> DEF 2000)",
+                  p.Action == "setmonster", $"(veio {p.Action} idx {p.Index})");
+
             // --- statline da propria carta decide o modo --------------------
             // O caso exato levantado: o jogador tem 1100 em campo e o NPC tem um
             // Aqua Madoor 1200/2000. Ele venceria atacando (1200 > 1100), mas o
@@ -151,6 +270,142 @@ namespace DuelServer
         // ------------------------------------------------------------------
         // Regra de batalha: monta o SELECT_BATTLECMD na mão e confere a decisão.
         // ------------------------------------------------------------------
+        /// <summary>
+        /// Dois relatos de duelo real, virados em teste:
+        ///   1. o NPC atacou uma Mystical Elf (800/2000) DEITADA com um Battle Ox
+        ///      (1700) — comparava com a ATK dela em vez da DEF;
+        ///   2. o NPC gastou um Dust Tornado sobre uma magia de ritual que já
+        ///      estava resolvendo, em vez de guardar para uma carta setada.
+        /// </summary>
+        static void PosicaoECorrente(string sa)
+        {
+            var db = new DatabaseManager(sa);
+
+            // Campo do oponente COM posição, que é a informação que faltava.
+            var campoPos = new List<(uint code, int pos)>();
+            int setStDoOponente = 0;
+            var stAbertasDoOponente = new List<uint>();
+            const int ATAQUE = 0x1, DEFESA = 0x4;
+
+            var brain = new NpcBrain(
+                db,
+                fieldOf: p => p == 0 ? campoPos.Select(x => x.code).ToList() : new List<uint>(),
+                log: _ => { },
+                handOf: null, stCountOf: null,
+                fieldPosOf: p => p == 0 ? campoPos : new List<(uint, int)>(),
+                setStCountOf: _ => setStDoOponente,
+                faceUpStOf: _ => stAbertasDoOponente);
+
+            InteractiveDuel.Question Batalha(params uint[] atacantes)
+            {
+                var q = new InteractiveDuel.Question { kind = "battle", player = 1 };
+                int i = 0;
+                foreach (var c in atacantes)
+                    q.attackers.Add(new InteractiveDuel.Act { code = c, index = i++, canDirect = false });
+                return q;
+            }
+
+            // 1. o caso relatado: parede deitada de 2000 DEF
+            campoPos.Clear(); campoPos.Add((MYSTICAL_ELF, DEFESA));   // 800/2000 em DEFESA
+            var b = brain.DecideBattle(Batalha(BATTLE_OX), 1);        // 1700 de ATK
+            Check("NAO ataca a Mystical Elf deitada (DEF 2000) com o Battle Ox (1700)",
+                  !b.Attack, $"(veio attack={b.Attack} — {b.Why})");
+
+            // a MESMA carta em ataque vale 800: aí o ataque e' correto
+            campoPos.Clear(); campoPos.Add((MYSTICAL_ELF, ATAQUE));
+            b = brain.DecideBattle(Batalha(BATTLE_OX), 1);
+            Check("ATACA a mesma Elfa quando ela esta em ATAQUE (vale 800)",
+                  b.Attack, $"(veio attack={b.Attack} — {b.Why})");
+
+            // parede que da' para vencer continua sendo alvo
+            campoPos.Clear(); campoPos.Add((CELTIC, DEFESA));         // 1400/1200 deitado
+            b = brain.DecideBattle(Batalha(BATTLE_OX), 1);
+            Check("ataca parede fraca deitada (DEF 1200 < 1700)",
+                  b.Attack, $"(veio attack={b.Attack} — {b.Why})");
+
+            // com varios alvos, basta UM que eu venca
+            campoPos.Clear();
+            campoPos.Add((MYSTICAL_ELF, DEFESA));   // vale 2000
+            campoPos.Add((CELTIC, DEFESA));         // vale 1200
+            b = brain.DecideBattle(Batalha(BATTLE_OX), 1);
+            Check("com um alvo vencivel entre varios, ataca",
+                  b.Attack, $"(veio attack={b.Attack} — {b.Why})");
+
+            // 2. Dust Tornado: sem carta setada do outro lado, GUARDA
+            var chain = new InteractiveDuel.Question { kind = "chain", player = 1 };
+            chain.choices.Add(new InteractiveDuel.Sel { code = DUST_TORNADO, index = 0 });
+            setStDoOponente = 0;
+            brain.ResetCadeia();
+            int idx = brain.DecideChain(chain, 1);
+            Check("NAO queima o Dust Tornado sem carta setada do oponente",
+                  idx == -1, $"(veio idx {idx})");
+
+            // com carta setada, usa
+            setStDoOponente = 1;
+            brain.ResetCadeia();
+            idx = brain.DecideChain(chain, 1);
+            Check("USA o Dust Tornado quando o oponente tem carta setada",
+                  idx == 0, $"(veio idx {idx})");
+
+            // armadilha que nao e' remocao de S/T continua sendo ativada na hora
+            var chain2 = new InteractiveDuel.Question { kind = "chain", player = 1 };
+            chain2.choices.Add(new InteractiveDuel.Sel { code = 44095762, index = 0 }); // Mirror Force
+            setStDoOponente = 0;
+            brain.ResetCadeia();
+            idx = brain.DecideChain(chain2, 1);
+            Check("Mirror Force continua sendo ativada na corrente",
+                  idx == 0, $"(veio idx {idx})");
+
+            // 4. UMA carta por cadeia. Relato: numa Invocacao-Normal o NPC ativava
+            //    DOIS Trap Hole seguidos — o primeiro ja destroi o monstro, o
+            //    segundo resolve sem alvo e vai para o lixo.
+            var trapHoles = new InteractiveDuel.Question { kind = "chain", player = 1 };
+            trapHoles.choices.Add(new InteractiveDuel.Sel { code = TRAP_HOLE, index = 0 });
+            trapHoles.choices.Add(new InteractiveDuel.Sel { code = TRAP_HOLE, index = 1 });
+
+            brain.ResetCadeia();
+            int primeiro = brain.DecideChain(trapHoles, 1);
+            Check("o primeiro Trap Hole e' ativado", primeiro == 0, $"(veio idx {primeiro})");
+
+            // segunda janela da MESMA cadeia: o motor pergunta de novo
+            int segundo = brain.DecideChain(trapHoles, 1);
+            Check("o SEGUNDO Trap Hole nao e' gasto na mesma cadeia",
+                  segundo == -1, $"(veio idx {segundo})");
+
+            // cadeia nova (o host avisa): volta a poder encadear
+            brain.ResetCadeia();
+            int novaCadeia = brain.DecideChain(trapHoles, 1);
+            Check("numa cadeia NOVA ele volta a ativar",
+                  novaCadeia == 0, $"(veio idx {novaCadeia})");
+
+            // se o motor OBRIGAR (chainForced), a regra sai da frente
+            brain.ResetCadeia();
+            brain.DecideChain(trapHoles, 1);
+            trapHoles.chainForced = true;
+            int forcado = brain.DecideChain(trapHoles, 1);
+            Check("com chainForced ele ativa mesmo ja tendo encadeado",
+                  forcado == 0, $"(veio idx {forcado})");
+            trapHoles.chainForced = false;
+            brain.ResetCadeia();
+
+            // 3. Call of the Haunted ABERTA vale a remocao mesmo sem carta setada:
+            //    destrui-la leva junto o monstro que ela reviveu (2-por-1).
+            setStDoOponente = 0;
+            stAbertasDoOponente.Clear(); stAbertasDoOponente.Add(CALL_HAUNTED);
+            brain.ResetCadeia();
+            idx = brain.DecideChain(chain, 1);
+            Check("USA o Dust Tornado no Call of the Haunted aberto (leva o monstro junto)",
+                  idx == 0, $"(veio idx {idx})");
+
+            // ...mas uma continua qualquer nao justifica: so' o que SUSTENTA algo.
+            stAbertasDoOponente.Clear(); stAbertasDoOponente.Add(55144522); // Pote (magia normal)
+            brain.ResetCadeia();
+            idx = brain.DecideChain(chain, 1);
+            Check("NAO gasta a remocao numa magia comum aberta",
+                  idx == -1, $"(veio idx {idx})");
+            stAbertasDoOponente.Clear();
+        }
+
         static void BatalhaIsolada(string sa)
         {
             var db = new DatabaseManager(sa);
@@ -199,13 +454,24 @@ namespace DuelServer
         // ------------------------------------------------------------------
         static void DueloReal(string sa)
         {
-            var deck = new List<uint>();
-            for (int i = 0; i < 6; i++) deck.Add(POT);
-            for (int i = 0; i < 3; i++) deck.Add(GAIA);
+            // Deck do NPC: Pote + um Nv7 + beaters Nv4.
+            var deckNpc = new List<uint>();
+            for (int i = 0; i < 6; i++) deckNpc.Add(POT);
+            for (int i = 0; i < 3; i++) deckNpc.Add(GAIA);
             uint[] lv4 = { BATTLE_OX, MYSTICAL_ELF, CELTIC };
-            while (deck.Count < 40) deck.Add(lv4[deck.Count % lv4.Length]);
+            while (deckNpc.Count < 40) deckNpc.Add(lv4[deckNpc.Count % lv4.Length]);
 
-            using var duel = new InteractiveDuel(sa, deck.ToArray(), 13579UL, 0x1000000UL, npc: true);
+            // Deck do JOGADOR: só Nv4 de 2000 ATK. Isto é deliberado — a regra 2
+            // exige uma ameaça que o NPC não supere, e antes os dois lados usavam
+            // o MESMO deck: bastava o NPC abrir bem para ele nunca ficar em
+            // desvantagem e a regra jamais disparar. Com 2000 do outro lado e no
+            // máximo 1700 entre os Nv4 dele, a ameaça é garantida sem depender
+            // de sorte de compra.
+            var deckJogador = new List<uint>();
+            while (deckJogador.Count < 40) deckJogador.Add(MYSTERY_SHELL_DRAGON);
+
+            using var duel = new InteractiveDuel(sa, deckJogador.ToArray(), 13579UL, 0x1000000UL,
+                                                 npc: true, npcDeck: deckNpc.ToArray());
             var r = duel.Advance();
 
             var acoes = new List<string>();

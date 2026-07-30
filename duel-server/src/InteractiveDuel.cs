@@ -35,6 +35,12 @@ namespace DuelServer
         // com armadilhas setadas. Alimentados pelo MSG_DRAW e pelo MSG_MOVE.
         readonly List<uint>[] _hand = { new(), new() };
         readonly int[] _st = { 0, 0 };
+        // Modelo da zona de magia/armadilha, por (jogador, sequência), com a
+        // POSIÇÃO. Serve para duas perguntas que o NPC precisa fazer: "o
+        // oponente tem carta setada?" (vale gastar remoção) e "ele tem uma
+        // contínua aberta?" (ex.: Call of the Haunted, que ao ser destruída leva
+        // junto o monstro revivido). Alimentado pelo MSG_MOVE e pelo POS_CHANGE.
+        readonly Dictionary<(int player, int seq), (uint code, int pos)> _stBoard = new();
 
         const byte LOCATION_MZONE = 0x4;
         const byte LOCATION_HAND = 0x2;
@@ -77,7 +83,8 @@ namespace DuelServer
             public int sumNeeded;                // selectsum: quanto ainda falta somar
             public bool sumOverflow;             // selectsum: soma "OU MAIS" (ritual) vs exata
             public bool chainForced;             // chain: TEM de ativar algo (não pode recusar)
-            public uint askCode;                 // yesno (EFFECTYN): carta cujo efeito é oferecido
+            public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
+            public byte posMask;                 // position: posições que o motor aceita
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
@@ -111,12 +118,16 @@ namespace DuelServer
         }
 
         public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed,
-                               ulong flags = 0, bool npc = true, uint[] npcDeck = null)
+                               ulong flags = 0, bool npc = true, uint[] npcDeck = null,
+                               uint[] extra = null, uint[] npcExtra = null)
         {
-            _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags);
+            // Sem `npcDeck` o oponente joga com o SEU deck; o Extra segue a mesma
+            // regra, senão ele duelaria com o seu main e o extra de outro deck.
+            _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags,
+                                 extra, npcDeck != null ? npcExtra : (npcExtra ?? extra));
             _npcEnabled = npc;
             _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
-                                HandOf, StCountOf);
+                                HandOf, StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf);
         }
 
         /// <summary>Cartas na mão de um jogador (para a IA achar Reborn/dragões).</summary>
@@ -136,6 +147,52 @@ namespace DuelServer
             var list = new List<uint>();
             foreach (var kv in _board)
                 if (kv.Key.player == player && (kv.Value.pos & POS_FACEUP) != 0)
+                    list.Add(kv.Value.code);
+            return list;
+        }
+
+        /// <summary>
+        /// Os mesmos monstros, mas COM a posição.
+        ///
+        /// Sem isto o NpcBrain não distinguia ataque de defesa e atacava uma
+        /// Mystical Elf (800/2000) deitada com um Battle Ox (1700): ele comparava
+        /// com os 800 de ATK, quando a batalha real é contra 2000 de DEF.
+        /// </summary>
+        IReadOnlyList<(uint code, int pos)> FaceUpMonstersPos(int player)
+        {
+            var list = new List<(uint, int)>();
+            foreach (var kv in _board)
+                if (kv.Key.player == player && (kv.Value.pos & POS_FACEUP) != 0)
+                    list.Add((kv.Value.code, kv.Value.pos));
+            return list;
+        }
+
+        /// <summary>
+        /// Quantas magias/armadilhas do jogador estão VIRADAS (setadas).
+        ///
+        /// É a informação que falta para o NPC não queimar uma remoção de
+        /// magia/armadilha à toa: destruir uma magia que já está resolvendo não
+        /// impede nada, então a carta só vale contra o que ainda está baixado.
+        /// </summary>
+        int SetStCountOf(int player)
+        {
+            int n = 0;
+            foreach (var kv in _stBoard)
+                if (kv.Key.player == player && (kv.Value.pos & 0xa) != 0) n++;   // 0x2/0x8 = virada
+            return n;
+        }
+
+        /// <summary>
+        /// Magias/armadilhas do jogador que estão ABERTAS (face para cima), com o
+        /// código. É informação pública — qualquer humano as vê. Serve para o NPC
+        /// reconhecer alvos que valem uma remoção mesmo sem estarem setados, como
+        /// o Call of the Haunted: destruí-lo mata junto o monstro que ele reviveu.
+        /// </summary>
+        IReadOnlyList<uint> FaceUpStOf(int player)
+        {
+            var list = new List<uint>();
+            foreach (var kv in _stBoard)
+                if (kv.Key.player == player && (kv.Value.pos & POS_FACEUP) != 0 && kv.Value.code != 0)
                     list.Add(kv.Value.code);
             return list;
         }
@@ -172,6 +229,12 @@ namespace DuelServer
 
                 var q = _pending;
                 if (q == null) { _s.Respond(I32(-1)); continue; }         // desconhecido: recusa
+
+                // Enquanto uma cadeia está sendo MONTADA só aparecem janelas de
+                // corrente; qualquer outra pergunta significa que ela já resolveu.
+                // É esse o sinal que zera a memória do NPC de "já encadeei" —
+                // sem ele, ele encadearia uma vez e nunca mais.
+                if (q.kind != "chain") _npc.ResetCadeia();
 
                 // Corrente (SELECT_CHAIN): janela sem nada some sozinha; com opções,
                 // o NPC decide pela sua regra e o humano decide na tela.
@@ -216,7 +279,12 @@ namespace DuelServer
                     }
                     r.question = q; return r;
                 }
-                if (q.kind == "position") { _s.Respond(I32(0x1)); continue; } // face-up ataque
+                // SELECT_POSITION: quem escolhe é o JOGADOR. Invocação-Ritual (e
+                // qualquer Invocação-Especial) pode entrar em ataque OU em defesa
+                // com a face para cima — não é Set, é escolha de posição. Antes
+                // respondíamos 0x1 aqui e o ritual sempre caía em ataque, sem a
+                // pergunta jamais chegar à tela.
+                if (q.kind == "position" && q.player == HUMAN) { r.question = q; return r; }
                 // pergunta do player 0 que não sei responder: devolve pro front avisar
                 // (em vez de travar). O usuário começa um novo duelo.
                 if (q.kind == "unsupported") { r.question = q; return r; }
@@ -303,7 +371,7 @@ namespace DuelServer
         /// </summary>
         byte[] NpcChain(Question q)
         {
-            int idx = _npcEnabled ? _npc.DecideChain(q) : -1;
+            int idx = _npcEnabled ? _npc.DecideChain(q, q.player) : -1;
             if (idx >= 0 && idx < q.choices.Count)
             {
                 var c = q.choices[idx];
@@ -393,6 +461,11 @@ namespace DuelServer
             "endbattle" => I32(3),                    // battlecmd, comando 3 = End Phase
             "chain" => I32(arg),                      // corrente: índice a ativar, ou -1 recusa
             "yesno" => I32(arg),                      // sim/não: 1 = sim, 0 = não
+            // Posição escolhida: 0x1 ataque, 0x4 defesa com a FACE PARA CIMA.
+            // Faltava aqui: "position" já constava em AcoesValidas, mas caía no
+            // `_ => I32(-1)` e o motor recusava tudo. Passou despercebido porque
+            // o host respondia a posição por dentro, sem usar este Encode.
+            "position" => I32(arg),
             _ => I32(-1),
         };
 
@@ -414,7 +487,11 @@ namespace DuelServer
                         (byte)(q.zones.Count > 0 ? q.zones[0] : 0),
                     });
                     break;
-                case "position": _s.Respond(I32(0x1)); break;
+                case "position":
+                    // Statline decide: parede fica deitada (com a face para cima,
+                    // que não é Set). Com a IA desligada, mantém o ataque de antes.
+                    _s.Respond(I32(_npcEnabled ? _npc.DecidePosicao(q.askCode, q.posMask) : 0x1));
+                    break;
                 case "yesno":
                     // Efeito opcional (ex.: Dust Tornado setar da mão): o NPC aceita.
                     _events?.Add(new { type = "npc", action = "yesno", why = "aceita o efeito opcional" });
@@ -510,6 +587,8 @@ namespace DuelServer
                     if (cl == LOCATION_HAND && cc <= 1) _hand[cc].Add(code);
                     if (pl == LOCATION_SZONE && pc <= 1 && _st[pc] > 0) _st[pc]--;
                     if (cl == LOCATION_SZONE && cc <= 1) _st[cc]++;
+                    if (pl == LOCATION_SZONE && pc <= 1) _stBoard.Remove((pc, ps));
+                    if (cl == LOCATION_SZONE && cc <= 1) _stBoard[(cc, cs)] = (code, cpo);
                     break;
                 }
                 case 53: // MSG_POS_CHANGE
@@ -529,6 +608,16 @@ namespace DuelServer
                     });
                     if (loc == LOCATION_MZONE && _board.TryGetValue((ctrl, seq), out var antes))
                         _board[(ctrl, seq)] = (antes.code, atual);
+                    // Magia/armadilha que DESVIRA (foi ativada) deixa de contar
+                    // como setada — senão o NPC continuaria guardando remoção
+                    // para uma carta que já está aberta. O código só chega
+                    // preenchido quando ela abre, que é justamente quando passa
+                    // a interessar saber QUAL é.
+                    if (loc == LOCATION_SZONE && ctrl <= 1)
+                    {
+                        _stBoard.TryGetValue((ctrl, seq), out var antesSt);
+                        _stBoard[(ctrl, seq)] = (code != 0 ? code : antesSt.code, atual);
+                    }
                     break;
                 }
                 case 110: // MSG_ATTACK — quem ataca quem
@@ -568,7 +657,7 @@ namespace DuelServer
                 case 11: _pending = ParseIdle(d, o, mlen); break;
                 case 18: _pending = ParsePlace(d, o); break;
                 case 10: _pending = ParseBattle(d, o, mlen); break;
-                case 19: _pending = new Question { kind = "position", player = d[o + 1] }; break;
+                case 19: _pending = ParsePosition(d, o, mlen); break;
                 // MSG_SELECT_EFFECTYN (12) e MSG_SELECT_YESNO (13): pergunta de
                 // sim/não. Ex.: Dust Tornado, após destruir, oferece "setar 1 magia/
                 // armadilha da mão?". Resposta = int32 (1=sim, 0=não). O 12 traz o
@@ -680,6 +769,30 @@ namespace DuelServer
                 p += ACT_ENTRY;
             }
             return list;
+        }
+
+        /// <summary>
+        /// MSG_SELECT_POSITION (19): `type(1) player(1) code(4) posicoesPermitidas(1)`.
+        ///
+        /// A máscara diz o que o motor aceita — 0x1 ataque, 0x2 ataque virado,
+        /// 0x4 defesa, 0x8 defesa virada. Uma Invocação-Ritual costuma vir com
+        /// 0x5 (ataque OU defesa, ambas com a face para cima), e é justamente
+        /// essa escolha que antes nunca chegava à tela.
+        ///
+        /// Lê defensivamente: se a mensagem for menor do que o layout supõe,
+        /// devolve só ataque em vez de estourar. O `--test-ritual-pos` confere
+        /// que o código lido bate com a carta invocada — é o que prova o layout.
+        /// </summary>
+        Question ParsePosition(byte[] d, int o, int mlen)
+        {
+            var q = new Question { kind = "position", player = d[o + 1] };
+            if (mlen >= 7)
+            {
+                q.askCode = BitConverter.ToUInt32(d, o + 2) & 0x7FFFFFFF;
+                q.posMask = d[o + 6];
+            }
+            if (q.posMask == 0) q.posMask = 0x1;   // sem máscara legível: ataque
+            return q;
         }
 
         Question ParsePlace(byte[] d, int o)

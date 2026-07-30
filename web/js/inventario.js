@@ -18,7 +18,7 @@ import { rarityIndex, RARITIES, hydrateBoosters } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
 import {
   getDP, getCollection, totalCards, distinctCards,
-  sellCards, sellPriceOf, SELL_PRICE, hydrateWallet,
+  sellCards, sellPriceOf, SELL_PRICE, hydrateWallet, removeCards,
 } from '/web/js/wallet.js';
 import { listDecks, saveDeck, getActiveIndex, setActiveIndex } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
@@ -226,10 +226,95 @@ function abrirVenda() {
   $('venda-back').classList.add('show');
 }
 
+/**
+ * Cartas da Coleção que não estão em NENHUM booster.
+ *
+ * São registro morto: sobraram de um booster apagado ou reescrito durante o
+ * balanceamento. O Deck Builder já as trata como carta sem raridade, e elas só
+ * poluem o inventário.
+ *
+ * Cartas CUSTOMIZADAS ficam de fora da varredura de propósito — elas não vêm de
+ * booster nenhum por natureza, e apagá-las junto seria destruir trabalho.
+ */
+function cartasOrfas() {
+  const custom = new Set(listCustom().map((c) => Number(c.id)));
+  return Object.keys(getCollection())
+    .map(Number)
+    .filter((id) => !rarOf(id) && !custom.has(id));
+}
+
+function abrirLimpezaOrfas() {
+  const orfas = cartasOrfas();
+  if (!orfas.length) return void toast('nenhuma carta órfã — o inventário está limpo');
+
+  const col = getCollection();
+  const copias = orfas.reduce((n, id) => n + (col[id] ?? 0), 0);
+
+  $('venda-sub').textContent =
+    `${orfas.length} carta${orfas.length > 1 ? 's' : ''} · ${copias} cópia${copias > 1 ? 's' : ''} `
+    + '· nenhum DP será pago (é registro morto, não venda)';
+
+  const frag = document.createDocumentFragment();
+  for (const id of orfas.sort((a, b) => (col[b] ?? 0) - (col[a] ?? 0))) {
+    const linha = document.createElement('div');
+    linha.className = 'linha';
+    linha.innerHTML = `<span class="q">${col[id] ?? 0}×</span>`
+      + `<span>${escapeHtml(nameOf(id))} <span class="muted">(sem booster)</span></span>`
+      + '<span class="v">—</span>';
+    frag.append(linha);
+  }
+  $('venda-lista').replaceChildren(frag);
+
+  // Reaproveita a caixa de aviso da venda para o alerta de decks: apagar uma
+  // carta usada num deck salvo impede remontá-lo, e isso vale ser dito ANTES.
+  const usadas = decksQueUsam(orfas);
+  const box = $('venda-aviso');
+  box.hidden = usadas.length === 0;
+  if (usadas.length) {
+    box.innerHTML = '⚠ Estas cartas aparecem em: '
+      + usadas.map((d) => `<b>${escapeHtml(d)}</b>`).join(', ')
+      + '. O deck continua salvo, mas não dá para remontá-lo sem elas.';
+  }
+
+  modoLimpeza = true;
+  $('venda-ok').textContent = 'apagar';
+  $('venda-back').classList.add('show');
+}
+
+/** Nomes dos decks salvos que usam alguma destas cartas. */
+function decksQueUsam(ids) {
+  const alvo = new Set(ids.map(Number));
+  const nomes = [];
+  for (const d of listDecks()) {
+    const usa = [...(d.main ?? []), ...(d.extra ?? [])].some((id) => alvo.has(Number(id)));
+    if (usa) nomes.push(d.name || 'deck sem nome');
+  }
+  return nomes;
+}
+
+function confirmarLimpezaOrfas() {
+  const r = removeCards(cartasOrfas());
+  fecharDialogo();
+  if (!r.ok) return void toast('nada foi apagado');
+  renderDP();
+  renderCards();
+  toast(`${r.distintas} carta${r.distintas > 1 ? 's' : ''} `
+      + `(${r.copias} cópia${r.copias > 1 ? 's' : ''}) apagada${r.distintas > 1 ? 's' : ''}`);
+}
+
+/** O overlay é compartilhado: sempre devolve o botão ao estado de venda. */
+function fecharDialogo() {
+  $('venda-back').classList.remove('show');
+  $('venda-ok').textContent = 'vender';
+  modoLimpeza = false;
+}
+
+let modoLimpeza = false;   // o overlay está servindo à limpeza, não à venda
+
 function confirmarVenda() {
   const lotes = [...selecao.entries()].map(([id, qty]) => ({ id, qty, rarity: rarOf(id) }));
   const r = sellCards(lotes);
-  $('venda-back').classList.remove('show');
+  fecharDialogo();
   if (!r.ok) return void toast('nada foi vendido');
   selecao.clear();
   renderDP();
@@ -357,13 +442,19 @@ $('btn-limpar').onclick = () => { selecao.clear(); renderCards(); };
 $('btn-tudo').onclick = () => selecionarAcimaDe(1);
 $('btn-acima3').onclick = () => selecionarAcimaDe(3);
 $('btn-vender').onclick = abrirVenda;
-$('venda-cancelar').onclick = () => $('venda-back').classList.remove('show');
-$('venda-ok').onclick = confirmarVenda;
+$('btn-orfas').onclick = abrirLimpezaOrfas;
+$('venda-cancelar').onclick = fecharDialogo;
+// O mesmo overlay serve à venda e à limpeza — `modoLimpeza` diz qual das duas
+// o botão de confirmar está executando. Sem essa flag, apagar cartas passaria
+// pelo caminho da venda e pagaria DP por registro morto.
+$('venda-ok').onclick = () => (modoLimpeza ? confirmarLimpezaOrfas() : confirmarVenda());
 $('cover-fechar').onclick = () => $('cover-back').classList.remove('show');
 $('cover-limpar').onclick = () => definirMoldura(null);
 for (const id of ['venda-back', 'cover-back']) {
   $(id).addEventListener('click', (e) => {
-    if (e.target === $(id)) $(id).classList.remove('show');
+    if (e.target !== $(id)) return;
+    if (id === 'venda-back') fecharDialogo();   // repõe o rótulo do botão
+    else $(id).classList.remove('show');
   });
 }
 

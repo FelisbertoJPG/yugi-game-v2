@@ -135,11 +135,19 @@ namespace DuelServer
             uint[] npcDeck = ReadDeck(body, "npcDeck");
             if (npcDeck.Length == 0) npcDeck = null;
 
-            Log.Info($"[rpc] /start deck={deck.Length} npc={npc} npcDeck={(npcDeck?.Length ?? 0)} seed={seed}");
+            // Extra Deck (Fusão/Sincro/Xyz/Link). Opcional: deck sem Extra manda
+            // lista vazia e nada muda.
+            uint[] extra = ReadDeck(body, "extra");
+            if (extra.Length == 0) extra = null;
+            uint[] npcExtra = ReadDeck(body, "npcExtra");
+            if (npcExtra.Length == 0) npcExtra = null;
+
+            Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
+                     $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed}");
             lock (_lock)
             {
                 _duel?.Dispose();
-                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck);
+                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra);
                 return _duel.Advance();
             }
         }

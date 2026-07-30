@@ -30,6 +30,7 @@ export const LISTA1_SPELLTRAP = [
   12607053, // Waboku
   14315573, // Negate Attack (Counter Trap)
   56120475, // Sakuretsu Armor
+  97077563, // Call of the Haunted — revive 1 monstro do cemitério (Armadilha Contínua)
 
   // --- equipamentos por tipo (pouco ATK, bem básicos) ---
   1435851,  // Dragon Treasure — Dragão
@@ -64,6 +65,20 @@ export const LISTA1_SPELLTRAP = [
   63391643, // Thousand Knives — Dark Magician (Yugi)
   17655904, // Burst Stream of Destruction — Blue-Eyes White Dragon (Kaiba)
   52684508, // Inferno Fire Blast — Red-Eyes Black Dragon (Joey)
+
+  // --- fusão ---
+  // A Polymerization é o único "motor" de fusão de que a Lista 1 precisa: a
+  // receita de cada monstro fundido mora no Lua da PRÓPRIA carta fundida, não
+  // aqui. Ver `inLista1` no fim deste arquivo.
+  24094653, // Polymerization
+  26902560, // Fusion Sage — busca 1 Polymerization no deck (consistência da fusão)
+
+  // Substitutos de matéria. Não são vanilla (têm efeito), mas o efeito já vem
+  // pronto do ocgcore: cada um declara `EFFECT_FUSION_SUBSTITUTE` no PRÓPRIO
+  // script, e o motor os aceita no lugar de qualquer matéria nomeada. Valem da
+  // mão, do campo E do cemitério.
+  79109599, // King of the Swamp — substituto + descarta para buscar Polymerization
+  30451366, // Mystical Sheep #1 — só substituto
 
   // --- rituais SEM efeito (vanilla) ---
   5405694,  // Black Luster Soldier (Nv 8, 3000/2500)
@@ -106,7 +121,22 @@ export const LISTA1_SPELLTRAP = [
 
 const SET = new Set(LISTA1_SPELLTRAP);
 
-/** A carta (entrada do índice) faz parte da Lista 1? */
+/**
+ * A carta (entrada do índice) faz parte da Lista 1?
+ *
+ * Monstro Normal entra por não ter efeito nenhum — nada a implementar.
+ *
+ * Fusão VANILLA (`tl === 'Fusion Monster'`, sem "/Effect") entra pelo mesmo
+ * motivo, e isso é menos óbvio: ela tem script `.lua`, mas o script só declara
+ * a RECEITA (`Fusion.AddProcMix(...)`), não um efeito. Como o script já vem do
+ * ocgcore, a carta funciona sem escrevermos nada. São 58 fusões nessa condição,
+ * todas com script — conferido contra a pasta de scripts.
+ *
+ * Elas precisam da Polymerization (24094653), que está na lista de magias, e do
+ * Extra Deck sendo enviado ao motor (`extra` no POST /start).
+ */
 export function inLista1(card) {
-  return SET.has(card.id) || (card.t === 'M' && card.tl === 'Normal Monster');
+  if (SET.has(card.id)) return true;
+  if (card.t !== 'M') return false;
+  return card.tl === 'Normal Monster' || card.tl === 'Fusion Monster';
 }

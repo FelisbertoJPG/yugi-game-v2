@@ -6,10 +6,13 @@
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
   listShopBoosters, openPack, boosterSize, hydrateBoosters,
-  DEFAULT_PRICE, PITY_EVERY,
+  DEFAULT_PRICE, PITY_EVERY, UR_PITY_DP,
 } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
-import { getDP, spendDP, addCards, getPity, bumpPity, hydrateWallet } from '/web/js/wallet.js';
+import {
+  getDP, spendDP, addCards, getPity, bumpPity, hydrateWallet,
+  addUrSpend, urPityReady, consumeUrPity, getUrSpend,
+} from '/web/js/wallet.js';
 
 const priceOf = (b) => (Number.isFinite(b.price) ? b.price : DEFAULT_PRICE);
 const pityKey = (b) => b.name;   // identidade do booster para o contador "a cada 10"
@@ -61,12 +64,23 @@ function renderShop() {
           ? `<span class="meta" style="color:var(--gold)">★ próximo pacote: SR garantida!</span>`
           : `<span class="meta">a cada ${PITY_EVERY} pacotes: 1 SR garantida deste booster (faltam ${faltam})</span>`)
       : '';
+
+    // Progresso da UR garantida: é global (vale para todos os boosters), então
+    // a linha mostra o mesmo número em todos os cards — de propósito.
+    const temUR = (b.cards?.UR?.length ?? 0) > 0;
+    const faltamDP = Math.max(0, UR_PITY_DP - getUrSpend());
+    const urLinha = temUR
+      ? (faltamDP === 0
+          ? `<span class="meta" style="color:var(--gold)">★★ próximo pacote: UR garantida!</span>`
+          : `<span class="meta">a cada ${UR_PITY_DP} DP gastos: 1 UR garantida (faltam ${faltamDP} DP)</span>`)
+      : '';
     el.innerHTML =
       `<div class="art" style="background-image:${b.coverId ? `url('${ART(b.coverId)}')` : 'none'}"></div>` +
       `<div class="body">` +
         `<span class="name">${escapeHtml(b.name)}</span>` +
         `<span class="meta">${boosterSize(b)} cartas · ${price} DP</span>` +
         pityLinha +
+        urLinha +
         `<button class="buy btn-primary" ${canBuy ? '' : 'disabled'}>abrir pacote (${price} DP)</button>` +
       `</div>`;
     el.querySelector('.buy').onclick = () => buy(b);
@@ -81,7 +95,16 @@ function buy(booster) {
   // "a cada N pacotes": este é o N-ésimo? então SR garantida (substitui uma N).
   const key = pityKey(booster);
   const garante = (getPity(key) + 1) % PITY_EVERY === 0;
-  const pulls = openPack(booster, undefined, { guaranteeSR: garante });
+
+  // UR garantida por DP acumulado: soma este pacote e só resgata se ESTE
+  // booster tiver UR — senão o jogador queimaria os 10.000 sem receber nada.
+  addUrSpend(price);
+  const temUR = (booster.cards?.UR?.length ?? 0) > 0;
+  const garanteUR = temUR && urPityReady();
+
+  const pulls = openPack(booster, undefined, { guaranteeSR: garante, guaranteeUR: garanteUR });
+  // Só desconta o ciclo se a UR foi mesmo entregue (o pacote podia já ter uma).
+  if (pulls.some((p) => p.guaranteedUR)) consumeUrPity();
   bumpPity(key);
   addCards(pulls.map((p) => p.id));
   lastBought = booster;

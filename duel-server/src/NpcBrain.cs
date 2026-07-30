@@ -55,25 +55,101 @@ namespace DuelServer
         {
             18144506, // Harpie's Feather Duster
             5318639,  // Mystical Space Typhoon
+            60082869, // Dust Tornado (Armadilha Normal)
+        };
+
+        /// <summary>
+        /// Magias/armadilhas que vale destruir mesmo ABERTAS no campo.
+        ///
+        /// O caso que motivou a lista: Call of the Haunted é contínua e fica com
+        /// a face para cima. O script dela destrói o monstro revivido quando ela
+        /// sai do campo — então um Dust Tornado nela é 2-por-1, e não o
+        /// desperdício que seria estourar uma magia normal já resolvida.
+        ///
+        /// Critério para entrar aqui: a carta tem de SUSTENTAR alguma coisa
+        /// enquanto está em campo. Magia normal, que resolve e vai embora, nunca
+        /// entra.
+        /// </summary>
+        static readonly HashSet<uint> ALVO_ST_ABERTO = new()
+        {
+            97077563, // Call of the Haunted — leva junto o monstro que reviveu
+            72302403, // Swords of Revealing Light — trava os ataques por 3 turnos
+        };
+
+        /// <summary>
+        /// Magias que FUNDEM. Vão por ID, e não por tipo como o ritual, porque
+        /// não existe bit de "magia de fusão": a Polymerization é uma Magia
+        /// Normal comum — quem carrega a receita é o monstro fundido, no Lua
+        /// dele. Sem type flag para consultar, a lista é explícita.
+        /// </summary>
+        static readonly HashSet<uint> FUSAO = new()
+        {
+            24094653, // Polymerization
+        };
+
+        /// <summary>
+        /// "Adição específica": busca uma carta NOMEADA do deck para a mão
+        /// (diferente da compra às cegas do Pote da Ganância).
+        ///
+        /// Existem para ser usadas ANTES da compra. O motivo é concreto: comprar
+        /// primeiro pode trazer justamente a carta que a busca traria, e aí a
+        /// busca vira carta morta. Buscar primeiro nunca desperdiça, e ainda
+        /// afina o deck para a compra seguinte.
+        /// </summary>
+        static readonly HashSet<uint> BUSCA_ESPECIFICA = new()
+        {
+            26902560, // Fusion Sage — busca 1 Polymerization
+            // King of the Swamp — descarta a si mesmo para buscar 1 Polymerization.
+            // O descarte NÃO é perda: ele é substituto de material de fusão e o
+            // `subcon` do script dele aceita HAND, ONFIELD **e GRAVE**. Ou seja,
+            // vai para o cemitério e continua servindo de matéria. Buscar com ele
+            // é ganho puro, e por isso entra na mesma lista da Sage.
+            79109599,
         };
 
         readonly DatabaseManager _cards;
         readonly Func<int, IReadOnlyList<uint>> _fieldOf;   // monstros face-up em campo
         readonly Func<int, IReadOnlyList<uint>> _handOf;    // cartas na mão de um jogador
         readonly Func<int, int> _stCountOf;                 // zonas de magia/armadilha ocupadas
+        readonly Func<int, int> _setStCountOf;              // dessas, quantas estão VIRADAS
+        readonly Func<int, IReadOnlyList<uint>> _faceUpStOf; // magias/armadilhas ABERTAS
+        readonly Func<int, IReadOnlyList<(uint code, int pos)>> _fieldPosOf;
         readonly Action<string> _log;
+
+        const int POS_ATAQUE = 0x1, POS_DEFESA = 0x4;
 
         public NpcBrain(DatabaseManager cards,
                         Func<int, IReadOnlyList<uint>> fieldOf,
                         Action<string> log = null,
                         Func<int, IReadOnlyList<uint>> handOf = null,
-                        Func<int, int> stCountOf = null)
+                        Func<int, int> stCountOf = null,
+                        Func<int, IReadOnlyList<(uint code, int pos)>> fieldPosOf = null,
+                        Func<int, int> setStCountOf = null,
+                        Func<int, IReadOnlyList<uint>> faceUpStOf = null)
         {
             _cards = cards;
             _fieldOf = fieldOf;
             _log = log ?? (_ => { });
             _handOf = handOf ?? (_ => Array.Empty<uint>());
             _stCountOf = stCountOf ?? (_ => 0);
+            _setStCountOf = setStCountOf ?? (_ => 0);
+            _faceUpStOf = faceUpStOf ?? (_ => Array.Empty<uint>());
+            // Sem informação de posição, assume ATAQUE — é o comportamento
+            // anterior, e mantém os testes que montam campo só com códigos.
+            _fieldPosOf = fieldPosOf
+                ?? (p => _fieldOf(p).Select(c => (c, POS_ATAQUE)).ToList());
+        }
+
+        /// <summary>
+        /// Quanto vale ENFRENTAR este monstro: a ATK se ele está em ataque, a DEF
+        /// se está deitado. É o número que a batalha realmente usa — comparar
+        /// sempre pela ATK fazia o NPC atacar uma parede 800/2000 achando que
+        /// enfrentava 800.
+        /// </summary>
+        int ValorNaBatalha((uint code, int pos) m)
+        {
+            var st = _cards.Stats(m.code);
+            return (m.pos & POS_DEFESA) != 0 ? st.DefValue : st.AtkValue;
         }
 
         // ---- atalhos de leitura da situação ----
@@ -121,13 +197,17 @@ namespace DuelServer
         /// <summary>
         /// Main Phase. Ordem de decisão do deck Blue-Eyes do Kaiba (a estratégia
         /// que o jogador descreveu):
-        ///   0. Pote da Ganância.
+        ///   0. Busca específica (Fusion Sage) — ANTES da compra, senão o Pote
+        ///      pode trazer a carta buscada e matar a busca.
+        ///   0.1 Pote da Ganância.
         ///   1. COMBO: Tribute to The Doomed com Monster Reborn na mão — descarta
         ///      um dragão para estourar a ameaça e revivê-lo depois.
         ///   2. Setar armadilha (mantendo SEMPRE ≥1 zona de magia/arm. livre).
         ///   3. Tribute to The Doomed sem o Reborn — ainda estoura a ameaça real.
         ///   4. Monster Reborn — reanima o mais forte do cemitério.
         ///   5. Ritual (Skull Guardian) tributando monstro de nível alto.
+        ///   5.1 Fusão (Polymerization) — mesma lógica do ritual: corpo grande em
+        ///      campo e materiais no cemitério, alimentando o Reborn.
         ///   6. Beatdown: sobe os dragões (sacrificando os fracos) ou beater Nv4.
         ///   7. Burst Stream of Destruction — só quando limpa 2+ monstros.
         ///   8. Batalha / encerrar o turno.
@@ -137,7 +217,17 @@ namespace DuelServer
         {
             int foe = 1 - me;
 
-            // 0. Pote da Ganância antes de tudo.
+            // 0. BUSCA ESPECÍFICA antes da compra. Comprar primeiro pode trazer a
+            //    carta que a busca traria — e aí a busca vira carta morta. Buscar
+            //    primeiro nunca desperdiça. O Pote continua logo abaixo, então na
+            //    decisão seguinte ele sai do mesmo jeito, só que com o deck já
+            //    afinado.
+            var buscaEsp = AtivavelSe(q, BUSCA_ESPECIFICA.Contains);
+            if (buscaEsp.code != 0)
+                return new Play("activate", buscaEsp.index,
+                    $"busca especifica antes da compra ({buscaEsp.code})");
+
+            // 0.1 Pote da Ganância antes de qualquer invocação.
             if (Ativavel(q, POT_OF_GREED))
                 return new Play("activate", IdxAtivavel(q, POT_OF_GREED), "Pote da Ganancia primeiro");
 
@@ -174,6 +264,17 @@ namespace DuelServer
                 return new Play("activate", ritual.index,
                     $"Ritual: invoca tributando monstro de nivel alto ({ritual.code})");
 
+            // 5.1 FUSÃO — mesma lógica do ritual, e por isso vem logo depois: põe
+            //     um corpo grande em campo E manda os materiais para o cemitério,
+            //     que é de onde o Monster Reborn tira o alvo. O motor só oferece a
+            //     Polymerization quando existe fusão possível com a mão/campo, então
+            //     não é preciso conferir receita aqui — se ela está em `activatable`,
+            //     há o que fundir.
+            var fusao = AtivavelSe(q, FUSAO.Contains);
+            if (fusao.code != 0)
+                return new Play("activate", fusao.index,
+                    $"Fusao: corpo grande em campo e materiais no cemiterio p/ o Reborn ({fusao.code})");
+
             // 5.5 Remoção e burn (decks de queima como o do Joey):
             //   • remoção de monstro (Raigeki/Dark Hole/Fissure) só com alvo;
             //   • remoção de magia/armadilha (Harpie's/MST) só se o oponente tiver S/T;
@@ -189,11 +290,23 @@ namespace DuelServer
                 return new Play("activate", burn.index, $"burn: dano fixo no oponente ({burn.code})");
 
             // 6. Beatdown: monstros grandes (sacrificando os fracos) ou beater Nv4.
+            //    O filtro `TributoCompensa` impede o NPC de tributar um corpo
+            //    melhor do que o que vai entrar. Vale para as DUAS listas: o Set
+            //    de um Nv5+ é um Tribute Set e custa os mesmos tributos que a
+            //    invocação. Filtrar só a de invocação deixava o NPC tributar uma
+            //    fusão de 3200 para SETAR um Red-Eyes — o mesmo erro pela porta
+            //    de trás.
             var invocaveis = Monstros(q.summonable);
             var setaveis = Monstros(q.settable);
+            var altasQueCompensam = invocaveis
+                .Where(c => c.St.Level >= 5 && TributoCompensa(me, c.St, setando: false))
+                .ToList();
+            var setsQueCompensam = setaveis
+                .Where(c => c.St.Level >= 5 && TributoCompensa(me, c.St, setando: true))
+                .ToList();
             var jogadaAlta = Escolher(
-                invocaveis.Where(c => c.St.Level >= 5).ToList(),
-                setaveis.Where(c => c.St.Level >= 5).ToList(),
+                altasQueCompensam,
+                setsQueCompensam,
                 ameaca, "nivel maior");
             if (jogadaAlta.HasValue) return jogadaAlta.Value;
 
@@ -301,14 +414,30 @@ namespace DuelServer
 
             var melhor = q.attackers.OrderByDescending(x => _cards.Stats(x.code).AtkValue).First();
             int meuAtk = _cards.Stats(melhor.code).AtkValue;
-            int ameaca = MaiorAtkEmCampo(foe);
 
-            if (meuAtk > ameaca)
+            // O que existe do outro lado, avaliado pelo número que a BATALHA usa:
+            // ATK de quem está em ataque, DEF de quem está deitado. Uma Mystical
+            // Elf (800/2000) em defesa vale 2000 aqui, não 800 — era exatamente
+            // essa confusão que fazia o Battle Ox (1700) se jogar contra ela.
+            var doOponente = _fieldPosOf(foe)
+                .Where(m => _cards.Stats(m.code).IsMonster)
+                .Select(m => (m.code, valor: ValorNaBatalha(m)))
+                .ToList();
+
+            if (doOponente.Count == 0)
                 return new BattlePlay(true, melhor.index,
-                    $"ATK {meuAtk} supera o maior do oponente ({ameaca}) — ataca com {melhor.code}");
+                    $"campo do oponente sem monstro visivel — ataca com {melhor.code}");
+
+            // Basta UM alvo que eu vença: o motor pergunta o alvo em seguida.
+            var maisFraco = doOponente.OrderBy(m => m.valor).First();
+            if (meuAtk > maisFraco.valor)
+                return new BattlePlay(true, melhor.index,
+                    $"ATK {meuAtk} supera o alvo mais fraco ({maisFraco.code} vale {maisFraco.valor}) " +
+                    $"— ataca com {melhor.code}");
 
             return new BattlePlay(false, 0,
-                $"meu melhor ATK ({meuAtk}) nao supera o do oponente ({ameaca}) — encerra o combate");
+                $"meu melhor ATK ({meuAtk}) nao vence nem o alvo mais fraco " +
+                $"({maisFraco.code} vale {maisFraco.valor}) — encerra o combate");
         }
 
         /// <summary>
@@ -368,15 +497,103 @@ namespace DuelServer
         }
 
         /// <summary>
-        /// Decisão de corrente (SELECT_CHAIN com opções). As armadilhas da Lista 1
-        /// são reativas — o motor só abre a janela delas no momento certo (um
-        /// ataque declarado, etc.) —, então o NPC ATIVA a primeira ativável. -1
-        /// recusaria. Regra deliberadamente simples; dá para pontuar por carta
-        /// depois (ex.: guardar Negate Attack para o atacante mais forte).
+        /// Decisão de corrente (SELECT_CHAIN com opções).
+        ///
+        /// A maioria das armadilhas da Lista 1 é reativa e o motor só abre a
+        /// janela delas no momento certo, então ativar o que é oferecido está
+        /// certo. A exceção é a REMOÇÃO DE MAGIA/ARMADILHA.
+        ///
+        /// Motivo, vindo de uma jogada real: o NPC gastou um Dust Tornado sobre
+        /// uma magia de ritual do oponente. Destruir uma magia que **já está
+        /// resolvendo** não impede nada — a carta foi queimada à toa. Ela só vale
+        /// contra o que ainda está BAIXADO, então é isso que se exige aqui.
+        ///
+        /// `me` é quem está decidindo; sem saber disso não dá para olhar o campo
+        /// do adversário certo.
         /// </summary>
-        public int DecideChain(InteractiveDuel.Question q)
+        /// <summary>
+        /// Em que posição pôr um monstro que o motor deixa escolher (ritual e
+        /// invocações especiais em geral).
+        ///
+        /// Usa o MESMO critério da invocação normal (`Cand.Ofensivo`): só vai
+        /// para ataque quem tem ATK &gt; DEF. Um ritual 1200/2000 rende mais
+        /// deitado — e agora ele PODE ficar deitado com a face para cima, que é
+        /// diferente de setar.
+        ///
+        /// `mask` é o que o motor aceita (0x1 ataque, 0x4 defesa com a face para
+        /// cima). Se a defesa não estiver na máscara, não há escolha a fazer.
+        /// </summary>
+        public int DecidePosicao(uint code, byte mask)
         {
-            return q.choices.Count > 0 ? q.choices[0].index : -1;
+            const int FACEUP_DEFESA = 0x4;
+            bool podeDefesa = (mask & FACEUP_DEFESA) != 0;
+            bool podeAtaque = (mask & POS_ATAQUE) != 0;
+            if (!podeDefesa) return POS_ATAQUE;
+            if (!podeAtaque) return FACEUP_DEFESA;
+
+            var st = _cards.Stats(code);
+            bool ofensivo = st.AtkValue > st.DefValue;
+            _log($"posicao de {code} ({st.AtkValue}/{st.DefValue}): " +
+                 (ofensivo ? "ataque" : "defesa (DEF >= ATK)"));
+            return ofensivo ? POS_ATAQUE : FACEUP_DEFESA;
+        }
+
+        /// <summary>
+        /// Já pus uma carta NESTA cadeia? O motor abre uma janela por elo, e sem
+        /// esta memória o NPC tratava cada janela como se fosse a primeira.
+        /// </summary>
+        bool _jaEncadeou;
+
+        /// <summary>
+        /// A cadeia acabou: pode encadear de novo na próxima.
+        ///
+        /// Quem chama é o host, quando aparece uma pergunta que NÃO é janela de
+        /// corrente — durante a montagem da cadeia só existem janelas de
+        /// corrente, então qualquer outra pergunta significa que ela já resolveu.
+        /// </summary>
+        public void ResetCadeia() => _jaEncadeou = false;
+
+        public int DecideChain(InteractiveDuel.Question q, int me = 1)
+        {
+            int foe = 1 - me;
+
+            // UMA carta por cadeia.
+            //
+            // O relato que originou a regra: numa Invocação-Normal o NPC ativava
+            // DOIS Trap Hole seguidos. O primeiro já destrói o monstro, então o
+            // segundo resolve sem alvo e vai direto para o cemitério — carta
+            // jogada fora.
+            //
+            // A regra é grosseira de propósito: ela também impede encadeamentos
+            // legítimos, mas no pool da Lista 1 (Trap Hole, Mirror Force, Waboku,
+            // Negate Attack, Sakuretsu) somar duas cartas na mesma cadeia é
+            // desperdício em praticamente todos os casos. Se o motor OBRIGAR a
+            // ativar (`chainForced`), a regra sai da frente.
+            if (_jaEncadeou && !q.chainForced)
+            {
+                _log("chain: ja ativei uma carta nesta cadeia — nao gasta outra");
+                return -1;
+            }
+
+            foreach (var c in q.choices)
+            {
+                if (!REMOCAO_ST.Contains(c.code)) { _jaEncadeou = true; return c.index; }
+
+                // Vale gastar a remoção? Duas situações justificam:
+                bool temSetada = _setStCountOf(foe) > 0;
+                var abertaValiosa = _faceUpStOf(foe).FirstOrDefault(ALVO_ST_ABERTO.Contains);
+                if (temSetada || abertaValiosa != 0)
+                {
+                    _log($"chain: usa {c.code} — " + (abertaValiosa != 0
+                        ? $"o oponente tem {abertaValiosa} aberta (leva junto o que ela sustenta)"
+                        : "o oponente tem magia/armadilha setada"));
+                    _jaEncadeou = true;
+                    return c.index;
+                }
+                _log($"chain: guarda {c.code} — o oponente nao tem alvo que valha");
+            }
+            // Só sobraram cartas que não vale a pena gastar agora.
+            return -1;
         }
 
         List<Cand> Monstros(List<InteractiveDuel.Act> lista)
@@ -388,6 +605,60 @@ namespace DuelServer
                 if (st.IsMonster) outp.Add(new Cand(a, st));
             }
             return outp;
+        }
+
+        /// <summary>
+        /// Quantos tributos um monstro deste nível exige (regra oficial):
+        /// Nv5-6 = 1, Nv7-8 = 2, Nv9+ = 3. Nv1-4 não custa nada.
+        /// </summary>
+        static int TributosPara(int level) =>
+            level >= 9 ? 3 : level >= 7 ? 2 : level >= 5 ? 1 : 0;
+
+        /// <summary>
+        /// A invocação por tributo COMPENSA?
+        ///
+        /// Nasceu de uma jogada absurda observada em duelo: o NPC fundiu um 2600
+        /// e no turno seguinte tributou essa mesma fusão para invocar um 2500.
+        /// A regra de beatdown só comparava o candidato com a ameaça do
+        /// OPONENTE — nunca com o que ela ia destruir do próprio lado.
+        ///
+        /// O `DecideSelect` sacrifica sempre os monstros de MENOR ATK, então é
+        /// contra esses que a conta tem de ser feita: se o melhor entre os que
+        /// sairiam já vale tanto quanto o que entra, a troca é ruim e a jogada
+        /// não deve nem ser considerada.
+        ///
+        /// Não conta monstro setado: o NPC só enxerga os com a face para cima
+        /// (`FaceUpMonsters`), que é a mesma informação que um humano teria.
+        ///
+        /// Quando vê MENOS monstros do que os tributos exigidos, julga assim
+        /// mesmo pelo que enxerga, em vez de liberar a jogada. Um 2600 visível
+        /// não deixa de ser um mau tributo por existir um setado que eu não sei
+        /// qual é — e liberar nesse caso era justamente o buraco por onde a
+        /// jogada absurda voltava a passar. Só confia no motor quando não há
+        /// monstro visível nenhum: aí realmente não há nada conhecido a perder.
+        ///
+        /// `setando` troca o que se ganha: um monstro SETADO defende com a DEF,
+        /// então é a DEF dele que precisa superar o que sai — comparar pela ATK
+        /// deixaria passar "tributo um 3200 para setar um 2400/2000", que na
+        /// prática entrega 3200 de ataque em troca de 2000 de defesa.
+        /// </summary>
+        bool TributoCompensa(int me, DatabaseManager.CardStats entra, bool setando)
+        {
+            int n = TributosPara(entra.Level);
+            if (n == 0) return true;                       // Nv1-4: não custa nada
+
+            var sacrificados = _fieldOf(me)
+                .Select(c => _cards.Stats(c))
+                .Where(s => s.IsMonster)
+                .OrderBy(s => s.AtkValue)                  // os mais fracos vão primeiro
+                .Take(n)
+                .ToList();
+
+            if (sacrificados.Count == 0) return true;      // nada visível a perder
+
+            int maiorPerdido = sacrificados.Max(s => s.AtkValue);
+            int ganho = setando ? entra.DefValue : entra.AtkValue;
+            return ganho > maiorPerdido;
         }
 
         /// <summary>Maior ATK entre os monstros do jogador indicado.</summary>

@@ -32,7 +32,8 @@ namespace DuelServer
         /// <summary>Banco de cartas — a IA do NPC consulta ATK/DEF/nível por aqui.</summary>
         public DatabaseManager Cards => _db;
 
-        public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0)
+        public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0,
+                           uint[] extra0 = null, uint[] extra1 = null)
         {
             _db = new DatabaseManager(streamingAssets);
             _sm = new ScriptManager(streamingAssets);
@@ -81,6 +82,15 @@ namespace DuelServer
             var rng = new Random(unchecked((int)seed));
             InjectDeck(team: 0, controller: 0, deck: Shuffle(deck0, rng));
             InjectDeck(team: 1, controller: 1, deck: Shuffle(deck1, rng));
+
+            // Extra Deck: MESMA injeção, outra localização. Não se embaralha — o
+            // Extra é aberto, você escolhe o que invocar; embaralhar não faria
+            // sentido nem mudaria nada. Sem isto, um monstro de Fusão iria parar
+            // no Main e seria COMPRADO como carta normal, que é o sintoma de
+            // "coloquei a fusão no deck e ela nunca aparece para invocar".
+            InjectExtra(team: 0, controller: 0, extra: extra0);
+            InjectExtra(team: 1, controller: 1, extra: extra1);
+
             YgoCoreAPI.OCG_StartDuel(_duel);
         }
 
@@ -93,6 +103,32 @@ namespace DuelServer
                 (a[i], a[j]) = (a[j], a[i]);
             }
             return a;
+        }
+
+        /// <summary>
+        /// Põe as cartas no Extra Deck (LOCATION_EXTRA = 0x40). É de lá que o
+        /// motor tira Fusão/Sincro/Xyz/Link: a lista de materiais de cada uma
+        /// está no Lua da PRÓPRIA carta (ex.: `Fusion.AddProcMix` no Gaia the
+        /// Dragon Champion), então o host não precisa saber nada sobre receitas —
+        /// basta a carta existir no Extra e o motor a oferece quando puder.
+        /// </summary>
+        private void InjectExtra(byte team, byte controller, uint[] extra)
+        {
+            if (extra == null) return;
+            foreach (uint code in extra)
+            {
+                var card = new OCG_NewCardInfo
+                {
+                    team = team,
+                    duelist = 0,
+                    code = code,
+                    con = controller,
+                    loc = 0x40, // LOCATION_EXTRA
+                    seq = 0,
+                    pos = 8     // POS_FACEDOWN_DEFENSE
+                };
+                YgoCoreAPI.OCG_DuelNewCard(_duel, ref card);
+            }
         }
 
         private void InjectDeck(byte team, byte controller, uint[] deck)

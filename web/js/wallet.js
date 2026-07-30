@@ -8,10 +8,13 @@
  */
 
 import { pushFile, pullFileEx } from '/web/js/projectstore.js';
+// Só a constante: `boosters.js` não importa daqui, então não há ciclo.
+import { UR_PITY_DP } from '/web/js/boosters.js';
 
 const KEY_DP = 'ygo:dp';
 const KEY_COL = 'ygo:collection';
 const KEY_PITY = 'ygo:pity';
+const KEY_URSPEND = 'ygo:urSpend';   // DP gasto em pacotes desde a última UR garantida
 
 export const START_DP = 2000;
 export const BOOSTER_PRICE = 100;
@@ -65,6 +68,7 @@ function mirrorWallet() {
     dp: read(KEY_DP, START_DP),
     collection: read(KEY_COL, {}),
     pity: read(KEY_PITY, {}),
+    urSpend: read(KEY_URSPEND, 0),
   });
 }
 
@@ -86,6 +90,9 @@ export async function hydrateWallet() {
   if ('dp' in data) localStorage.setItem(KEY_DP, JSON.stringify(data.dp));
   if ('collection' in data) localStorage.setItem(KEY_COL, JSON.stringify(data.collection));
   if ('pity' in data) localStorage.setItem(KEY_PITY, JSON.stringify(data.pity));
+  // Carteira gravada antes da UR garantida não tem o campo: começa do zero, que
+  // é o certo — ninguém deve herdar progresso de um contador que não existia.
+  if ('urSpend' in data) localStorage.setItem(KEY_URSPEND, JSON.stringify(data.urSpend));
   return true;
 }
 
@@ -191,6 +198,35 @@ export function sellCards(lotes) {
   return { ok: true, total, vendidas, dp: addDP(total) };
 }
 
+/**
+ * Remove cartas da Coleção SEM pagar DP.
+ *
+ * É o oposto de vender: aqui a carta não vale nada porque não existe mais no
+ * jogo — sobrou de um booster que foi apagado ou reescrito durante o
+ * balanceamento. Pagar por ela injetaria DP a partir de registro morto, que é
+ * justamente o que se está limpando.
+ *
+ * @param {Array<number>} ids cartas a apagar (TODAS as cópias de cada uma)
+ * @returns {{ok: boolean, distintas: number, copias: number}}
+ */
+export function removeCards(ids) {
+  const col = getCollection();
+  let distintas = 0, copias = 0;
+
+  for (const id of ids ?? []) {
+    const key = Number(id);
+    const tem = col[key] ?? 0;
+    if (!tem) continue;
+    copias += tem;
+    distintas++;
+    delete col[key];
+  }
+
+  if (!distintas) return { ok: false, distintas: 0, copias: 0 };
+  write(KEY_COL, col);
+  return { ok: true, distintas, copias };
+}
+
 // ------------------------------------------------------------------ pity (SR garantida)
 
 /** Quantos pacotes deste booster já foram abertos (contador do "a cada 10"). */
@@ -204,4 +240,42 @@ export function bumpPity(key) {
   p[key] = (p[key] ?? 0) + 1;
   write(KEY_PITY, p);
   return p[key];
+}
+
+// ------------------------------------------------- pity da UR (por DP gasto)
+
+/**
+ * Contador GLOBAL de DP gasto em pacotes desde a última UR garantida.
+ *
+ * É por DP, e não por pacote, porque cada booster pode ter o seu preço: contar
+ * pacotes faria um booster caro chegar à garantia com o mesmo esforço de um
+ * barato. Global (e não por booster) porque a garantia é do jogador — ele
+ * acumula abrindo o que quiser e resgata onde houver UR.
+ *
+ * O ciclo NÃO é consumido aqui: quem abre o pacote confirma que a UR foi mesmo
+ * entregue antes de chamar `consumeUrPity()`. Um booster sem UR não pode
+ * queimar o progresso de 10.000 DP do jogador.
+ */
+export function getUrSpend() {
+  const n = Number(read(KEY_URSPEND, 0));
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** Soma o gasto de um pacote ao contador. Devolve o novo total. */
+export function addUrSpend(dp) {
+  const v = getUrSpend() + Math.max(0, Math.round(Number(dp) || 0));
+  write(KEY_URSPEND, v);
+  return v;
+}
+
+/** Já deu para a UR garantida? */
+export function urPityReady() {
+  return getUrSpend() >= UR_PITY_DP;
+}
+
+/** Desconta UM ciclo (guarda o troco para o próximo). Só após entregar a UR. */
+export function consumeUrPity() {
+  const v = Math.max(0, getUrSpend() - UR_PITY_DP);
+  write(KEY_URSPEND, v);
+  return v;
 }

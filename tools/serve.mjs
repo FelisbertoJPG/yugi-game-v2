@@ -8,7 +8,7 @@
  *   npm run dev     -> http://localhost:8080
  */
 import { createServer } from 'node:http';
-import { readFile, stat, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
+import { readFile, stat, writeFile, mkdir, readdir, unlink, rename } from 'node:fs/promises';
 import { join, extname, normalize, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -186,7 +186,7 @@ async function handleDecks(action, req, res) {
       return json(res, { ok: false, error: 'conteúdo vazio' }, 400);
     }
     await mkdir(dirname(full), { recursive: true });
-    await writeFile(full, content, 'utf8');
+    await gravarSerializado(full, content);   // mesma proteção da store/
     console.log(`  deck salvo: ${relative(ROOT, full)}`);
     return json(res, { ok: true, path: relative(DECKS, full).split(sep).join('/') });
   }
@@ -216,6 +216,39 @@ function safeStorePath(name) {
   return full;
 }
 
+/**
+ * Grava de forma ATÔMICA e sem concorrência.
+ *
+ * Dois `writeFile` simultâneos no mesmo caminho não são atômicos: o mais lento
+ * continua escrevendo no offset dele DEPOIS de o outro já ter truncado, e o que
+ * sobra no disco é um JSON válido seguido do rabo do arquivo anterior. Foi
+ * exatamente assim que uma carteira apareceu com `} Fusão": 118 } }` no fim.
+ *
+ * O gatilho é trivial de disparar: abrir um pacote grava DP, coleção, pity e o
+ * contador da UR em sequência, e cada gravação espelha o arquivo inteiro.
+ *
+ * Duas defesas: uma FILA por caminho (nunca duas gravações do mesmo arquivo ao
+ * mesmo tempo) e escrita em arquivo temporário seguida de `rename`, que é
+ * atômico no mesmo volume — quem estiver lendo vê a versão velha ou a nova,
+ * nunca metade das duas.
+ */
+const filaDeEscrita = new Map();
+
+function gravarSerializado(full, texto) {
+  const anterior = filaDeEscrita.get(full) ?? Promise.resolve();
+  const atual = anterior
+    .catch(() => {})            // falha de uma não pode travar a fila
+    .then(async () => {
+      const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
+      await writeFile(tmp, texto, 'utf8');
+      await rename(tmp, full);
+    });
+  filaDeEscrita.set(full, atual);
+  // Não deixa o Map crescer para sempre: quem terminou por último se remove.
+  atual.finally(() => { if (filaDeEscrita.get(full) === atual) filaDeEscrita.delete(full); });
+  return atual;
+}
+
 async function handleStore(name, req, res) {
   const full = safeStorePath(name);
   if (!full) return json(res, { ok: false, error: 'nome inválido (use <nome>.json)' }, 400);
@@ -223,7 +256,7 @@ async function handleStore(name, req, res) {
   if (req.method === 'POST') {
     const data = await readBody(req);
     await mkdir(STORE, { recursive: true });
-    await writeFile(full, JSON.stringify(data, null, 2), 'utf8');
+    await gravarSerializado(full, JSON.stringify(data, null, 2));
     console.log(`  store salvo: ${relative(ROOT, full)}`);
     return json(res, { ok: true });
   }

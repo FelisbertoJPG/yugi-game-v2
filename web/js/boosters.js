@@ -78,18 +78,39 @@ export function salvarNoProjeto() {
 
 /**
  * Chances de cada raridade ao abrir um pacote (peso relativo, POR CARTA, soma 1000).
- * Calibrado para UR ser "ultra rara": 0,4%/carta → num pacote de 5 dá ~2% de
- * chance de sair 1 UR → em média ~50 pacotes = ~5000 DP por UR, como pedido.
- * (N domina; SR ~5,6%/carta; R comum.) Só entram as raridades presentes no
- * booster, renormalizadas — um booster sem UR simplesmente não dropa UR.
+ *
+ * UR continua "ultra rara": 0,4%/carta → ~2% por pacote de 5 → em média ~50
+ * pacotes (~5000 DP) por UR.
+ *
+ * **SR foi reduzida de 56 para 38** (5,6% → 3,8% por carta). Motivo: com 56 e a
+ * garantia a cada 10 pacotes, 50 pacotes rendiam ~18 SRs — mais do que o total
+ * de SRs de um booster, então o jogador FECHAVA a lista de SR antes de tirar a
+ * primeira UR, e a raridade perdia o sentido. Com 38 e a garantia a cada 20, o
+ * mesmo investimento rende ~11. O que saiu de SR foi para R (240→252) e N
+ * (700→706): o pacote não fica mais pobre, fica menos inflacionado no topo.
+ *
+ * Só entram as raridades presentes no booster, renormalizadas — um booster sem
+ * UR simplesmente não dropa UR.
  */
-export const PACK_ODDS = { N: 700, R: 240, SR: 56, UR: 4 };
+export const PACK_ODDS = { N: 706, R: 252, SR: 38, UR: 4 };
 /** Quantas cartas saem por pacote. */
 export const PACK_SIZE = 5;
 /** Preço padrão de um pacote (o booster pode ter o seu). */
 export const DEFAULT_PRICE = 100;
-/** A cada N pacotes deste booster, 1 SR garantida (substitui uma carta N). */
-export const PITY_EVERY = 10;
+/**
+ * A cada N pacotes deste booster, 1 SR garantida (substitui uma carta N).
+ * Era 10; virou 20 junto com o corte da taxa de SR — as duas coisas puxavam
+ * a mesma inflação, e mexer só numa deixaria o efeito pela metade.
+ */
+export const PITY_EVERY = 20;
+/**
+ * A cada este tanto de DP gasto em pacotes, 1 UR garantida — em QUALQUER
+ * booster que tenha UR. É piso, não fonte: a chance normal já dá ~1 UR a cada
+ * ~5000 DP, então isto só socorre quem está com azar acumulado. O contador é
+ * global (soma o gasto em todos os boosters) e mora na carteira, porque é
+ * progresso do jogador e não do booster — ver `wallet.js`.
+ */
+export const UR_PITY_DP = 10000;
 
 /** Garante o formato { name, coverId, inShop, price, order, cards:{...}, updatedAt }. */
 export function normalize(b = {}) {
@@ -184,7 +205,7 @@ export function setInShop(index, on) {
  * tem (renormalizando), senão um booster só de N nunca daria carta. Cartas
  * podem repetir (é um sorteio com reposição, como pacote de verdade).
  */
-export function openPack(booster, n = PACK_SIZE, { guaranteeSR = false } = {}) {
+export function openPack(booster, n = PACK_SIZE, { guaranteeSR = false, guaranteeUR = false } = {}) {
   const buckets = RARITIES.filter((r) => booster.cards[r]?.length);
   if (!buckets.length) return [];
   const total = buckets.reduce((s, r) => s + PACK_ODDS[r], 0);
@@ -196,8 +217,31 @@ export function openPack(booster, n = PACK_SIZE, { guaranteeSR = false } = {}) {
     const pool = booster.cards[chosen];
     pulls.push({ id: pool[Math.floor(Math.random() * pool.length)], rarity: chosen });
   }
+  // A UR vem primeiro de propósito: se ela entrar, a garantia de SR já está
+  // satisfeita (aplicarSRGarantida desiste quando o pacote tem SR ou UR) e o
+  // jogador não gasta os dois contadores no mesmo pacote.
+  if (guaranteeUR) aplicarURGarantida(booster, pulls);
   if (guaranteeSR) aplicarSRGarantida(booster, pulls);
   return pulls;
+}
+
+/**
+ * Garante uma UR substituindo a carta de MENOR raridade do pacote. Se o pacote
+ * já trouxe UR (ou o booster não tem UR), não faz nada — e é por isso que quem
+ * chama deve conferir `guaranteedUR` antes de descontar o contador de DP, senão
+ * um booster sem UR queimaria os 10.000 do jogador sem entregar nada.
+ */
+function aplicarURGarantida(booster, pulls) {
+  const ur = booster.cards.UR;
+  if (!ur?.length) return;
+  if (pulls.some((p) => p.rarity === 'UR')) return;
+  for (const r of ['N', 'R', 'SR']) {                  // sempre sacrificar a mais baixa
+    const i = pulls.findIndex((p) => p.rarity === r);
+    if (i >= 0) {
+      pulls[i] = { id: ur[Math.floor(Math.random() * ur.length)], rarity: 'UR', guaranteed: true, guaranteedUR: true };
+      return;
+    }
+  }
 }
 
 /**

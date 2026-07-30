@@ -40,8 +40,111 @@ namespace DuelServer
             TributoEmDefesa(sa);
             Log.Info("\n=== teste: ritual por SOMA MAIOR (overshoot) ===\n");
             RitualOverflow(sa);
+            Log.Info("\n=== teste: ESCOLHA DE POSICAO no ritual ===\n");
+            PosicaoDoRitual(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
             return _fail == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// A escolha de POSIÇÃO no ritual — `--test-summons`.
+        ///
+        /// Relato: o monstro de ritual sempre entrava em ataque, sem oferecer a
+        /// defesa. A causa era o host respondendo `0x1` sozinho ao
+        /// MSG_SELECT_POSITION; a pergunta nunca chegava à tela.
+        ///
+        /// Este teste também PROVA o layout da mensagem, que não estava
+        /// documentado: se o `askCode` lido bate com o Black Luster Soldier que
+        /// está sendo invocado, então `code` está mesmo no offset 2. E ele
+        /// confirma que a defesa aparece na máscara — sem isso, a escolha que o
+        /// jogador reclamou não existiria nem no motor.
+        /// </summary>
+        static void PosicaoDoRitual(string sa)
+        {
+            var deck = new List<uint>();
+            for (int i = 0; i < 8; i++) deck.Add(BLS_RITUAL);
+            for (int i = 0; i < 8; i++) deck.Add(BLS);
+            while (deck.Count < 40) deck.Add(BATTLE_OX);
+
+            using var duel = new InteractiveDuel(sa, deck.ToArray(), 4321UL, 0x1000000UL, npc: false);
+            var r = duel.Advance();
+
+            bool perguntouPosicao = false, entrouEmDefesa = false;
+            uint codigoPerguntado = 0;
+            byte mascara = 0;
+
+            for (int guard = 0; guard < 300 && !r.ended && !entrouEmDefesa; guard++)
+            {
+                foreach (var e in r.events)
+                {
+                    var t = e.GetType();
+                    if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
+                    uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
+                    byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                    int pos = Convert.ToInt32(t.GetProperty("pos")?.GetValue(e) ?? 0);
+                    // 0x4 = defesa com a FACE PARA CIMA (não é Set, que seria 0x8)
+                    if (code == BLS && loc == LOC_MZONE && (pos & 0x4) != 0)
+                    {
+                        entrouEmDefesa = true;
+                        Log.Info($"  > Black Luster Soldier entrou em DEFESA aberta (pos 0x{pos:x})");
+                    }
+                }
+                if (entrouEmDefesa) break;
+
+                var q = r.question;
+                if (q == null) break;
+
+                switch (q.kind)
+                {
+                    case "position":
+                        perguntouPosicao = true;
+                        codigoPerguntado = q.askCode;
+                        mascara = q.posMask;
+                        Log.Info($"  > o motor PERGUNTOU a posicao: carta {q.askCode} " +
+                                 $"mascara 0x{q.posMask:x}");
+                        r = duel.Respond("position", 0x4);   // escolhe DEFESA aberta
+                        break;
+                    case "idle":
+                    {
+                        var ritual = q.activatable.FirstOrDefault(a => a.code == BLS_RITUAL);
+                        if (ritual.code == BLS_RITUAL) r = duel.Respond("activate", ritual.index);
+                        else if (q.summonable.Count > 0) r = duel.Respond("summon", q.summonable[0].index);
+                        else r = duel.Respond("endturn", 0);
+                        break;
+                    }
+                    case "place": r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0); break;
+                    case "selectcard":
+                    case "selecttribute":
+                        r = duel.Respond("select", 0,
+                            q.choices.Take(Math.Max(1, q.selMin)).Select(c => c.index).ToList());
+                        break;
+                    case "selectsum":
+                    {
+                        var pick = new List<int>(); int soma = 0;
+                        foreach (var c in q.choices)
+                        {
+                            if (soma >= q.sumNeeded) break;
+                            pick.Add(c.index); soma += c.param;
+                        }
+                        r = duel.Respond("select", 0, pick);
+                        break;
+                    }
+                    case "selectunselect":
+                        r = q.canFinish && q.choices.Count == 0
+                            ? duel.Respond("finishselect", 0)
+                            : duel.Respond("pick", q.choices[0].index);
+                        break;
+                    case "battle": r = duel.Respond("endbattle", 0); break;
+                    default: r = duel.Respond("endturn", 0); break;
+                }
+            }
+
+            Check("o motor PERGUNTA a posicao do ritual (nao decide sozinho)", perguntouPosicao);
+            Check("a pergunta traz o codigo da carta certa (prova o layout)",
+                  codigoPerguntado == BLS, $"(veio {codigoPerguntado}, esperado {BLS})");
+            Check("a mascara permite DEFESA com a face para cima (0x4)",
+                  (mascara & 0x4) != 0, $"(mascara 0x{mascara:x})");
+            Check("o ritual entrou em DEFESA quando escolhida", entrouEmDefesa);
         }
 
         /// <summary>
@@ -124,6 +227,11 @@ namespace DuelServer
                         r = q.canFinish && q.choices.Count == 0
                             ? duel.Respond("finishselect", 0)
                             : duel.Respond("pick", q.choices[0].index);
+                        break;
+                    // A posicao agora e' pergunta do JOGADOR: estes testes nao
+                    // avaliam a escolha, entao mantem o ataque de sempre.
+                    case "position":
+                        r = duel.Respond("position", 0x1);
                         break;
                     case "battle":
                         r = duel.Respond("endbattle", 0);
@@ -280,6 +388,11 @@ namespace DuelServer
                     case "place":
                         r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0);
                         break;
+                    // A posição virou pergunta do jogador; aqui só interessa que
+                    // o ritual SAIA, então mantém o ataque de antes.
+                    case "position":
+                        r = duel.Respond("position", 0x1);
+                        break;
                     case "selectcard":
                     case "selecttribute":
                         Log.Info($"  > {q.kind}: min={q.selMin} opcoes={q.choices.Count}");
@@ -405,6 +518,9 @@ namespace DuelServer
                     }
                     case "place":
                         r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0);
+                        break;
+                    case "position":
+                        r = duel.Respond("position", 0x1);
                         break;
                     case "selecttribute":
                     {

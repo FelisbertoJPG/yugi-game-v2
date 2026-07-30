@@ -377,6 +377,7 @@ import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 const advId = new URLSearchParams(location.search).get('npc');
 let advNpc = advId ? getNpc(advId) : null;
 let advDeck = null;        // deck do NPC (main ids), carregado no boot
+let advExtra = null;       // extra do NPC (fusões etc.), idem
 let advSignature = null;
 let advReward = WIN_REWARD; // DP que este deck do NPC dá ao ser vencido
 let rewardGiven = false;   // trava para não premiar duas vezes no mesmo duelo
@@ -445,6 +446,7 @@ async function start() {
   busy = false; $('fx').replaceChildren();   // aborta qualquer animação em curso
   const deck = chosenDeck();
   const ids = deck ? deck.main : [];
+  const extraIds = deck?.extra ?? [];
   if (!ids.length) { warn('Nenhum deck com cartas. Monte/selecione um deck no Deck Builder.'); return; }
   deckName = deck.name;
   hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
@@ -458,7 +460,12 @@ async function start() {
   deckCount = { 0: ids.length, 1: npcIds.length };
   try {
     const body = { deck: ids };
+    // O Extra Deck vai separado: o motor o guarda em LOCATION_EXTRA, de onde
+    // saem Fusão/Sincro/Xyz/Link. Mandado junto do main, seria embaralhado e
+    // COMPRADO como carta comum — e a fusão nunca apareceria para invocar.
+    if (extraIds.length) body.extra = extraIds;
     if (advNpc && advDeck && advDeck.length) body.npcDeck = npcIds;
+    if (advNpc && advExtra && advExtra.length) body.npcExtra = advExtra;
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
@@ -856,6 +863,17 @@ function handle(ev) {
         if (ev.fromLoc === 4) src.m[ev.fromSeq] = null;
         else if (ev.fromLoc === 8) { if (ev.fromSeq === 5) src.f = null; else src.s[ev.fromSeq] = null; }
         else if (ev.fromLoc === 0x100) src.f = null;
+        // 0x10 = LOCATION_GRAVE. O cemitério é uma PILHA por código, não um
+        // vetor de zonas: para tirar, acha o código e remove UMA ocorrência —
+        // `indexOf` e não um filtro, senão um Monster Reborn num deck com 3
+        // cópias limparia as três do cemitério.
+        //
+        // Sem este ramo a pilha só crescia: o monstro revivido aparecia em
+        // campo E continuava listado no cemitério.
+        else if (ev.fromLoc === 0x10 && ev.code) {
+          const i = src.g.indexOf(ev.code);
+          if (i >= 0) src.g.splice(i, 1);
+        }
       }
       // coloca no destino
       const f = field[ev.controller] || (field[ev.controller] = fresh());
@@ -864,6 +882,14 @@ function handle(ev) {
       else if (ev.loc === 8) { if (ev.seq === 5) f.f = card; else f.s[ev.seq] = card; } // seq 5 = zona de campo
       else if (ev.loc === 0x100) f.f = card;
       else if (ev.loc === 0x10) f.g.push(ev.code); // 0x10 = LOCATION_GRAVE
+      // 0x2 = LOCATION_HAND. Carta que VAI PARA A MÃO sem ser compra: busca no
+      // deck (Fusion Sage), volta do campo, devolução do cemitério. O MSG_DRAW
+      // cobre só a compra, então sem este ramo a carta buscada sumia — saía do
+      // deck (o contador caía) e não aparecia em lugar nenhum.
+      else if (ev.loc === 2) {
+        if (ev.controller === 0) { if (ev.code) hand[0].push(ev.code); }
+        else hand[1]++;
+      }
       if (ev.fromLoc === 2) { // saiu da mão
         if (ev.fromCtrl === 0) { const i = hand[0].indexOf(ev.code); if (i>=0) hand[0].splice(i,1); }
         else if (hand[1] > 0) hand[1]--;
@@ -871,6 +897,9 @@ function handle(ev) {
       // Saiu do deck por efeito (não pela compra, que já vem no MSG_DRAW).
       if (ev.fromLoc === 1) {
         deckCount[ev.fromCtrl] = Math.max(0, deckCount[ev.fromCtrl] - 1);
+        if (ev.loc === 2) {
+          log(`busca: ${ev.code ? nameOf(ev.code) : 'carta'} foi do deck para a mão`);
+        }
       }
       break;
     }
@@ -1331,8 +1360,47 @@ function abrirPopupPosicao(h, acts, type, index) {
 
 function fecharPopupPosicao() { $('pos-overlay').hidden = true; }
 
+/**
+ * Pergunta de POSIÇÃO (SELECT_POSITION): Invocação-Ritual e demais Invocações
+ * Especiais deixam escolher entre ataque e defesa — as duas com a FACE PARA
+ * CIMA. Não confunda com Set: setar é virar a carta, e é outra jogada.
+ *
+ * A máscara vem do motor (0x1 ataque, 0x4 defesa aberta); só desenhamos o que
+ * ele aceita, em vez de oferecer uma opção que seria recusada.
+ */
+function abrirPopupPosicaoEspecial(q) {
+  const code = q.askCode;
+  const opcoes = [];
+  if (q.posMask & 0x1) opcoes.push({ pos: 0x1, label: 'Posição de Ataque', primaria: true });
+  if (q.posMask & 0x4) opcoes.push({ pos: 0x4, label: 'Posição de Defesa', primaria: false });
+  // Máscara sem nada reconhecível: responde ataque para não travar o duelo.
+  if (!opcoes.length) { act('position', 0x1, 'posição (ataque)'); return; }
+
+  $('pos-art').src = ART(code);
+  $('pos-name').textContent = nameOf(code);
+  $('pos-where').textContent = '→ escolha a posição';
+
+  const frag = document.createDocumentFragment();
+  for (const o of opcoes) {
+    const b = document.createElement('button');
+    b.className = o.primaria ? 'btn-primary' : '';
+    b.textContent = o.label;
+    b.onclick = () => {
+      fecharPopupPosicao();
+      act('position', o.pos, `${nameOf(code)} em ${o.label.toLowerCase()}`);
+    };
+    frag.append(b);
+  }
+  // Sem "cancelar": o motor está esperando uma posição, e recusar trava o duelo.
+  $('pos-acts').replaceChildren(frag);
+  $('pos-overlay').hidden = false;
+}
+
 function render() {
   SELECIONAVEIS = selecionaveisNoCampo();
+  if (question && question.kind === 'position' && question.player === 0) {
+    abrirPopupPosicaoEspecial(question);
+  }
   $('turn').textContent = turn === 0 ? 'VOCÊ' : 'oponente';
   $('opp-field').replaceChildren(fieldRows(1, false));
   $('you-field').replaceChildren(fieldRows(0, true));
@@ -1605,6 +1673,7 @@ if (advNpc) {
     await loadNpcDecks();
     const active = getNpcActiveDeck(advId);
     advDeck = active?.deck?.main?.length ? active.deck.main : null;
+    advExtra = active?.deck?.extra?.length ? active.deck.extra : null;
     advSignature = active?.signatureId ?? advNpc.signatureId;
     advReward = Number.isFinite(Number(active?.rewardDp)) ? Number(active.rewardDp) : WIN_REWARD;
   } catch { advSignature = advNpc.signatureId; }

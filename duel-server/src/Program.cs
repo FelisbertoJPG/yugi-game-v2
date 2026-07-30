@@ -134,6 +134,14 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-battle") >= 0)
                 return TestBattle.Run(streamingAssets);
 
+            // Teste de aceitacao da invocacao por Fusao (Extra Deck).
+            if (Array.IndexOf(args, "--test-fusion") >= 0)
+                return TestFusion.Run(streamingAssets);
+
+            // Teste da saida do cemiterio (contrato do fromLoc no MSG_MOVE).
+            if (Array.IndexOf(args, "--test-grave") >= 0)
+                return TestGrave.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-chain") >= 0)
                 return TestChain.Run(streamingAssets);
 

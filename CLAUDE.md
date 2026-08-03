@@ -42,7 +42,9 @@ em `duel-server/native/`). O app mobile (`mobile/`) requer o Flutter SDK.
 (Invocação-Sincro pelo Extra Deck + negação do Stardust Dragon via corrente),
 `--test-xyz` (Invocação-Xyz + desanexação de material do Number 39: Utopia),
 `--test-fieldbonus` (Bônus de Campo do editor de tabuleiro: Forest injetada
-ativa dá +200 de ATK de verdade a um Inseto, consultado no motor), `--test-toon`
+ativa dá +200 de ATK de verdade a um Inseto, consultado no motor E o evento
+`stats` que acende o destaque de ATK em `duel.html` chega sozinho ao entrar
+em campo, sem precisar de equipamento), `--test-toon`
 (NpcBrain ativa Toon World e invoca especialmente — `spsummon` — os Toons
 "clássicos" da mão, ex.: Toon Mermaid/Toon Summoned Skull), `--test-weevil`
 (as cartas COM EFEITO que o deck do Weevil trouxe pra Lista 1: Cocoon of

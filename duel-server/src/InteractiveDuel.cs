@@ -624,6 +624,24 @@ namespace DuelServer
                     bool ocultaMv = Oculta(cpo, cc);
                     ev.Add(new { type = "move", code = ocultaMv ? 0u : code, hidden = ocultaMv, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
 
+                    // Monstro chegando na zona já com bônus de campo em vigor (Forest
+                    // etc. injetada pelo editor de tabuleiro, ou qualquer contínua já
+                    // ativa) — o mesmo evento `stats` do MSG_EQUIP, só que disparado
+                    // aqui em vez de esperar um equipamento. `duel.html` já sabe
+                    // desenhar isso (destaca o ATK, igual ao equip); sem isto o bônus
+                    // só aparecia consultando manualmente, nunca na tela. Não emite
+                    // para monstro virado (`ocultaMv`) — revelar o ATK ali entregaria
+                    // informação que o jogo não mostra.
+                    if (cl == LOCATION_MZONE && cc <= 1 && !ocultaMv)
+                    {
+                        var (mAtk, mBase) = QueryAtk(cc, cs);
+                        if (mAtk != null && mBase != null && mAtk != mBase)
+                        {
+                            ev.Add(new { type = "stats", controller = cc, loc = cl, seq = cs,
+                                         atk = mAtk.Value, baseAtk = mBase.Value });
+                        }
+                    }
+
                     // Mantém o modelo de campo em dia (com o código REAL) para a IA.
                     if (pl == LOCATION_MZONE) _board.Remove((pc, ps));
                     if (cl == LOCATION_MZONE) _board[(cc, cs)] = (code, cpo);

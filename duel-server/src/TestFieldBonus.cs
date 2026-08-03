@@ -18,6 +18,12 @@ namespace DuelServer
     /// normal-summonado com Forest no campo tem que consultar ATK = base + 200
     /// no PRÓPRIO motor (`InteractiveDuel.QueryAtk`, a mesma consulta que a
     /// Equip Spell usa) — não é uma conta nossa, é o que o core responde.
+    ///
+    /// Também prova que o evento `stats` (o que acende o destaque ".boost" no
+    /// ATK em `duel.html`) chega sozinho quando um monstro entra em campo já
+    /// sob o bônus — antes só disparava em MSG_EQUIP; pedido do usuário depois
+    /// de testar um tabuleiro com Forest injetada pro deck do Weevil e ver que
+    /// o ATK do Inseto não destacava na tela.
     /// </summary>
     public static class TestFieldBonus
     {
@@ -47,19 +53,39 @@ namespace DuelServer
 
             bool summonou = false;
             int seq = -1;
+            // Prova que o `duel.html` de verdade recebe o destaque de ATK: não
+            // basta o QueryAtk manual (linha 88) responder certo, o evento
+            // `stats` precisa aparecer no MESMO lote da invocação — é ele que
+            // acende o ".boost" na carta (ver InteractiveDuel.cs, case 50/MOVE).
+            bool statsEventChegou = false;
+            int statsAtk = -1, statsBaseAtk = -1;
 
             for (int guard = 0; guard < 30 && !r.ended && !summonou; guard++)
             {
                 foreach (var e in r.events)
                 {
                     var t = e.GetType();
-                    if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
-                    uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
-                    byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
-                    if (code == KAMAKIRI && loc == 4) // LOCATION_MZONE
+                    var tipo = t.GetProperty("type")?.GetValue(e) as string;
+                    if (tipo == "move")
                     {
-                        summonou = true;
-                        seq = Convert.ToInt32(t.GetProperty("seq")?.GetValue(e) ?? -1);
+                        uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
+                        byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                        if (code == KAMAKIRI && loc == 4) // LOCATION_MZONE
+                        {
+                            summonou = true;
+                            seq = Convert.ToInt32(t.GetProperty("seq")?.GetValue(e) ?? -1);
+                        }
+                    }
+                    else if (tipo == "stats")
+                    {
+                        byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                        int evSeq = Convert.ToInt32(t.GetProperty("seq")?.GetValue(e) ?? -1);
+                        if (loc == 4 && evSeq == seq)
+                        {
+                            statsEventChegou = true;
+                            statsAtk = Convert.ToInt32(t.GetProperty("atk")?.GetValue(e) ?? -1);
+                            statsBaseAtk = Convert.ToInt32(t.GetProperty("baseAtk")?.GetValue(e) ?? -1);
+                        }
                     }
                 }
                 if (summonou) break;
@@ -89,6 +115,12 @@ namespace DuelServer
             Log.Info($"  ATK consultado no motor: base={baseAtk} atual={atk} (Forest ativo deveria dar base+200)");
             Check("Forest aplicou +200 de ATK de verdade (consulta no core, nao conta nossa)",
                   atk == 1700, $"(veio {atk}, base {baseAtk})");
+
+            Check("o evento 'stats' chegou no MESMO lote da invocacao (duel.html destaca o ATK)",
+                  statsEventChegou, $"(chegou={statsEventChegou})");
+            if (statsEventChegou)
+                Check("o evento 'stats' trouxe os numeros certos (1700 sobre base 1500)",
+                      statsAtk == 1700 && statsBaseAtk == 1500, $"(atk={statsAtk}, baseAtk={statsBaseAtk})");
         }
 
         static void Check(string nome, bool ok, string extra = "")

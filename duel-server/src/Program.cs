@@ -400,12 +400,53 @@ namespace DuelServer
             }
         }
 
+        /// <summary>
+        /// Caminhos de instalação padrão do Edge/Chrome no Windows — checar
+        /// arquivo em vez de mexer no registro, no mesmo espírito pragmático
+        /// do resto do launcher (sem dependência nova, sem P/Invoke extra).
+        /// </summary>
+        private static readonly string[] NavegadoresChromium =
+        {
+            @"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+            @"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+            @"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+            @"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+        };
+
+        /// <summary>
+        /// Abre o jogo como janela de app (Edge/Chrome com `--app=`): sem barra
+        /// de endereço, sem abas — parece um executável de verdade, não uma aba
+        /// de navegador. Sem Edge/Chrome instalado (raro no Windows 11, onde o
+        /// Edge vem de fábrica), cai para o navegador padrão do sistema.
+        /// </summary>
         private static void AbrirNavegador(string url)
         {
             Console.WriteLine();
             Log.Info($"abrindo {url}");
             Log.Info("DEIXE ESTA JANELA ABERTA — fechar aqui encerra o jogo.");
             Console.WriteLine();
+
+            string chromium = NavegadoresChromium
+                .Select(Environment.ExpandEnvironmentVariables)
+                .FirstOrDefault(File.Exists);
+            if (chromium != null)
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = chromium,
+                        Arguments = $"--app=\"{url}\" --window-size=1400,900",
+                        UseShellExecute = false,
+                    });
+                    return;
+                }
+                catch (Exception e)
+                {
+                    Log.Warn($"nao consegui abrir {Path.GetFileName(chromium)} em modo app ({e.Message}); tentando o navegador padrao.");
+                }
+            }
+
             try
             {
                 System.Diagnostics.Process.Start(

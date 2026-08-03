@@ -90,15 +90,15 @@ internal static class Program
         // ---- 4. abrir o navegador ----------------------------------------
         if (!noBrowser)
         {
-            Step(4, "abrindo no navegador");
+            Step(4, "abrindo a janela do jogo");
             try
             {
-                Process.Start(new ProcessStartInfo(OpenPage) { UseShellExecute = true });
-                Ok("navegador aberto");
+                OpenAsAppWindow(OpenPage);
+                Ok("janela aberta");
             }
             catch (Exception e)
             {
-                Warn($"nao consegui abrir o navegador: {e.Message}");
+                Warn($"nao consegui abrir a janela do jogo: {e.Message}");
                 Console.WriteLine($"  Abra manualmente: {OpenPage}");
             }
         }
@@ -203,6 +203,48 @@ internal static class Program
         return Directory.EnumerateFiles(bin, "duel-server.exe", SearchOption.AllDirectories)
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Caminhos de instalacao padrao do Edge/Chrome no Windows — checar arquivo
+    /// em vez de mexer no registro, pragmatico como o resto deste launcher.
+    /// </summary>
+    static readonly string[] ChromiumPaths =
+    {
+        @"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+        @"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+        @"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+        @"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+    };
+
+    /// <summary>
+    /// Abre o jogo como janela de app (Edge/Chrome com `--app=`): sem barra de
+    /// endereco nem abas — parece um executavel de verdade, nao uma aba de
+    /// navegador. Sem Edge/Chrome instalado cai para o navegador padrao.
+    /// </summary>
+    static void OpenAsAppWindow(string url)
+    {
+        string chromium = ChromiumPaths
+            .Select(Environment.ExpandEnvironmentVariables)
+            .FirstOrDefault(File.Exists);
+        if (chromium != null)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = chromium,
+                    Arguments = $"--app=\"{url}\" --window-size=1400,900",
+                    UseShellExecute = false,
+                });
+                return;
+            }
+            catch (Exception e)
+            {
+                Warn($"nao consegui abrir {Path.GetFileName(chromium)} em modo app ({e.Message}); tentando o navegador padrao.");
+            }
+        }
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     // ------------------------------------------------------------------ processo

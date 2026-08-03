@@ -628,17 +628,21 @@ namespace DuelServer
                     // etc. injetada pelo editor de tabuleiro, ou qualquer contínua já
                     // ativa) — o mesmo evento `stats` do MSG_EQUIP, só que disparado
                     // aqui em vez de esperar um equipamento. `duel.html` já sabe
-                    // desenhar isso (destaca o ATK, igual ao equip); sem isto o bônus
-                    // só aparecia consultando manualmente, nunca na tela. Não emite
-                    // para monstro virado (`ocultaMv`) — revelar o ATK ali entregaria
-                    // informação que o jogo não mostra.
+                    // desenhar isso (destaca ATK e DEF, igual ao equip); sem isto o
+                    // bônus só aparecia consultando manualmente, nunca na tela. Não
+                    // emite para monstro virado (`ocultaMv`) — revelar o ATK/DEF ali
+                    // entregaria informação que o jogo não mostra.
                     if (cl == LOCATION_MZONE && cc <= 1 && !ocultaMv)
                     {
                         var (mAtk, mBase) = QueryAtk(cc, cs);
-                        if (mAtk != null && mBase != null && mAtk != mBase)
+                        var (mDef, mBaseDef) = QueryDef(cc, cs);
+                        bool atkMudou = mAtk != null && mBase != null && mAtk != mBase;
+                        bool defMudou = mDef != null && mBaseDef != null && mDef != mBaseDef;
+                        if (atkMudou || defMudou)
                         {
                             ev.Add(new { type = "stats", controller = cc, loc = cl, seq = cs,
-                                         atk = mAtk.Value, baseAtk = mBase.Value });
+                                         atk = mAtk ?? 0, baseAtk = mBase ?? mAtk ?? 0,
+                                         def = mDef ?? 0, baseDef = mBaseDef ?? mDef ?? 0 });
                         }
                     }
 
@@ -800,11 +804,14 @@ namespace DuelServer
             if (location != LOCATION_MZONE || controller > 1) return;
 
             var (atk, baseAtk) = QueryAtk(controller, sequence);
+            var (def, baseDef) = QueryDef(controller, sequence);
             if (atk != null)
             {
-                Log.Info($"[equip] alvo P{controller} M{sequence}: ATK {baseAtk ?? atk.Value} -> {atk.Value}");
+                Log.Info($"[equip] alvo P{controller} M{sequence}: ATK {baseAtk ?? atk.Value} -> {atk.Value}" +
+                         (def != null ? $", DEF {baseDef ?? def.Value} -> {def.Value}" : ""));
                 ev.Add(new { type = "stats", controller, loc = location, seq = sequence,
-                             atk = atk.Value, baseAtk = baseAtk ?? atk.Value });
+                             atk = atk.Value, baseAtk = baseAtk ?? atk.Value,
+                             def = def ?? 0, baseDef = baseDef ?? def ?? 0 });
             }
         }
 
@@ -851,6 +858,50 @@ namespace DuelServer
                 p += 2 + size;
             }
             return (atk, baseAtk);
+        }
+
+        /// <summary>
+        /// DEF atual e DEF base de um monstro na zona — mesmo padrão do
+        /// `QueryAtk` (própria consulta nativa; o equip clássico "+400 ATK /
+        /// -200 DEF por atributo" da Lista 1 já reduz DEF de verdade, só nunca
+        /// tinha sido mostrado na tela). Fica em método separado (em vez de
+        /// juntar tudo numa consulta só) pra não arriscar quebrar o `QueryAtk`
+        /// já usado pelos testes de aceitação existentes.
+        /// </summary>
+        internal (int? def, int? baseDef) QueryDef(int controller, int sequence)
+        {
+            var info = new OCG_QueryInfo
+            {
+                flags = 0x200 | 0x800, // QUERY_DEFENSE | QUERY_BASE_DEFENSE
+                con = (byte)controller,
+                loc = LOCATION_MZONE,
+                seq = (uint)sequence,
+            };
+            IntPtr ptr = YgoCoreAPI.OCG_DuelQuery(_s.Handle, out uint len, ref info);
+            if (ptr == IntPtr.Zero || len == 0)
+            {
+                Log.Warn($"[query] DEF de P{controller} M{sequence} vazio (ptr={ptr}, len={len})");
+                return (null, null);
+            }
+            var data = new byte[len];
+            Marshal.Copy(ptr, data, 0, (int)len);
+
+            int? def = null, baseDef = null;
+            for (int p = 0; p + 6 <= data.Length;)
+            {
+                int size = BitConverter.ToUInt16(data, p);
+                if (size < 4 || p + 2 + size > data.Length) break;
+                uint flag = BitConverter.ToUInt32(data, p + 2);
+                if (flag == 0x80000000) break; // QUERY_END
+                if (size >= 8)
+                {
+                    int value = BitConverter.ToInt32(data, p + 6);
+                    if (flag == 0x200) def = value;
+                    else if (flag == 0x800) baseDef = value;
+                }
+                p += 2 + size;
+            }
+            return (def, baseDef);
         }
 
         // Idle: parseia a lista de invocáveis e de Invocação Especial (início,

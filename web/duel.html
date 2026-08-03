@@ -28,9 +28,12 @@
     position: relative; border-radius: 2px;
   }
   .zone .zl { position: absolute; top: 1px; left: 2px; font-size: 7px; color: #3a4756; letter-spacing: .5px; }
-  .zone .atk { position: absolute; right: 1px; bottom: 1px; z-index: 2; padding: 1px 3px;
+  .zone .atk, .zone .def { position: absolute; right: 1px; z-index: 2; padding: 1px 3px;
     background: #07151acc; color: #9daebb; font: 700 9px/1 ui-monospace, monospace; text-shadow: 0 1px #000; }
-  .zone .atk.boost { color: #39e5d2; background: #08383bcc; text-shadow: 0 0 5px #0cebd5; }
+  .zone .atk { bottom: 1px; }
+  .zone .def { bottom: 12px; }   /* empilha acima do ATK, mesmo canto */
+  .zone .atk.boost, .zone .def.boost { color: #39e5d2; background: #08383bcc; text-shadow: 0 0 5px #0cebd5; }
+  .zone .atk.reduced, .zone .def.reduced { color: #ff6b6b; background: #3a0e0ecc; text-shadow: 0 0 5px #ff3b3b; }
   .zone.mz { border-color: #6b4a1e; }
   .zone.sz { border-color: #1e5a4a; }
   .zone.fz { border-color: #4a2e6b; }
@@ -55,7 +58,13 @@
   .actbar b { color: var(--gold); }
   .actbar button { font-size: 11px; padding: 3px 10px; }
 
-  .midbar { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 4px; background: var(--panel); border: 1px solid var(--line); flex-wrap: wrap; }
+  /* LP fica FORA do grupo que quebra linha — senão, quando o texto do botão
+     de fase varia (ex.: "próxima fase" no turno de batalha do oponente), o
+     LP do canto direito é o primeiro a sobrar pra segunda linha e some da
+     tela sem rolar até lá. */
+  .midbar { display: flex; align-items: center; gap: 10px; padding: 4px; background: var(--panel); border: 1px solid var(--line); }
+  .midbar .lp { flex: none; }
+  .mid-phases { display: flex; align-items: center; gap: 10px; justify-content: center; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
   .phase-pill { padding: 1px 7px; border: 1px solid var(--line); font-size: 10px; color: var(--dim); }
   .phase-pill.on { color: var(--gold); border-color: var(--gold); }
   .lp { font-size: 12px; color: var(--ink); }
@@ -1195,8 +1204,15 @@ function handle(ev) {
     case 'stats': {
       const f = field[ev.controller];
       const alvo = ev.loc === 4 ? f?.m?.[ev.seq] : null;
-      if (alvo) { alvo.atk = ev.atk; alvo.baseAtk = ev.baseAtk; }
-      log(`ATK de ${alvo?.code ? nameOf(alvo.code) : 'monstro'}: ${ev.atk}`, true);
+      if (alvo) {
+        alvo.atk = ev.atk; alvo.baseAtk = ev.baseAtk;
+        alvo.def = ev.def; alvo.baseDef = ev.baseDef;
+      }
+      const nome = alvo?.code ? nameOf(alvo.code) : 'monstro';
+      const partes = [];
+      if (Number.isFinite(ev.atk)) partes.push(`ATK ${ev.atk}`);
+      if (Number.isFinite(ev.def)) partes.push(`DEF ${ev.def}`);
+      log(`${nome}: ${partes.join(' / ')}`, true);
       break;
     }
     case 'move': {
@@ -1220,7 +1236,7 @@ function handle(ev) {
       }
       // coloca no destino
       const f = field[ev.controller] || (field[ev.controller] = fresh());
-      const card = { code: ev.code, pos: ev.pos, atk: null, baseAtk: null };
+      const card = { code: ev.code, pos: ev.pos, atk: null, baseAtk: null, def: null, baseDef: null };
       if (ev.loc === 4) f.m[ev.seq] = card;
       else if (ev.loc === 8) { if (ev.seq === 5) f.f = card; else f.s[ev.seq] = card; } // seq 5 = zona de campo
       else if (ev.loc === 0x100) f.f = card;
@@ -1290,10 +1306,21 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
     if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
     el.title = facedown ? 'carta virada' : nameOf(cell.code) + '\nsegurar: ver detalhes';
     z.append(el);
+    // Selo de estatística alterada — só aparece quando um evento `stats` já
+    // mexeu no valor (equip ou entrar em campo sob um Bônus de Campo). Verde/
+    // azul quando sobe, vermelho quando desce (o ciclo de equipamento por
+    // atributo da Lista 1 sobe ATK e desce DEF do MESMO monstro ao mesmo
+    // tempo, então os dois precisam poder divergir).
     if (cls === 'mz' && !facedown && Number.isFinite(cell.atk)) {
       const stat = document.createElement('span');
-      stat.className = 'atk' + (cell.atk !== cell.baseAtk ? ' boost' : '');
+      stat.className = 'atk' + (cell.atk > cell.baseAtk ? ' boost' : cell.atk < cell.baseAtk ? ' reduced' : '');
       stat.textContent = `ATK ${cell.atk}`;
+      z.append(stat);
+    }
+    if (cls === 'mz' && !facedown && Number.isFinite(cell.def)) {
+      const stat = document.createElement('span');
+      stat.className = 'def' + (cell.def > cell.baseDef ? ' boost' : cell.def < cell.baseDef ? ' reduced' : '');
+      stat.textContent = `DEF ${cell.def}`;
       z.append(stat);
     }
     // Carta virada não revela nada: ver o detalhe dela seria trapaça.
@@ -1781,12 +1808,13 @@ function render() {
     s.innerHTML = `<b style="color:${p === 0 ? 'var(--blue)' : 'var(--red)'}">${p === 0 ? 'VOCÊ' : 'OPP'}</b> ${lp[p]}`;
     return s;
   };
-  $('mid').replaceChildren(
-    lpEl(1),
+  const midPhases = document.createElement('div');
+  midPhases.className = 'mid-phases';
+  midPhases.append(
     ...PHASES.map(([v, n]) => { const s = document.createElement('span'); s.className = 'phase-pill' + (v === phase ? ' on' : ''); s.textContent = n; return s; }),
     ...botoesDeFase(),
-    lpEl(0),
   );
+  $('mid').replaceChildren(lpEl(1), midPhases, lpEl(0));
 
   // mão do oponente (verso)
   const oh = document.createElement('div'); oh.style.display='contents';

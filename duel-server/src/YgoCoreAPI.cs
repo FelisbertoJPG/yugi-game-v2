@@ -67,6 +67,18 @@ namespace YGO
         public uint pos;       // Posição (8 = Facedown Defense)
     }
 
+    /// <summary>Endereço de uma carta para consulta no estado atual do duelo.
+    /// O padding explícito acompanha o alinhamento C da API nativa x64.</summary>
+    [StructLayout(LayoutKind.Explicit, Size = 20)]
+    public struct OCG_QueryInfo
+    {
+        [FieldOffset(0)] public uint flags;
+        [FieldOffset(4)] public byte con;
+        [FieldOffset(8)] public uint loc;
+        [FieldOffset(12)] public uint seq;
+        [FieldOffset(16)] public uint overlay_seq;
+    }
+
     /// <summary>
     /// Wrapper para a nova DLL em C++ do ygopro-core (edo9300 API).
     /// </summary>
@@ -103,5 +115,9 @@ namespace YGO
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int OCG_DuelQueryCount(IntPtr ocg_duel, byte team, uint loc);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr OCG_DuelQuery(IntPtr ocg_duel, out uint length,
+                                                   ref OCG_QueryInfo info);
     }
 }

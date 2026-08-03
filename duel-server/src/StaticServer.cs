@@ -55,6 +55,7 @@ namespace DuelServer
 
             if (path.StartsWith("/__decks/")) return Decks(ctx, root, path.Substring("/__decks/".Length));
             if (path.StartsWith("/__store/")) return Store(ctx, root, path.Substring("/__store/".Length));
+            if (path.StartsWith("/__boards/")) return Boards(ctx, root, path.Substring("/__boards/".Length));
 
             // Redireciona de verdade em vez de servir o index na raiz: um documento
             // servido em '/' faz os caminhos relativos dele resolverem contra '/',
@@ -195,6 +196,79 @@ namespace DuelServer
                 if (m.Success) meta[m.Groups[1].Value.ToLowerInvariant()] = m.Groups[2].Value.Trim();
             }
             return meta;
+        }
+
+        // ------------------------------------------------------------ boards/
+
+        /// <summary>Layouts de campo do editor (web/campo.html). Flat como store/
+        /// (sem subpastas), mas com list/save/delete como decks/ — o editor
+        /// precisa navegar vários tabuleiros, não só ler um pelo nome.</summary>
+        static string CaminhoBoard(string root, string nome)
+        {
+            if (string.IsNullOrEmpty(nome) || !Regex.IsMatch(nome, @"^[a-zA-Z0-9_-]+\.json$")) return null;
+            string boards = Path.Combine(root, "boards");
+            string full = Path.GetFullPath(Path.Combine(boards, nome));
+            if (!full.StartsWith(boards + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                return null;
+            return full;
+        }
+
+        static bool Boards(HttpListenerContext ctx, string root, string acao)
+        {
+            var req = ctx.Request;
+            var res = ctx.Response;
+            string boards = Path.Combine(root, "boards");
+
+            if (acao == "list")
+            {
+                var itens = new List<object>();
+                if (Directory.Exists(boards))
+                {
+                    foreach (var f in Directory.EnumerateFiles(boards, "*.json"))
+                    {
+                        try
+                        {
+                            itens.Add(new { path = Path.GetFileName(f), content = File.ReadAllText(f) });
+                        }
+                        catch { /* sumiu no meio da varredura */ }
+                    }
+                }
+                Json(res, new { ok = true, boards = itens });
+                return true;
+            }
+
+            if (acao == "save" && req.HttpMethod == "POST")
+            {
+                var body = Body(req);
+                string full = CaminhoBoard(root, Str(body, "path"));
+                if (full == null)
+                { Json(res, new { ok = false, error = "caminho invalido (precisa ser .json dentro de boards/)" }, 400); return true; }
+                string conteudo = Str(body, "content");
+                if (string.IsNullOrWhiteSpace(conteudo))
+                { Json(res, new { ok = false, error = "conteudo vazio" }, 400); return true; }
+                try { JsonDocument.Parse(conteudo); }
+                catch { Json(res, new { ok = false, error = "conteudo nao e' JSON valido" }, 400); return true; }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(full));
+                File.WriteAllText(full, conteudo, new UTF8Encoding(false));
+                Log.Info($"tabuleiro salvo: {Path.GetRelativePath(root, full)}");
+                Json(res, new { ok = true, path = Path.GetFileName(full) });
+                return true;
+            }
+
+            if (acao == "delete" && req.HttpMethod == "POST")
+            {
+                string full = CaminhoBoard(root, Str(Body(req), "path"));
+                if (full == null) { Json(res, new { ok = false, error = "caminho invalido" }, 400); return true; }
+                if (!File.Exists(full)) { Json(res, new { ok = false, error = "nao existe" }, 404); return true; }
+                try { File.Delete(full); Log.Info($"tabuleiro removido: {Path.GetRelativePath(root, full)}"); }
+                catch (Exception e) { Json(res, new { ok = false, error = e.Message }, 404); return true; }
+                Json(res, new { ok = true });
+                return true;
+            }
+
+            Json(res, new { ok = false, error = "acao desconhecida" }, 404);
+            return true;
         }
 
         // ------------------------------------------------------------- store/

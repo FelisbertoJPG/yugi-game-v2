@@ -1,0 +1,25 @@
+{
+  "listId": "lista1",
+  "pointBudget": 0,
+  "cardPoints": {},
+  "cardLimits": {
+    "11901678": 1,
+    "23995346": 1,
+    "48791583": 1,
+    "54752875": 2,
+    "90660762": 1
+  },
+  "cardGroups": {},
+  "rules": [
+    {
+      "id": "limit:1",
+      "type": "limit",
+      "value": 1
+    },
+    {
+      "id": "limit:2",
+      "type": "limit",
+      "value": 2
+    }
+  ]
+}

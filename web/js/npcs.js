@@ -31,6 +31,7 @@ const BASE_NPCS = [
 const KEY = 'ygo:npcDecks';       // legado: decks que ficaram só no navegador
 const KEY_ACTIVE = 'ygo:npcActive';  // preferência local de qual deck está ativo
 const KEY_CUSTOM = 'ygo:customNpcs'; // adversários criados na Área de Teste
+const KEY_BASE_META = 'ygo:baseNpcMeta'; // campanha/tabuleiro dos 3 NPCs FIXOS (overlay, não tem onde mais morar)
 
 // Recompensa padrão (DP) por vencer um deck de NPC, quando o deck não define a
 // sua. Espelha o WIN_REWARD da carteira — repetido aqui para não acoplar os NPCs
@@ -48,6 +49,7 @@ const DEFAULT_REWARD = 100;
  * (ex.: duel.html); `hydrateCustomNpcs()` sincroniza com `store/npcs.json`
  * depois, para os adversários criados em outra máquina aparecerem também.
  */
+applyBaseMeta();  // campanha/tabuleiro dos fixos, do que já houver salvo no navegador
 export const NPCS = [...BASE_NPCS, ...readCustom()];
 
 /**
@@ -94,6 +96,31 @@ function writeCustom(list) {
   else console.warn('[npcs] gravação de adversário customizado não espelhada: disco ainda não foi lido');
 }
 
+// Os 3 NPCs fixos não têm registro próprio (são um array const embutido no
+// código), então campanha/tabuleiro deles vivem num overlay à parte —
+// { [npcId]: {campaign, board} } — aplicado por cima de BASE_NPCS.
+let leuBaseMetaDisco = false;
+
+function readBaseMeta() {
+  const obj = readJson(KEY_BASE_META, {});
+  return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
+}
+
+function writeBaseMeta(meta) {
+  writeJson(KEY_BASE_META, meta);
+  if (leuBaseMetaDisco) pushFile('npc-base-meta', meta);   // store/npc-base-meta.json
+  else console.warn('[npcs] gravação de metadados do NPC fixo não espelhada: disco ainda não foi lido');
+}
+
+function applyBaseMeta() {
+  const meta = readBaseMeta();
+  for (const npc of BASE_NPCS) {
+    const m = meta[npc.id] || {};
+    npc.campaign = m.campaign || null;
+    npc.board = m.board || null;
+  }
+}
+
 /** Reconstrói NPCS = fixos + customizados, preservando a MESMA referência de array. */
 function rebuildNpcList() {
   NPCS.length = 0;
@@ -105,6 +132,14 @@ export async function hydrateCustomNpcs() {
   const { alcancou, data } = await pullFileEx('npcs');
   leuCustomDisco = alcancou;
   if (alcancou && Array.isArray(data)) writeJson(KEY_CUSTOM, data);
+
+  const baseMeta = await pullFileEx('npc-base-meta');
+  leuBaseMetaDisco = baseMeta.alcancou;
+  if (baseMeta.alcancou && baseMeta.data && typeof baseMeta.data === 'object') {
+    writeJson(KEY_BASE_META, baseMeta.data);
+  }
+  applyBaseMeta();
+
   rebuildNpcList();
   return alcancou;
 }
@@ -113,8 +148,15 @@ export async function hydrateCustomNpcs() {
  * Cria um novo adversário (id gerado a partir do nome, único entre os
  * existentes). Sem deck ainda — o jogador monta o 1º deck normalmente, como
  * com os NPCs fixos. `signatureId`/cover ficam null até existir um deck.
+ *
+ * `campaign` (texto livre — vira uma "Campanha" na página /adversario assim
+ * que 1+ NPC tiver esse mesmo nome, sem precisar cadastrar campanha em lugar
+ * nenhum) e `board` (path de um tabuleiro salvo em `boards/`, ver
+ * `projectboards.js`) são OPCIONAIS. Aqui só pra criação de customizado — os
+ * 3 NPCs fixos ganham/trocam campanha via `updateNpc` (não têm construtor
+ * próprio, então não passam por `createNpc`).
  */
-export function createNpc(name, theme) {
+export function createNpc(name, theme, { campaign, board } = {}) {
   const finalName = (name ?? '').trim();
   if (!finalName) return { ok: false, error: 'dê um nome ao adversário' };
 
@@ -126,11 +168,63 @@ export function createNpc(name, theme) {
     id = `${id}-${n}`;
   }
 
-  const npc = { id, name: finalName, theme: (theme ?? '').trim(), signatureId: null, custom: true };
+  const npc = {
+    id, name: finalName, theme: (theme ?? '').trim(), signatureId: null, custom: true,
+    campaign: (campaign ?? '').trim() || null,
+    board: board || null,
+  };
   writeCustom([...readCustom(), npc]);
   NPCS.push(npc);
   cache[id] = [];
   return { ok: true, npc };
+}
+
+/**
+ * Atualiza um adversário existente. Para os customizados, nome/tema/campanha/
+ * tabuleiro (os decks continuam intactos — isso só mexe nos metadados). Para
+ * os 3 NPCs FIXOS da fase 1, só campanha/tabuleiro mudam — nome/tema/deck
+ * continuam com a identidade original (Kaiba é sempre Kaiba).
+ */
+export function updateNpc(id, { name, theme, campaign, board } = {}) {
+  const npc = NPCS.find((n) => n.id === id);
+  if (!npc) return { ok: false, error: 'adversário inexistente' };
+
+  const finalCampaign = (campaign ?? '').trim() || null;
+  const finalBoard = board || null;
+
+  if (!npc.custom) {
+    npc.campaign = finalCampaign;
+    npc.board = finalBoard;
+    const meta = readBaseMeta();
+    meta[id] = { campaign: finalCampaign, board: finalBoard };
+    writeBaseMeta(meta);
+    return { ok: true, npc };
+  }
+
+  const finalName = (name ?? '').trim();
+  if (!finalName) return { ok: false, error: 'dê um nome ao adversário' };
+
+  npc.name = finalName;
+  npc.theme = (theme ?? '').trim();
+  npc.campaign = finalCampaign;
+  npc.board = finalBoard;
+
+  writeCustom(readCustom().map((n) => (n.id === id ? { ...n, ...npc } : n)));
+  return { ok: true, npc };
+}
+
+/**
+ * Nomes de campanha distintos entre os adversários (customizados), na ordem
+ * em que apareceram. Usado pela aba "Campanhas" em /adversario pra montar as
+ * seções sem precisar de uma tela de gerenciar campanha separada.
+ */
+export function listCampaignNames() {
+  const seen = new Set();
+  const out = [];
+  for (const n of NPCS) {
+    if (n.campaign && !seen.has(n.campaign)) { seen.add(n.campaign); out.push(n.campaign); }
+  }
+  return out;
 }
 
 /** Remove um adversário CUSTOMIZADO (os 3 fixos não podem ser excluídos), com seus decks. */

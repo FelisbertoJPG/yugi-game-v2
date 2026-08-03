@@ -157,6 +157,25 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-joey") >= 0)
                 return TestJoey.Run(streamingAssets);
 
+            // Teste de aceitacao do Bonus de Campo (editor de tabuleiro): a magia
+            // de campo injetada de verdade aplica o efeito dela (Forest +200 ATK
+            // a Inseto), nao e' simulacao.
+            if (Array.IndexOf(args, "--test-fieldbonus") >= 0)
+                return TestFieldBonus.Run(streamingAssets);
+
+            // Teste de aceitacao da Invocacao-Sincro (Extra Deck via spsummon).
+            if (Array.IndexOf(args, "--test-synchro") >= 0)
+                return TestSynchro.Run(streamingAssets);
+
+            // Teste de aceitacao da Invocacao-Xyz (Extra Deck via spsummon).
+            if (Array.IndexOf(args, "--test-xyz") >= 0)
+                return TestXyz.Run(streamingAssets);
+
+            // Teste de aceitacao do pacote Toon: NpcBrain ativa Toon World e
+            // invoca especialmente os Toons "classicos" da mao (spsummon).
+            if (Array.IndexOf(args, "--test-toon") >= 0)
+                return TestToon.Run(streamingAssets);
+
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)
             {

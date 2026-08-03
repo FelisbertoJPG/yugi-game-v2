@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DECKS = join(ROOT, 'decks');
 const STORE = join(ROOT, 'store');
+const BOARDS = join(ROOT, 'boards');
 const PORT = Number(process.env.PORT ?? 8080);
 
 const MIME = {
@@ -59,6 +60,14 @@ const server = createServer(async (req, res) => {
     if (rel.startsWith('/__store/')) {
       if (!isLocal(req)) return void res.writeHead(403).end('403');
       return void await handleStore(rel.slice('/__store/'.length), req, res);
+    }
+
+    // Tabuleiros (boards/*.json) versionados no projeto — layouts de campo
+    // desenhados no editor de campo. Mesma regra: só localhost, porque grava
+    // no disco.
+    if (rel.startsWith('/__boards/')) {
+      if (!isLocal(req)) return void res.writeHead(403).end('403');
+      return void await handleBoards(rel.slice('/__boards/'.length), req, res);
     }
 
     // Redireciona de verdade em vez de servir o arquivo em '/': se o documento
@@ -196,6 +205,66 @@ async function handleDecks(action, req, res) {
     const full = safeDeckPath(rel);
     if (!full) return json(res, { ok: false, error: 'caminho inválido' }, 400);
     try { await unlink(full); console.log(`  deck removido: ${relative(ROOT, full)}`); }
+    catch (e) { return json(res, { ok: false, error: e.code === 'ENOENT' ? 'não existe' : e.message }, 404); }
+    return json(res, { ok: true });
+  }
+
+  return json(res, { ok: false, error: 'ação desconhecida' }, 404);
+}
+
+// ---------------------------------------------------------------------------
+// boards/ — layouts de campo desenhados no editor (web/campo.html), versionados
+// no projeto pelo mesmo motivo que decks/: sobreviver a commit/transferência.
+// Um arquivo .json por tabuleiro, sem subpastas (ao contrário de decks/, que
+// separa npc/player) — não há essa distinção aqui.
+// ---------------------------------------------------------------------------
+
+/** Só um nome de arquivo .json simples dentro de boards/ (sem subpastas). */
+function safeBoardPath(rel) {
+  if (typeof rel !== 'string' || !rel.trim()) return null;
+  if (/^([a-zA-Z]:|[/\\])/.test(rel)) return null;
+  const parts = rel.split(/[/\\]+/);
+  if (parts.length !== 1 || parts[0] === '.' || parts[0] === '..') return null;
+  if (extname(rel).toLowerCase() !== '.json') return null;
+  const full = join(BOARDS, parts[0]);
+  if (!full.startsWith(BOARDS + sep)) return null;
+  return full;
+}
+
+async function handleBoards(action, req, res) {
+  // GET /__boards/list — varre boards/ e devolve tudo com conteúdo, igual
+  // /__decks/list (poucos KB cada, evita 1 requisição por tabuleiro).
+  if (action === 'list') {
+    let files = [];
+    try { files = (await readdir(BOARDS)).filter((f) => f.toLowerCase().endsWith('.json')); }
+    catch { /* boards/ ainda não existe: lista vazia */ }
+    const items = [];
+    for (const f of files) {
+      try { items.push({ path: f, content: await readFile(join(BOARDS, f), 'utf8') }); }
+      catch { /* arquivo sumiu no meio da varredura: ignora */ }
+    }
+    return json(res, { ok: true, boards: items });
+  }
+
+  if (action === 'save' && req.method === 'POST') {
+    const { path: rel, content } = await readBody(req);
+    const full = safeBoardPath(rel);
+    if (!full) return json(res, { ok: false, error: 'caminho inválido (precisa ser .json dentro de boards/)' }, 400);
+    if (typeof content !== 'string' || !content.trim()) {
+      return json(res, { ok: false, error: 'conteúdo vazio' }, 400);
+    }
+    try { JSON.parse(content); } catch { return json(res, { ok: false, error: 'conteúdo não é JSON válido' }, 400); }
+    await mkdir(dirname(full), { recursive: true });
+    await gravarSerializado(full, content);   // mesma proteção atômica da store/
+    console.log(`  tabuleiro salvo: ${relative(ROOT, full)}`);
+    return json(res, { ok: true, path: relative(BOARDS, full).split(sep).join('/') });
+  }
+
+  if (action === 'delete' && req.method === 'POST') {
+    const { path: rel } = await readBody(req);
+    const full = safeBoardPath(rel);
+    if (!full) return json(res, { ok: false, error: 'caminho inválido' }, 400);
+    try { await unlink(full); console.log(`  tabuleiro removido: ${relative(ROOT, full)}`); }
     catch (e) { return json(res, { ok: false, error: e.code === 'ENOENT' ? 'não existe' : e.message }, 404); }
     return json(res, { ok: true });
   }

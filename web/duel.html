@@ -15,7 +15,7 @@
   /* zoom escala o cenário inteiro (cartas, zonas, mãos, midbar) de uma vez —
      inclusive os widths que o JS seta inline — mantendo tudo alinhado. +25%. */
   .arena { flex: 1; zoom: 1.25; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; overflow: auto; }
-  .handrow { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; min-height: 62px; }
+  .handrow { display: flex; gap: 4px; justify-content: center; align-items: center; align-content: center; flex-wrap: wrap; min-height: 62px; overflow: hidden; }
   .handrow.opp { opacity: .8; }
 
   .rows { display: flex; flex-direction: column; gap: 4px; }
@@ -28,6 +28,9 @@
     position: relative; border-radius: 2px;
   }
   .zone .zl { position: absolute; top: 1px; left: 2px; font-size: 7px; color: #3a4756; letter-spacing: .5px; }
+  .zone .atk { position: absolute; right: 1px; bottom: 1px; z-index: 2; padding: 1px 3px;
+    background: #07151acc; color: #9daebb; font: 700 9px/1 ui-monospace, monospace; text-shadow: 0 1px #000; }
+  .zone .atk.boost { color: #39e5d2; background: #08383bcc; text-shadow: 0 0 5px #0cebd5; }
   .zone.mz { border-color: #6b4a1e; }
   .zone.sz { border-color: #1e5a4a; }
   .zone.fz { border-color: #4a2e6b; }
@@ -154,8 +157,23 @@
   .gv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
   .gv-grid .thumb { width: 100%; }
 
-  .log { height: 96px; overflow: auto; background: #0c1118; border-top: 1px solid var(--line);
-    font-family: ui-monospace, monospace; font-size: 11px; padding: 5px 12px; color: var(--dim); }
+  /* Log virou popup (pedido: tirar do rodapé, botão simples no canto). O
+     botão fica sempre visível; o painel só aparece com `.show`, no mesmo
+     padrão do popup do cemitério (`.gv-back.show`). */
+  .log-fab {
+    position: fixed; right: 12px; bottom: 12px; z-index: 60;
+    width: 34px; height: 34px; padding: 0; border-radius: 50%;
+    font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .log {
+    position: fixed; right: 12px; bottom: 54px; z-index: 60;
+    width: min(360px, calc(100vw - 24px)); max-height: min(50vh, 320px);
+    overflow: auto; background: #0c1118; border: 1px solid var(--line); border-radius: 4px;
+    font-family: ui-monospace, monospace; font-size: 11px; padding: 8px 12px; color: var(--dim);
+    box-shadow: 0 4px 16px #0008;
+    display: none;
+  }
+  .log.show { display: block; }
   .log .l { white-space: pre-wrap; }
   .log .l.big { color: var(--gold); }
   .prompt { font-size: 12px; color: var(--gold); min-height: 16px; }
@@ -264,6 +282,38 @@
   .end-box.lose h2 { color: var(--red); }
   .end-acts { display: flex; gap: 10px; justify-content: center; }
   .end-acts button { padding: 9px 16px; font-size: 13px; }
+
+  /* ---------- popup de sorteio de moeda 3D ---------- */
+  #coin-overlay {
+    position: fixed; inset: 0; background: #000c; z-index: 85;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px;
+  }
+  #coin-overlay[hidden] { display: none; }
+  .coin-title { font-size: 16px; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 8px #000; }
+  .coin-viewport { perspective: 800px; width: 130px; height: 130px; }
+  .coin-3d {
+    width: 100%; height: 100%; position: relative;
+    transform-style: preserve-3d; transition: transform 1.6s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+  }
+  .coin-face {
+    position: absolute; inset: 0; border-radius: 50%;
+    backface-visibility: hidden; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; font-weight: bold;
+    border: 4px solid #f1c40f; box-shadow: 0 0 25px rgba(241, 196, 15, 0.5) inset, 0 8px 20px #000a;
+  }
+  .coin-face.heads {
+    background: radial-gradient(circle at 35% 35%, #ffe600, #b8860b, #4a3200);
+    color: #fff; text-shadow: 0 2px 4px #000;
+  }
+  .coin-face.tails {
+    background: radial-gradient(circle at 35% 35%, #ff7700, #a04000, #3a1500);
+    color: #fff; text-shadow: 0 2px 4px #000;
+    transform: rotateY(180deg);
+  }
+  .coin-symbol { font-size: 42px; line-height: 1; }
+  .coin-text { font-size: 12px; letter-spacing: 1px; margin-top: 3px; font-weight: 800; }
+  .coin-res-label { font-size: 22px; font-weight: bold; color: var(--gold); min-height: 32px; text-shadow: 0 2px 8px #000; }
 </style>
 </head>
 <body>
@@ -321,10 +371,7 @@
   <div class="chain-box">
     <h3 id="yn-title">Efeito opcional</h3>
     <div class="sub" id="yn-sub"></div>
-    <div class="chain-acts">
-      <button id="yn-no">não</button>
-      <button id="yn-yes" class="btn-primary">sim</button>
-    </div>
+    <div class="chain-acts" id="yn-acts"></div>
   </div>
 </div>
 
@@ -338,6 +385,23 @@
       <button id="end-again">novo duelo</button>
     </div>
   </div>
+</div>
+
+<div id="coin-overlay" hidden>
+  <div class="coin-title" id="coin-title">SORTEIO DE MOEDA</div>
+  <div class="coin-viewport">
+    <div class="coin-3d" id="coin-3d">
+      <div class="coin-face heads">
+        <span class="coin-symbol">👑</span>
+        <span class="coin-text">CARA</span>
+      </div>
+      <div class="coin-face tails">
+        <span class="coin-symbol">🪙</span>
+        <span class="coin-text">COROA</span>
+      </div>
+    </div>
+  </div>
+  <div class="coin-res-label" id="coin-res-label">Girando...</div>
 </div>
 
 <div id="phase-toast"></div>
@@ -355,6 +419,7 @@
 </div>
 
 <div class="log" id="log"></div>
+<button class="log-fab" id="log-fab" title="log do duelo">📜</button>
 
 <div class="gv-back" id="gv-back">
   <div class="gv">
@@ -370,6 +435,8 @@ import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/
 import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
+import { getActiveBoard, allZoneIds, CARD_ASPECT } from '/web/js/boards.js';
+import { listProjectBoards } from '/web/js/projectboards.js';
 
 // Modo Adversário: duel.html?npc=<id>. Sem npc = Treino (Área de Teste, sem
 // recompensa). Com npc, o NPC usa o próprio deck e vencer dá o prêmio em DP
@@ -407,10 +474,150 @@ let field = { 0: fresh(), 1: fresh() };
 let question = null, ended = false, turn = 0, phase = 0, turnNo = 0;
 let lp = { 0: 8000, 1: 8000 };               // pontos de vida
 let deckCount = { 0: 0, 1: 0 };              // cartas restantes no deck de cada um
+let extraCount = { 0: 0, 1: 0 };             // cartas restantes no Extra Deck de cada um
+let extraPicker = null;                       // { acts } quando a pilha do Extra foi clicada
 let selectedHand = null;                      // índice da carta da mão selecionada
 let turnPlays = [];                          // jogadas do turno atual (p/ "salvar jogada")
 let deckName = '';                            // deck em uso
 function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: null, g: [] }; }
+
+// ---------- tabuleiro customizado (editor de campo, web/campo.html) ----------
+// Sem tabuleiro ativo (o caso comum), nenhuma destas variáveis é usada e o
+// layout continua exatamente o flexbox de sempre — este bloco é só aditivo.
+let activeBoard = null;   // { name, canvas, zones } ou null
+let boardScale = 1;
+const ZONE_KIND = new Map(allZoneIds().map((z) => [z.id, z.kind]));
+
+/** `${player}:${loc}:${seq}` (já usado em dataset.anchor) -> id do board.js. */
+function zoneIdFromAnchor(anchor) {
+  if (!anchor) return null;
+  const [p, loc, seq] = anchor.split(':').map(Number);
+  if (loc === 4) return `p${p}:m${seq}`;
+  if (loc === 8) return seq === 5 ? `p${p}:f` : `p${p}:s${seq}`;
+  return null;
+}
+
+/** Se houver tabuleiro ativo E ele tiver essa zona, posiciona `el` de forma
+ *  absoluta dentro de `.arena`; senão não mexe em nada (fica no flexbox). */
+function applyZonePosition(el, zoneid) {
+  if (!el || !activeBoard || !zoneid) return;
+  const zv = activeBoard.zones[zoneid];
+  if (!zv) return;
+  el.style.position = 'absolute';
+  el.style.left = `${zv.x * boardScale}px`;
+  el.style.top = `${zv.y * boardScale}px`;
+  if (ZONE_KIND.get(zoneid) === 'area') {
+    el.style.width = `${zv.w * boardScale}px`;
+    el.style.height = `${zv.h * boardScale}px`;
+  } else {
+    // 'slot': só a largura — a CSS (.zone/.pilezone) já tem aspect-ratio
+    // fixo, então a altura acompanha sozinha.
+    el.style.width = `${zv.size * boardScale}px`;
+  }
+}
+
+/**
+ * Cartas da mão (`.card`, 54px fixo na CSS) não são "zonas" — são conteúdo
+ * DENTRO da zona `hand`. O tamanho delas segue a ALTURA da caixa da mão
+ * daquele jogador (não só a escala geral do tabuleiro): é isso que faz
+ * aumentar `p0:hand` no editor realmente aumentar as cartas, em vez de só
+ * abrir mais vão vazio ao redor delas do mesmo tamanho de sempre.
+ */
+function scaleCard(el, player) {
+  if (!activeBoard) return;
+  const zv = activeBoard.zones[`p${player}:hand`];
+  if (!zv) { el.style.width = `${54 * boardScale}px`; return; }
+  const boxH = zv.h * boardScale;
+  const cardH = boxH * 0.86;             // margem, senão a carta encosta na borda
+  el.style.width = `${cardH * CARD_ASPECT}px`;
+}
+
+function updateBoardScale() {
+  if (!activeBoard) return;
+  const arena = document.querySelector('.arena');
+  // `.arena` já tem `zoom: 1.25` na CSS (pensado pro layout flexbox de
+  // sempre, cartas em px "cruas") — desliga, pra sobrar só a NOSSA escala.
+  arena.style.zoom = 1;
+  arena.style.position = 'relative';
+  // NÃO setamos width/height do arena: ele continua `flex:1` dentro do
+  // `body` (que também é flex-column, com topbar/log como IRMÃOS do arena
+  // disputando altura) — é o body/flexbox que decide quanto sobra pra ele,
+  // igual sempre foi. Medir `body.clientHeight` (como a versão anterior
+  // fazia) ignora essa disputa e sempre dá o viewport INTEIRO, maior do que
+  // o arena de fato recebe — foi isso que fazia o campo nascer maior que a
+  // tela mesmo depois de tirar o zoom empilhado. Em vez disso, LEMOS o
+  // tamanho que o arena JÁ tem (resolvido pelo flex) e encaixamos os
+  // retângulos AI dentro — sem brigar com o layout, só aproveitando.
+  const availW = arena.clientWidth;
+  const availH = arena.clientHeight;
+  if (!availW || !availH) return;   // ainda não teve layout resolvido; próximo frame tenta de novo
+  boardScale = Math.max(0.05, Math.min(availW / activeBoard.canvas.w, availH / activeBoard.canvas.h));
+}
+
+/** `#hand-you`/`#hand-opp`/`#mid` são estáticos no HTML (não recriados a cada
+ *  render), então são posicionados à parte — uma vez, não a cada frame. `mid`
+ *  (fases/LP) é uma zona de UI, não do motor (ver `boards.js`), mas segue o
+ *  mesmo mecanismo — editável no editor de campo como qualquer outra. */
+function positionHandRows() {
+  applyZonePosition($('hand-you'), 'p0:hand');
+  applyZonePosition($('hand-opp'), 'p1:hand');
+  if (activeBoard.zones.mid) {
+    applyZonePosition($('mid'), 'mid');
+  } else {
+    // Tabuleiro salvo antes de `mid` existir como zona: reabrir no editor
+    // preenche sozinho (backfillMissingZones), mas até isso acontecer não
+    // deixa o indicador de fase/LP largado onde o flexbox mandar — recentraliza.
+    const mid = $('mid');
+    mid.style.position = 'absolute';
+    mid.style.left = '50%';
+    mid.style.top = '50%';
+    mid.style.transform = 'translate(-50%, -50%)';
+  }
+}
+
+/** Carrega o tabuleiro ativo (se houver) ANTES do primeiro render, pra não
+ *  nascer no layout padrão e só depois "pular" pro customizado. Sem servidor
+ *  de desenvolvimento no ar, `listProjectBoards()` já devolve lista vazia —
+ *  cai pro layout padrão em silêncio, mesmo padrão de `canWrite()` em
+ *  `projectdecks.js`. */
+async function loadActiveBoard() {
+  // Adversário com tabuleiro próprio manda mais que o ponteiro global — cada
+  // NPC pode ter seu campo específico (estilo "campo de Floresta do Weevil").
+  const path = advNpc?.board || getActiveBoard();
+  if (!path) return;
+  try {
+    const list = await listProjectBoards();
+    const entry = list.find((b) => b.path === path);
+    if (!entry) return;
+    activeBoard = entry.board;
+    const arena = document.querySelector('.arena');
+    if (activeBoard.background) {
+      arena.style.backgroundImage = `url(${activeBoard.background})`;
+      arena.style.backgroundSize = 'cover';
+      arena.style.backgroundPosition = 'center';
+    }
+    updateBoardScale();
+    positionHandRows();
+
+    // ResizeObserver no PRÓPRIO arena, não `window.resize`: reage a qualquer
+    // mudança no espaço que ele de fato tem (janela redimensionada, mas
+    // também topbar/log quebrando linha, DevTools abrindo do lado, etc.) —
+    // "sempre cabe na tela" de verdade, não só quando a janela muda.
+    // rAF-throttled: ResizeObserver pode disparar várias vezes por frame
+    // durante um arrasto de borda da janela.
+    let pending = false;
+    new ResizeObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        updateBoardScale();
+        positionHandRows();
+        render();
+      });
+    }).observe(arena);
+  } catch { /* mantém o layout padrão */ }
+}
 
 function log(msg, big=false){ const e=document.createElement('div'); e.className='l'+(big?' big':''); e.textContent=msg; $('log').append(e); $('log').scrollTop=1e9; }
 
@@ -458,6 +665,11 @@ async function start() {
   // No modo Adversário o NPC joga com o PRÓPRIO deck; no Treino, os dois usam o seu.
   const npcIds = (advNpc && advDeck && advDeck.length) ? advDeck : ids;
   deckCount = { 0: ids.length, 1: npcIds.length };
+  // Mesma regra do servidor pro Extra do oponente: usa o dele se veio junto do
+  // Adversário, senão cai pro mesmo Extra do jogador (npcExtra ?? extra).
+  const npcExtraIds = (advNpc && advExtra && advExtra.length) ? advExtra : extraIds;
+  extraCount = { 0: extraIds.length, 1: npcExtraIds.length };
+  extraPicker = null;
   try {
     const body = { deck: ids };
     // O Extra Deck vai separado: o motor o guarda em LOCATION_EXTRA, de onde
@@ -466,6 +678,9 @@ async function start() {
     if (extraIds.length) body.extra = extraIds;
     if (advNpc && advDeck && advDeck.length) body.npcDeck = npcIds;
     if (advNpc && advExtra && advExtra.length) body.npcExtra = advExtra;
+    // Bônus de Campo do tabuleiro ativo (editor de campo): a magia de campo
+    // já nasce ativada, antes de qualquer jogada — ver `boards.js`.
+    if (activeBoard?.fieldSpell) body.fieldSpell = activeBoard.fieldSpell;
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
@@ -476,9 +691,21 @@ async function start() {
 
 async function act(action, arg, label, args) {
   if (ended || busy) return;   // busy = animação rolando; ignora cliques até assentar
+  // A pergunta antiga não pode sobreviver enquanto a resposta está a caminho:
+  // cada evento da resposta chama render(), que antes reabria o popup de posição
+  // já respondido e permitia um segundo clique (o motor então emitia RETRY).
+  const perguntaRespondida = question;
+  busy = true;
+  question = null;
+  render(); renderSelection(); renderChain(); renderYesno();
   turnPlays.push({ action, arg, label, turn: turnNo });
-  try { apply(await rpc('/respond', args ? { action, arg, args } : { action, arg })); }
-  catch (e) { conn(false); warn('perdi a conexão com o servidor.'); }
+  try { await apply(await rpc('/respond', args ? { action, arg, args } : { action, arg })); }
+  catch (e) {
+    question = perguntaRespondida;
+    busy = false;
+    render(); renderSelection(); renderChain(); renderYesno();
+    conn(false); warn('perdi a conexão com o servidor.');
+  }
 }
 
 // ---------- seleção de cartas (tributo, alvo) ----------
@@ -519,7 +746,37 @@ function somaValida(q) {
                        : (soma === q.sumNeeded);
 }
 
+/**
+ * Escolha de qual carta do Extra Deck Invocar Especialmente (Sincro/Xyz com
+ * material já em campo). Não é uma pergunta do motor — é a mesma janela de
+ * "clicar a pilha" que Deck/Cemitério já têm, só que a pilha do Extra tem mais
+ * de uma opção às vezes. Reaproveita o overlay de seleção (mesmo DOM), mas com
+ * lógica própria: aqui o clique já DISPARA a jogada (`spsummon`), não junta
+ * escolhas para confirmar depois.
+ */
+function renderExtraPicker() {
+  const box = $('sel-overlay');
+  box.hidden = false;
+  $('sel-title').textContent = 'Invocação Especial — Extra Deck';
+  $('sel-info').textContent = 'clique numa carta para invocar';
+  const frag = document.createDocumentFragment();
+  for (const a of extraPicker.acts) {
+    const el = document.createElement('div');
+    el.className = 'sel-card';
+    el.innerHTML = `<img src="${ART(a.code)}" alt="">`;
+    el.title = nameOf(a.code);
+    el.onclick = () => {
+      extraPicker = null;
+      act('spsummon', a.index, `Invocação Especial: ${nameOf(a.code)}`);
+    };
+    frag.append(el);
+  }
+  $('sel-cards').replaceChildren(frag);
+  $('sel-ok').hidden = true;
+}
+
 function renderSelection() {
+  if (extraPicker) { renderExtraPicker(); return; }
   const q = selectionQuestion();
   const box = $('sel-overlay');
   if (!q) { box.hidden = true; return; }
@@ -613,15 +870,40 @@ function renderChain() {
   $('chain-pass').hidden = !!q.chainForced;
 }
 
-// ---------- sim/não: efeito opcional (Dust Tornado, etc.) ----------
+// ---------- sim/não e escolha de opção (efeitos como Time Wizard) ----------
 function renderYesno() {
-  const q = (question && question.kind === 'yesno' && question.player === 0) ? question : null;
+  const q = (question && ['yesno', 'option'].includes(question.kind) && question.player === 0) ? question : null;
   const box = $('yn-overlay');
   if (!q) { box.hidden = true; return; }
   box.hidden = false;
-  $('yn-sub').innerHTML = q.askCode
-    ? `Ativar o efeito de <b>${nameOf(q.askCode)}</b>?`
-    : 'O efeito permite uma ação opcional (ex.: Dust Tornado — setar 1 carta da mão). Aceitar?';
+  const acts = $('yn-acts');
+  const frag = document.createDocumentFragment();
+  if (q.kind === 'yesno') {
+    $('yn-title').textContent = 'Efeito opcional';
+    $('yn-sub').innerHTML = q.askCode
+      ? `Ativar o efeito de <b>${nameOf(q.askCode)}</b>?`
+      : 'O efeito permite uma ação opcional. Aceitar?';
+    for (const [label, value, primary] of [['não', 0, false], ['sim', 1, true]]) {
+      const b = document.createElement('button');
+      b.textContent = label; if (primary) b.className = 'btn-primary';
+      b.onclick = () => { box.hidden = true; act('yesno', value, label); };
+      frag.append(b);
+    }
+  } else {
+    $('yn-title').textContent = 'Escolha uma opção';
+    const coin = (q.options || []).some((value) => value === 60 || value === 61);
+    $('yn-sub').textContent = coin
+      ? 'Declare o resultado da moeda antes do sorteio.'
+      : 'Escolha uma das opções oferecidas pelo efeito.';
+    for (const [index, value] of (q.options || []).entries()) {
+      const b = document.createElement('button');
+      b.textContent = value === 60 ? '👑 Cara' : value === 61 ? '🪙 Coroa' : `Opção ${index + 1}`;
+      if (index === 0) b.className = 'btn-primary';
+      b.onclick = () => { box.hidden = true; act('option', index, `opção ${index + 1}`); };
+      frag.append(b);
+    }
+  }
+  acts.replaceChildren(frag);
 }
 
 // ---------- aplicar a resposta do servidor ----------
@@ -683,9 +965,51 @@ function flashZone(anchor, cls = 'fx-activate', ms = 500) {
   setTimeout(() => el.classList.remove(cls), ms);
 }
 
+/** Animação 3D da moeda girando */
+function animateCoinFlip(results, player) {
+  const box = $('coin-overlay');
+  const coin = $('coin-3d');
+  const label = $('coin-res-label');
+  const title = $('coin-title');
+  if (!box || !coin) return Promise.resolve();
+
+  box.hidden = false;
+  title.textContent = player === 0 ? 'SEU SORTEIO DE MOEDA' : 'SORTEIO DE MOEDA (OPONENTE)';
+  label.textContent = 'Girando...';
+  label.style.color = 'var(--gold)';
+  
+  // Reseta rotação sem transição
+  coin.style.transition = 'none';
+  coin.style.transform = 'rotateY(0deg)';
+  void coin.offsetWidth;
+
+  const firstRes = results && results.length ? results[0] : 1;
+  const spins = 6;
+  const finalDegrees = (spins * 360) + (firstRes === 1 ? 0 : 180);
+
+  coin.style.transition = 'transform 1.6s cubic-bezier(0.15, 0.85, 0.35, 1.15)';
+  coin.style.transform = `rotateY(${finalDegrees}deg)`;
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const isCara = firstRes === 1;
+      label.textContent = isCara ? '👑 CARA!' : '🪙 COROA!';
+      label.style.color = isCara ? 'var(--gold)' : '#ff8833';
+      setTimeout(() => {
+        box.hidden = true;
+        resolve();
+      }, 1100);
+    }, 1650);
+  });
+}
+
 /** Animação de UM evento, ANTES de mutar o estado (a origem ainda está na tela). */
 async function animateEvent(ev) {
   try {
+    if (ev.type === 'coin') {
+      await animateCoinFlip(ev.results, ev.player);
+      return;
+    }
     if (ev.type === 'draw') {
       const from = anchorRect(`${ev.player}:deck`);
       const cont = containerRect(ev.player === 0 ? 'hand-you' : 'hand-opp');
@@ -753,6 +1077,7 @@ async function apply(j) {
     ended = !!j.ended;
     picked.clear();
     selectedField = null;   // a pergunta mudou: a seleção de campo não vale mais
+    extraPicker = null;     // idem para a escolha pendente no Extra Deck
     render();
     renderSelection();
     renderChain();
@@ -806,6 +1131,16 @@ function handle(ev) {
       else
         log(`🤖 NPC: ${ev.action} — ${ev.why}`, true);
       return;
+    case 'coin': {
+      const resTxt = (ev.results || []).map(r => r === 1 ? 'CARA 👑' : 'COROA 🪙').join(', ');
+      log(`🪙 sorteio de moeda (${ev.player === 0 ? 'você' : 'oponente'}): ${resTxt}`, true);
+      break;
+    }
+    case 'dice': {
+      const resTxt = (ev.results || []).join(', ');
+      log(`🎲 dado (${ev.player === 0 ? 'você' : 'oponente'}): ${resTxt}`, true);
+      break;
+    }
     case 'draw':
       if (ev.player === 0) { for (const c of ev.cards) hand[0].push(c.code); }
       else hand[1] += ev.cards.length;
@@ -826,6 +1161,7 @@ function handle(ev) {
       break;
     }
     case 'summoning': log(`invocando ${nameOf(ev.code)}`); break;
+    case 'spsummoning': log(`Invocação Especial: ${nameOf(ev.code)}`, true); break;
     case 'retry':
       // O motor recusou. Sem avisar, a tela só "não reage" e parece bug de clique.
       warn('O motor recusou essa escolha — confira se ela atende ao que foi pedido '
@@ -856,6 +1192,13 @@ function handle(ev) {
       log(`${ev.code ? nameOf(ev.code) : 'carta virada'} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
       break;
     }
+    case 'stats': {
+      const f = field[ev.controller];
+      const alvo = ev.loc === 4 ? f?.m?.[ev.seq] : null;
+      if (alvo) { alvo.atk = ev.atk; alvo.baseAtk = ev.baseAtk; }
+      log(`ATK de ${alvo?.code ? nameOf(alvo.code) : 'monstro'}: ${ev.atk}`, true);
+      break;
+    }
     case 'move': {
       // limpa a zona de origem (carta que sai p/ cemitério, mão, etc.)
       const src = field[ev.fromCtrl];
@@ -877,7 +1220,7 @@ function handle(ev) {
       }
       // coloca no destino
       const f = field[ev.controller] || (field[ev.controller] = fresh());
-      const card = { code: ev.code, pos: ev.pos };
+      const card = { code: ev.code, pos: ev.pos, atk: null, baseAtk: null };
       if (ev.loc === 4) f.m[ev.seq] = card;
       else if (ev.loc === 8) { if (ev.seq === 5) f.f = card; else f.s[ev.seq] = card; } // seq 5 = zona de campo
       else if (ev.loc === 0x100) f.f = card;
@@ -900,6 +1243,10 @@ function handle(ev) {
         if (ev.loc === 2) {
           log(`busca: ${ev.code ? nameOf(ev.code) : 'carta'} foi do deck para a mão`);
         }
+      }
+      // 0x40 = LOCATION_EXTRA. Fusão/Sincro/Xyz saindo do Extra Deck pro campo.
+      if (ev.fromLoc === 0x40) {
+        extraCount[ev.fromCtrl] = Math.max(0, extraCount[ev.fromCtrl] - 1);
       }
       break;
     }
@@ -943,6 +1290,12 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
     if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
     el.title = facedown ? 'carta virada' : nameOf(cell.code) + '\nsegurar: ver detalhes';
     z.append(el);
+    if (cls === 'mz' && !facedown && Number.isFinite(cell.atk)) {
+      const stat = document.createElement('span');
+      stat.className = 'atk' + (cell.atk !== cell.baseAtk ? ' boost' : '');
+      stat.textContent = `ATK ${cell.atk}`;
+      z.append(stat);
+    }
     // Carta virada não revela nada: ver o detalhe dela seria trapaça.
     if (!facedown) {
       wireLongPress(z, HOLD_MS, () => showCardDetail(cell.code));
@@ -1083,6 +1436,7 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   }
 
   if (!cell && onClick) { z.classList.add('free'); z.onclick = onClick; }
+  applyZonePosition(z, zoneIdFromAnchor(selKey));
   return z;
 }
 
@@ -1179,6 +1533,7 @@ function fieldRows(player, isYou) {
       isYou ? { type: 's', index: i } : null, co(8, i), null, sk(8, i)));
   // Deck logo abaixo do cemitério, que é onde ele fica de verdade na mesa.
   srow.append(deckEl(player));
+  srow.append(extraEl(player, isYou));
 
   // você (embaixo): monstros na linha de cima (perto do centro), magias embaixo.
   // oponente (em cima): espelhado.
@@ -1221,15 +1576,19 @@ function rebuildMaps() {
   };
 }
 
+/**
+ * Clicar a carta (sem arrastar) abre o MESMO popup de ação que arrastar até
+ * uma zona já abria — só que sem zona nenhuma pré-escolhida. Pedido do
+ * usuário: toda carta com efeito devia abrir esse quadro perguntando o que
+ * fazer, igual já acontecia com Invocação — em vez do atalho de clicar um
+ * botão "Utilizar" solto na barra de baixo, que pulava o popup inteiro.
+ */
 function toggleSelect(h) {
-  selectedHand = (selectedHand === h) ? null : h;   // clicar de novo desmarca
+  const acts = actionsFor(h);
+  if (!acts.length) return;
+  selectedHand = h;
   render();
-}
-
-function doAction(a) {
-  const code = hand[0][selectedHand];
-  selectedHand = null;
-  act(a.action, a.arg, `${a.label} ${nameOf(code)}`);
+  abrirPopupPosicao(h, acts);
 }
 
 // ---------- arrastar da mão para a zona ----------
@@ -1319,10 +1678,19 @@ function dropOn(type, index, tributoSeq = null) {
 }
 
 /**
- * Popup de posição. Para monstro são [Posição de Ataque] e [Setar]; para
+ * Popup de posição/ação. Para monstro são [Posição de Ataque] e [Setar]; para
  * magia/armadilha, [Utilizar] e [Setar] — a mesma escolha, outro vocabulário.
+ *
+ * `type`/`index` são a zona de destino — vêm preenchidos quando a carta foi
+ * ARRASTADA até lá (`dropOn`), e ficam `null` quando a carta só foi CLICADA
+ * (`toggleSelect`): aí ainda não existe zona nenhuma escolhida, e uma ação que
+ * precise de uma (Invocar/Setar) vai gerar a pergunta SELECT_PLACE do motor
+ * normalmente depois — as zonas válidas acendem na tela do mesmo jeito que já
+ * acendiam antes deste popup existir. "Utilizar" nunca precisou de zona pra
+ * ignição de efeito (Thunder Dragon, Rei do Pântano etc.), então esses casos
+ * já resolvem direto.
  */
-function abrirPopupPosicao(h, acts, type, index) {
+function abrirPopupPosicao(h, acts, type = null, index = null) {
   const code = hand[0][h];
   const LABEL = {
     summon: 'Posição de Ataque',
@@ -1332,11 +1700,12 @@ function abrirPopupPosicao(h, acts, type, index) {
   };
   const zonaTxt = type === 'f' ? 'Zona de Campo'
     : type === 'm' ? `Zona de Monstro ${index + 1}`
-    : `Zona de Magia/Armadilha ${index + 1}`;
+    : type === 's' ? `Zona de Magia/Armadilha ${index + 1}`
+    : null;
 
   $('pos-art').src = ART(code);
   $('pos-name').textContent = nameOf(code);
-  $('pos-where').textContent = `→ ${zonaTxt}`;
+  $('pos-where').textContent = zonaTxt ? `→ ${zonaTxt}` : 'escolha o que fazer';
 
   const frag = document.createDocumentFragment();
   for (const a of acts) {
@@ -1344,14 +1713,15 @@ function abrirPopupPosicao(h, acts, type, index) {
     b.className = a.action === 'summon' || a.action === 'activate' ? 'btn-primary' : '';
     b.textContent = LABEL[a.action] ?? a.label;
     b.onclick = () => {
+      selectedHand = null;
       fecharPopupPosicao();
-      act(a.action, a.arg, `${LABEL[a.action] ?? a.label} ${nameOf(code)} em ${zonaTxt}`);
+      act(a.action, a.arg, `${LABEL[a.action] ?? a.label} ${nameOf(code)}` + (zonaTxt ? ` em ${zonaTxt}` : ''));
     };
     frag.append(b);
   }
   const x = document.createElement('button');
   x.textContent = 'cancelar';
-  x.onclick = () => { pendingZone = null; fecharPopupPosicao(); render(); };
+  x.onclick = () => { selectedHand = null; pendingZone = null; fecharPopupPosicao(); render(); };
   frag.append(x);
 
   $('pos-acts').replaceChildren(frag);
@@ -1421,7 +1791,7 @@ function render() {
   // mão do oponente (verso)
   const oh = document.createElement('div'); oh.style.display='contents';
   $('hand-opp').replaceChildren(...Array.from({length: hand[1]}, (_, i) => {
-    const c=document.createElement('div'); c.className='card'; c.dataset.anchor='1:hand:'+i; c.innerHTML='<div class="back"></div>'; return c;
+    const c=document.createElement('div'); c.className='card'; c.dataset.anchor='1:hand:'+i; c.innerHTML='<div class="back"></div>'; scaleCard(c, 1); return c;
   }));
 
   // sua mão (selecionável quando há ação disponível)
@@ -1430,6 +1800,7 @@ function render() {
   $('hand-you').replaceChildren(...hand[0].map((code, h) => {
     const c = document.createElement('div'); c.className = 'card'; c.dataset.anchor = '0:hand:' + h;
     c.innerHTML = `<img src="${ART(code)}" title="${nameOf(code)}\nsegurar: ver detalhes" alt="" draggable="false">`;
+    scaleCard(c, 0);
 
     // Segurar abre os detalhes — vale para toda carta da mão, jogável ou não.
     const segurou = wireLongPress(c, HOLD_MS, () => showCardDetail(code));
@@ -1473,20 +1844,9 @@ function render() {
     x.onclick = () => { selectedField = null; render(); };
     div.append(x);
     bar.replaceChildren(div);
-  } else if (selectedHand != null) {
-    const div = document.createElement('div'); div.className = 'actbar';
-    div.append(Object.assign(document.createElement('b'), { textContent: nameOf(hand[0][selectedHand]) + ':' }));
-    div.append(Object.assign(document.createElement('span'), {
-      className: 'muted',
-      textContent: 'clique numa zona verde para escolher onde, ou use:',
-    }));
-    for (const a of actionsFor(selectedHand)) {
-      const b = document.createElement('button'); b.textContent = a.label; b.onclick = () => doAction(a); div.append(b);
-    }
-    const x = document.createElement('button'); x.textContent = 'cancelar'; x.onclick = () => { selectedHand = null; render(); };
-    div.append(x);
-    bar.replaceChildren(div);
   } else {
+    // selectedHand != null cai aqui também: o popup de ação (abrirPopupPosicao)
+    // já cobre a tela pra esse caso, então não tem barra própria pra ele.
     const unsupported = question && question.kind === 'unsupported';
     if (unsupported) warn(`O motor pediu uma ação que o treino ainda não suporta (msg ${question.rawType}). Dê "novo duelo".`);
     bar.replaceChildren(Object.assign(document.createElement('span'), {
@@ -1495,7 +1855,7 @@ function render() {
         : unsupported ? `⚠ ação não suportada ainda (msg ${question.rawType}) — comece um novo duelo.`
         : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
         : dragging ? 'Solte a carta numa zona verde.'
-        : yourIdle ? 'Sua vez: arraste a carta até a zona — ou clique na carta e depois na zona.'
+        : yourIdle ? 'Sua vez: clique numa carta pra escolher o que fazer, ou arraste até a zona.'
         : 'aguarde…'
     }));
   }
@@ -1540,6 +1900,7 @@ function pileEl(player, label, cards) {
   d.dataset.anchor = player + ':gy';
   d.innerHTML = `<span class="n">${cards.length}</span>${label}`;
   if (cards.length) d.onclick = () => openGrave(player);
+  applyZonePosition(d, `p${player}:gy`);
   return d;
 }
 
@@ -1557,6 +1918,42 @@ function deckEl(player) {
   } else {
     d.innerHTML = `<span class="n" style="color:var(--red)">0</span>DECK`;
   }
+  applyZonePosition(d, `p${player}:deck`);
+  return d;
+}
+
+/**
+ * Pilha do Extra Deck (Fusão/Sincro/Xyz). Fica destacada e clicável quando o
+ * motor está oferecendo Invocação Especial AGORA (`question.spSummonable`) —
+ * é a mesma ideia da mão ficar com botões: aqui quem oferece a ação é a
+ * pilha, porque a carta não está visível em lugar nenhum antes de invocada.
+ */
+function extraEl(player, isYou) {
+  const n = extraCount[player];
+  const d = document.createElement('div');
+  d.className = 'pilezone';
+  d.dataset.anchor = player + ':extra';
+  const disponiveis = (isYou && question && question.kind === 'idle' && question.player === 0)
+    ? (question.spSummonable || []).filter((a) => a.controller === player)
+    : [];
+  d.title = `Extra Deck de ${player === 0 ? 'você' : 'oponente'}: ${n} carta(s)`
+    + (disponiveis.length ? ` — ${disponiveis.length} pronta(s) para Invocação Especial` : '');
+  if (n > 0) {
+    d.style.borderStyle = 'solid';
+    d.style.borderColor = '#6b4a1e';
+    d.innerHTML = `<span class="n">${n}</span>EXTRA`;
+  } else {
+    d.innerHTML = `<span class="n" style="color:var(--red)">0</span>EXTRA`;
+  }
+  if (disponiveis.length) {
+    d.classList.add('has');
+    d.style.borderColor = 'var(--gold)';
+    d.onclick = () => {
+      extraPicker = (extraPicker ? null : { acts: disponiveis });
+      render(); renderSelection();
+    };
+  }
+  applyZonePosition(d, `p${player}:extra`);
   return d;
 }
 
@@ -1651,13 +2048,12 @@ $('btn-end').onclick = () => act('endturn', 0, 'encerrar turno');
 $('btn-save').onclick = savePlays;
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 $('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
-$('yn-yes').onclick = () => { $('yn-overlay').hidden = true; act('yesno', 1, 'sim'); };
-$('yn-no').onclick = () => { $('yn-overlay').hidden = true; act('yesno', 0, 'não'); };
 $('end-home').onclick = () => (location.href = '/web/index.html');
 $('end-again').onclick = () => { fecharFimDuelo(); start(); };
 $('deck-sel').onchange = start;                 // trocar de deck começa novo duelo
 $('gv-close').onclick = () => $('gv-back').classList.remove('show');
 $('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $('gv-back').classList.remove('show'); });
+$('log-fab').onclick = () => $('log').classList.toggle('show');
 
 await hydrateWallet();   // carteira do projeto antes de premiar vitórias
 await hydrateCustomNpcs();
@@ -1679,6 +2075,7 @@ if (advNpc) {
   } catch { advSignature = advNpc.signatureId; }
 }
 
+await loadActiveBoard();   // antes do 1º render, senão pisca do padrão pro customizado
 populateDecks();
 start();
 </script>

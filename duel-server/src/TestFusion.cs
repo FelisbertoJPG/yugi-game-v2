@@ -49,6 +49,8 @@ namespace DuelServer
             BuscaNoDeck(sa);
             Log.Info("\n=== teste: SUBSTITUTO de materia (King of the Swamp) ===\n");
             SubstitutoDeMateria(sa);
+            Log.Info("\n=== teste: Rei do Pantano intacto apos buscar Poly (Caveira Negra) ===\n");
+            ReiIntactoAposBusca(sa);
             Log.Info("\n=== teste: o NPC funde sozinho (duelo real) ===\n");
             NpcFunde(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
@@ -149,6 +151,7 @@ namespace DuelServer
             Log.Info($"  eventos vistos: {string.Join(", ", tiposDeMensagem)}");
 
             Check("Fusion Sage pode ser ativada", sageAtivada);
+            BuscaPorFiltro(sa);
             Check("o motor pediu a ESCOLHA da carta (busca, nao compra)", perguntouEscolha,
                   $"({opcoesOferecidas} opcoes)");
             Check("a Polymerization foi do deck (0x1) para a mao (0x2)", polyFoiParaMao,
@@ -267,6 +270,85 @@ namespace DuelServer
         }
 
         const uint KING_SWAMP = 79109599;   // substituto de materia + busca Poly
+        const uint SUMMONED_SKULL = 70781052;   // materia REAL do Caveira Negra
+        const uint BLACK_SKULL_DRAGON = 11901678; // Caveira Negra: Summoned Skull + Red-Eyes(ou substituto)
+        const uint ROTA = 32807846;         // Reinforcement of the Army
+        const uint CELTIC = 91152256;       // Guerreiro Nv4 (alvo valido da ROTA)
+        const uint AQUA_MADOOR = 85639257;  // Mago Nv4 (NAO e' guerreiro)
+
+        /// <summary>
+        /// Busca por FILTRO, em vez de por nome — Reinforcement of the Army.
+        ///
+        /// É a mesma carta que a Fusion Sage do ponto de vista da mecânica; a
+        /// única diferença no Lua é a linha do `s.filter`:
+        ///
+        ///   Fusion Sage: c:IsCode(CARD_POLYMERIZATION)
+        ///   ROTA:        c:IsLevelBelow(4) and c:IsRace(RACE_WARRIOR)
+        ///
+        /// O teste existe para provar que o FILTRO é respeitado: o deck tem
+        /// guerreiro e não-guerreiro, e só o guerreiro pode ser oferecido.
+        /// </summary>
+        static void BuscaPorFiltro(string sa)
+        {
+            var deck = new List<uint>();
+            for (int i = 0; i < 10; i++) deck.Add(ROTA);
+            for (int i = 0; i < 10; i++) deck.Add(CELTIC);        // Guerreiro Nv4
+            while (deck.Count < 40) deck.Add(AQUA_MADOOR);        // Mago Nv4
+
+            using var duel = new InteractiveDuel(sa, deck.ToArray(), 1234UL, 0x1000000UL, npc: false);
+            var r = duel.Advance();
+
+            bool ativou = false, guerreiroNaMao = false, ofereceuSoGuerreiro = true;
+            var oferecidos = new List<uint>();
+
+            for (int guard = 0; guard < 200 && !r.ended && !guerreiroNaMao; guard++)
+            {
+                foreach (var e in r.events)
+                {
+                    var t = e.GetType();
+                    if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
+                    uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
+                    byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                    byte from = Convert.ToByte(t.GetProperty("fromLoc")?.GetValue(e) ?? (byte)0);
+                    if (code == CELTIC && from == 0x1 && loc == LOC_HAND) guerreiroNaMao = true;
+                }
+                if (guerreiroNaMao) break;
+
+                var q = r.question;
+                if (q == null) break;
+
+                switch (q.kind)
+                {
+                    case "idle":
+                    {
+                        var rota = q.activatable.FirstOrDefault(a => a.code == ROTA);
+                        if (rota.code == ROTA) { ativou = true; r = duel.Respond("activate", rota.index); }
+                        else r = duel.Respond("endturn", 0);
+                        break;
+                    }
+                    case "selectcard":
+                    case "selecttribute":
+                        foreach (var c in q.choices)
+                        {
+                            if (!oferecidos.Contains(c.code)) oferecidos.Add(c.code);
+                            if (c.code != CELTIC) ofereceuSoGuerreiro = false;
+                        }
+                        r = duel.Respond("select", 0,
+                            q.choices.Take(Math.Max(1, q.selMin)).Select(c => c.index).ToList());
+                        break;
+                    case "place": r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0); break;
+                    case "position": r = duel.Respond("position", 0x1); break;
+                    case "battle": r = duel.Respond("endbattle", 0); break;
+                    default: r = duel.Respond("endturn", 0); break;
+                }
+            }
+
+            Check("ROTA pode ser ativada", ativou);
+            Check("o Guerreiro foi do deck para a mao", guerreiroNaMao);
+            Check("o FILTRO foi respeitado: so' guerreiro Nv<=4 foi oferecido",
+                  ofereceuSoGuerreiro && oferecidos.Count > 0,
+                  $"(oferecidos: [{string.Join(",", oferecidos)}])");
+        }
 
         /// <summary>
         /// King of the Swamp no lugar de uma matéria NOMEADA.
@@ -378,6 +460,120 @@ namespace DuelServer
             Check("o King foi oferecido/consumido no processo", kingFoiUsado
                   || idsOferecidos.Contains(KING_SWAMP),
                   $"(oferecidos: [{string.Join(",", idsOferecidos)}])");
+        }
+
+        /// <summary>
+        /// Reproduz o relato do jogador: 2 King of the Swamp na mão, usa UM para
+        /// buscar a Poly (o que descarta esse King), e tenta fundir o Caveira
+        /// Negra (Black Skull Dragon) com o King que SOBROU intacto na mão +
+        /// Summoned Skull.
+        ///
+        /// Diferença do teste `SubstitutoDeMateria`: aquele usa Gaia the Dragon
+        /// Champion com a OUTRA matéria real (Curse of Dragon) e nunca prova qual
+        /// King foi de fato usado — com 14 cópias no deck de 40, o teste passa
+        /// mesmo que a reutilização-do-cemitério esteja quebrada, porque sempre
+        /// há outro King disponível em algum momento dos 300 turnos. Aqui a
+        /// instrumentação registra a LOCALIZAÇÃO de cada King oferecido como
+        /// matéria (mão 0x2 vs cemitério 0x10) para separar as duas hipóteses.
+        /// </summary>
+        static void ReiIntactoAposBusca(string sa)
+        {
+            var deck = new List<uint>();
+            for (int i = 0; i < 12; i++) deck.Add(POLY);
+            for (int i = 0; i < 12; i++) deck.Add(KING_SWAMP);
+            for (int i = 0; i < 12; i++) deck.Add(SUMMONED_SKULL);
+            while (deck.Count < 40) deck.Add(CURSE_DRAGON);
+
+            uint[] extra = { BLACK_SKULL_DRAGON };
+
+            using var duel = new InteractiveDuel(sa, deck.ToArray(), 246813579UL, 0x1000000UL,
+                                                 npc: false, npcDeck: null, extra: extra);
+            var r = duel.Advance();
+
+            bool fundiu = false, buscouComKing = false, polyAtivavel = false;
+            bool kingOferecidoDaMao = false, kingOferecidoDoCemiterio = false;
+            var materiaisNoCemiterio = new List<uint>();
+
+            for (int guard = 0; guard < 300 && !r.ended && !fundiu; guard++)
+            {
+                foreach (var e in r.events)
+                {
+                    var t = e.GetType();
+                    if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
+                    uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
+                    byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                    byte from = Convert.ToByte(t.GetProperty("fromLoc")?.GetValue(e) ?? (byte)0);
+                    if (code == BLACK_SKULL_DRAGON && loc == LOC_MZONE)
+                    {
+                        fundiu = true;
+                        Log.Info("  > Caveira Negra entrou em campo");
+                    }
+                    if (loc == LOC_GRAVE && (code == KING_SWAMP || code == SUMMONED_SKULL) && from == LOC_HAND)
+                        materiaisNoCemiterio.Add(code);
+                }
+                if (fundiu) break;
+
+                var q = r.question;
+                if (q == null) break;
+
+                switch (q.kind)
+                {
+                    case "idle":
+                    {
+                        var poly = q.activatable.FirstOrDefault(a => a.code == POLY);
+                        var king = q.activatable.FirstOrDefault(a => a.code == KING_SWAMP);
+
+                        if (king.code == KING_SWAMP && !buscouComKing)
+                        {
+                            buscouComKing = true;
+                            Log.Info("  > King of the Swamp ativavel na mao (busca a Poly descartando-se)");
+                            r = duel.Respond("activate", king.index);
+                        }
+                        else if (poly.code == POLY)
+                        {
+                            polyAtivavel = true;
+                            Log.Info("  > Polymerization ativavel");
+                            r = duel.Respond("activate", poly.index);
+                        }
+                        else r = duel.Respond("endturn", 0);
+                        break;
+                    }
+                    case "place": r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0); break;
+                    case "position": r = duel.Respond("position", 0x1); break;
+                    case "yesno": r = duel.Respond("yesno", 1); break;
+                    case "selectcard":
+                    case "selecttribute":
+                        foreach (var c in q.choices)
+                        {
+                            if (c.code != KING_SWAMP) continue;
+                            if (c.location == LOC_HAND) kingOferecidoDaMao = true;
+                            if (c.location == LOC_GRAVE) kingOferecidoDoCemiterio = true;
+                            Log.Info($"  > King oferecido como materia: loc=0x{c.location:x}");
+                        }
+                        r = duel.Respond("select", 0,
+                            q.choices.Take(Math.Max(1, q.selMin)).Select(c => c.index).ToList());
+                        break;
+                    case "selectunselect":
+                        if (q.canFinish && q.choices.Count == 0) { r = duel.Respond("finishselect", 0); break; }
+                        foreach (var c in q.choices)
+                        {
+                            Log.Info($"  > materia oferecida: {c.code} loc=0x{c.location:x}");
+                            if (c.code != KING_SWAMP) continue;
+                            if (c.location == LOC_HAND) kingOferecidoDaMao = true;
+                            if (c.location == LOC_GRAVE) kingOferecidoDoCemiterio = true;
+                        }
+                        r = duel.Respond("pick", q.choices[0].index);
+                        break;
+                    case "battle": r = duel.Respond("endbattle", 0); break;
+                    default: r = duel.Respond("endturn", 0); break;
+                }
+            }
+
+            Check("o King pode buscar a Poly da mao", buscouComKing);
+            Check("a Polymerization ficou ativavel depois da busca", polyAtivavel);
+            Check("o Caveira Negra (Black Skull Dragon) foi invocado", fundiu);
+            Log.Info($"  King oferecido vindo da MAO: {kingOferecidoDaMao} | vindo do CEMITERIO: {kingOferecidoDoCemiterio}");
+            Log.Info($"  materiais que foram da mao para o cemiterio: [{string.Join(",", materiaisNoCemiterio)}]");
         }
 
         /// <summary>

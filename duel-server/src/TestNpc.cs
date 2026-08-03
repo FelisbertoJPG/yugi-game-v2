@@ -30,6 +30,8 @@ namespace DuelServer
         const uint SUMMONED_SKULL_LIKE = 70781052; // Summoned Skull Nv6 2500/1200 (1 tributo)
         const uint BLACK_SKULL_DRAGON = 11901678;  // fusao Nv9 3200/2500
         const uint RED_EYES = 74677422;            // Nv7 2400/2000 (2 tributos)
+        const uint WABOKU = 12607053;              // Armadilha Normal (protecao)
+        const uint TIME_WIZARD = 71625222;         // moeda: varre um dos campos
         const uint TRAP_HOLE = 4206964;             // Armadilha Normal: destroi o invocado
         const uint DUST_TORNADO = 60082869;         // remocao de S/T (Armadilha Normal)
         const uint CALL_HAUNTED = 97077563;        // continua ABERTA: alvo que vale remocao
@@ -304,6 +306,105 @@ namespace DuelServer
                     q.attackers.Add(new InteractiveDuel.Act { code = c, index = i++, canDirect = false });
                 return q;
             }
+
+            // 0. DIAGNOSTICO do relato "parou de setar armadilha": com Waboku
+            //    setavel e as zonas de magia LIVRES, a regra 2 tem de disparar.
+            //    Se este teste passa, a regra esta certa e o problema e' estado
+            //    (zonas cheias / o motor nao oferecer), nao decisao.
+            var stOcupadas = 0;
+            var brainSt = new NpcBrain(
+                db,
+                fieldOf: p => p == 0 ? campoPos.Select(x => x.code).ToList() : new List<uint>(),
+                log: _ => { },
+                handOf: null,
+                stCountOf: _ => stOcupadas,
+                fieldPosOf: p => p == 0 ? campoPos : new List<(uint, int)>(),
+                setStCountOf: _ => 0,
+                faceUpStOf: _ => new List<uint>());
+
+            InteractiveDuel.Question ComTrap(int zonas, params uint[] invocaveis)
+            {
+                stOcupadas = zonas;
+                var qq = new InteractiveDuel.Question { kind = "idle", player = 1 };
+                int i = 0;
+                foreach (var c in invocaveis) qq.summonable.Add(new InteractiveDuel.Act { code = c, index = i++ });
+                foreach (var c in invocaveis) qq.settable.Add(new InteractiveDuel.Act { code = c, index = 0 });
+                qq.settableST.Add(new InteractiveDuel.Act { code = WABOKU, index = 0 });
+                return qq;
+            }
+
+            campoPos.Clear(); campoPos.Add((GAIA, ATAQUE));    // ameaca 2300
+            var ps = brainSt.Decide(ComTrap(0, MYSTICAL_ELF), 1);
+            Check("com zonas livres, SETA a Waboku antes de por monstro",
+                  ps.Action == "setspell", $"(veio {ps.Action})");
+
+            // com as zonas cheias ele nao tem como setar — e' o estado, nao a regra
+            ps = brainSt.Decide(ComTrap(4, MYSTICAL_ELF), 1);
+            Check("com 4 zonas de magia ocupadas ele PARA de setar (regra do >=1 livre)",
+                  ps.Action != "setspell", $"(veio {ps.Action})");
+
+            // --- Mago do Tempo: a moeda -------------------------------------
+            InteractiveDuel.Question ComMago(params uint[] ativaveis)
+            {
+                var qq = new InteractiveDuel.Question { kind = "idle", player = 1 };
+                int i = 0;
+                foreach (var c in ativaveis) qq.activatable.Add(new InteractiveDuel.Act { code = c, index = i++ });
+                return qq;
+            }
+
+            // atras: o oponente tem 2300 e eu nao tenho campo -> arrisca
+            campoPos.Clear(); campoPos.Add((GAIA, ATAQUE));
+            var pm = brain.Decide(ComMago(TIME_WIZARD), 1);
+            Check("ARRISCA a moeda quando esta atras",
+                  pm.Action == "activate", $"(veio {pm.Action} — {pm.Why})");
+
+            // oponente sem monstro: cara nao destroi nada -> nao arrisca
+            campoPos.Clear();
+            pm = brain.Decide(ComMago(TIME_WIZARD), 1);
+            Check("NAO arrisca com o oponente sem monstro",
+                  pm.Action != "activate", $"(veio {pm.Action} — {pm.Why})");
+
+            // fusao pronta na mao -> material vale mais que a moeda
+            campoPos.Clear(); campoPos.Add((GAIA, ATAQUE));
+            pm = brain.Decide(ComMago(TIME_WIZARD, POLYMERIZATION), 1);
+            Check("NAO arrisca a moeda tendo fusao pronta (usa a fusao)",
+                  pm.Action == "activate" && pm.Why.StartsWith("Fusao"),
+                  $"(veio {pm.Action} — {pm.Why})");
+
+            // DIAGNOSTICO: com ameaca em campo e o Mago do Tempo NA MAO,
+            // o NPC chega a invoca-lo? O efeito dele e' LOCATION_MZONE, entao
+            // sem estar em campo a regra da moeda nunca tem chance de rodar.
+            InteractiveDuel.Question IdleLocal(uint[] invoc, uint[] setav = null)
+            {
+                var qq = new InteractiveDuel.Question { kind = "idle", player = 1 };
+                int i = 0;
+                foreach (var c in invoc) qq.summonable.Add(new InteractiveDuel.Act { code = c, index = i++ });
+                i = 0;
+                foreach (var c in setav ?? Array.Empty<uint>())
+                    qq.settable.Add(new InteractiveDuel.Act { code = c, index = i++ });
+                return qq;
+            }
+
+            // Relato de duelo: o NPC SETAVA o Mago do Tempo (500/400) como parede
+            // tres turnos seguidos. Setado ele fica VIRADO, e carta virada nao
+            // ativa efeito — a moeda nunca tinha chance de acontecer.
+            campoPos.Clear(); campoPos.Add((GAIA, ATAQUE));   // ameaca 2300
+            var ptw = brain.Decide(IdleLocal(new[] { TIME_WIZARD },
+                                             new[] { TIME_WIZARD, MYSTICAL_ELF }), 1);
+            Check("estando atras, INVOCA o Mago do Tempo (nao seta)",
+                  ptw.Action == "summon", $"(veio {ptw.Action} — {ptw.Why})");
+
+            // E nunca o usa como parede, nem quando ha outra opcao de defesa.
+            campoPos.Clear(); campoPos.Add((GAIA, ATAQUE));
+            ptw = brain.Decide(IdleLocal(Array.Empty<uint>(), new[] { TIME_WIZARD }), 1);
+            Check("NUNCA seta o Mago do Tempo como parede",
+                  ptw.Action != "setmonster", $"(veio {ptw.Action} — {ptw.Why})");
+
+            // Sem ameaca, a regra nao atrapalha: continua invocando o melhor ATK.
+            campoPos.Clear();
+            ptw = brain.Decide(IdleLocal(new[] { TIME_WIZARD, BATTLE_OX }), 1);
+            Check("sem ameaca, continua invocando o de maior ATK (Battle Ox)",
+                  ptw.Action == "summon" && ptw.Index == 1, $"(veio {ptw.Action} idx {ptw.Index})");
 
             // 1. o caso relatado: parede deitada de 2000 DEF
             campoPos.Clear(); campoPos.Add((MYSTICAL_ELF, DEFESA));   // 800/2000 em DEFESA

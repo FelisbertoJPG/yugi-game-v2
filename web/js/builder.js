@@ -20,6 +20,7 @@ import {
 } from '/web/js/npcs.js';
 import { saveProjectDeck, playerDeckPath } from '/web/js/projectdecks.js';
 import { inLista1 } from '/web/js/lista1.js';
+import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
@@ -50,6 +51,7 @@ function injectCustom(card) {
 
 let db = null;         // índice
 let fullDb = null;     // cards.json, carregado sob demanda
+let banlist = null;    // pontos + grupos de cópias (web/js/banlist.js), só some se Lista 1 estiver ligada
 let deck = new Deck();
 let deckIndex = null;  // posição no localStorage; null = ainda não salvo
 let dirty = false;
@@ -102,11 +104,96 @@ function markDirty(v = true) {
   $('btn-save').textContent = v ? `${base} *` : base;
 }
 
+/**
+ * Linha extra pro tooltip da miniatura com a regra de banlist da carta (só
+ * quando a Lista 1 está marcada — fora dela a banlist nem se aplica).
+ */
+function banlistTooltip(id) {
+  if (!$('f-lista1').checked || !banlist) return '';
+  const pts = banlist.cardPoints[String(id)];
+  const lim = banlist.cardLimits[String(id)];
+  const grp = banlist.cardGroups[String(id)];
+  if (!pts && !lim && !grp) return '';
+  const limLabel = lim === 1 ? 'Limitada' : lim === 2 ? 'Semilimitada' : lim ? `máx ${lim}` : '';
+  return '\nbanlist:' +
+    (pts ? ` ${pts} pontos` : '') +
+    (limLabel ? ` · ${limLabel}` : '') +
+    (grp ? ` · grupo ${grp}` : '');
+}
+
+/**
+ * Selos visuais da banlist na miniatura (mesma linguagem visual de
+ * `web/banlist.html`): [L1]/[L2] em vermelho pro teto individual, pontos em
+ * azul, e o número do grupo em AMARELO quando a carta está numa lista
+ * compartilhada. Só aparece com a Lista 1 marcada — fora dela a banlist nem
+ * se aplica.
+ *
+ * As miniaturas já têm CST (topo-esquerda) e raridade (topo-direita) — em
+ * vez de arriscar sobrepor, `hasTopLeft`/`hasTopRight` empurram o selo da
+ * banlist pra uma segunda linha quando o canto já está ocupado.
+ */
+function banlistBadges(id, { hasTopLeft = false, hasTopRight = false } = {}) {
+  if (!$('f-lista1').checked || !banlist) return '';
+  const pts = banlist.cardPoints[String(id)];
+  const lim = banlist.cardLimits[String(id)];
+  const grp = banlist.cardGroups[String(id)];
+  if (!pts && !lim && !grp) return '';
+
+  let html = '';
+  let leftRow = hasTopLeft ? 1 : 0;   // canto esquerdo: limite, depois grupo (empilhados se os dois existirem)
+  if (lim) {
+    html += `<span class="bl-badge bl-limit" style="top:${2 + leftRow * 11}px">L${lim}</span>`;
+    leftRow++;
+  }
+  if (grp) {
+    html += `<span class="bl-badge bl-group" style="top:${2 + leftRow * 11}px">${grp}</span>`;
+  }
+  if (pts) {
+    const rightRow = hasTopRight ? 1 : 0;
+    html += `<span class="bl-badge bl-points" style="top:${2 + rightRow * 11}px">${pts}p</span>`;
+  }
+  return html;
+}
+
 /** O índice traz só id/nome/stats; para nome de carta no deck usamos o cache. */
 const briefCache = new Map();
 function brief(id) {
   if (!briefCache.has(id)) briefCache.set(id, db.brief(id));
   return briefCache.get(id);
+}
+
+/**
+ * Estado de validade do deck: regras oficiais (`deck.js`, sempre) + banlist
+ * (`web/js/banlist.js`, só quando a Lista 1 está marcada). Uma função só,
+ * reaproveitada tanto pelo status visual (`renderDeck`) quanto pelo bloqueio
+ * de salvar (`podeSalvar`) — o mesmo texto que aparece na tela é o motivo
+ * que impede o "salvar", nunca dois cálculos divergentes.
+ *
+ * `ignoreBanlist` é a liberdade do modo NPC (checkbox "ignorar banlist") —
+ * as regras de CONSTRUÇÃO (min/max, 3 cópias) nunca são puladas, nem lá.
+ */
+function deckStatus({ ignoreBanlist = false } = {}) {
+  const v = deck.validate();
+  const bl = ($('f-lista1').checked && !ignoreBanlist)
+    ? validateBanlist(deck, banlist) : { ok: true, problems: [] };
+
+  if (!v.valid) {
+    return { ok: false, message: v.errors[0], color: 'var(--dim)' };
+  }
+  if (!bl.ok) {
+    const p = bl.problems[0];
+    const message = p.type === 'points'
+      ? `banlist: ${p.spent}/${p.budget} pontos — estourou o orçamento`
+      : p.type === 'limit'
+      ? `banlist: ${brief(p.card)?.name ?? p.card} tem ${p.count} cópias (máximo ${p.limit})`
+      : `banlist: grupo ${p.group} com ${p.count} cópias (máximo ${p.group})`;
+    return { ok: false, message, color: 'var(--red)' };
+  }
+  return {
+    ok: true,
+    message: `deck válido — Main ${deck.main.length}, Extra ${deck.extra.length}`,
+    color: 'var(--green)',
+  };
 }
 
 // ---------------------------------------------------------------- render deck
@@ -124,9 +211,10 @@ function renderDeck() {
       el.draggable = true;
       el.dataset.id = id;
       el.dataset.zone = zone;
-      el.title = `${c?.name ?? id}\nclique: +1 cópia · segurar: detalhes · `
-               + `arraste para o pool: remover`;
-      el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">` +
+      el.title = `${c?.name ?? id}` + banlistTooltip(id) +
+               `\nclique: +1 cópia · segurar: detalhes · arraste para o pool: remover`;
+      el.innerHTML = banlistBadges(id) +
+                     `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">` +
                      (count > 1 ? `<span class="count">×${count}</span>` : '');
 
       // Segurar abre a janela de detalhes, igual ao pool.
@@ -156,11 +244,23 @@ function renderDeck() {
   mEl.className = 'n ' + (m >= RULES.MAIN_MIN && m <= RULES.MAIN_MAX ? 'good' : 'bad');
   xEl.className = 'n ' + (x <= RULES.EXTRA_MAX ? 'good' : 'bad');
 
-  const v = deck.validate();
-  $('status').textContent = v.valid
-    ? `deck válido — Main ${m}, Extra ${x}`
-    : v.errors[0];
-  $('status').style.color = v.valid ? 'var(--green)' : 'var(--dim)';
+  const st = deckStatus({ ignoreBanlist: npcMode && $('npc-ignore-banlist').checked });
+  $('status').textContent = st.message;
+  $('status').style.color = st.color;
+
+  // Desabilita os botões de salvar em vez de só recusar no clique — o
+  // usuário vê ANTES de tentar que o deck não bate com as regras.
+  const motivo = st.ok ? '' : `não é possível salvar: ${st.message}`;
+  $('btn-save').disabled = !st.ok;
+  $('btn-save').title = motivo;
+  $('btn-project').disabled = !st.ok;
+  $('btn-project').title = motivo;
+  if (npcMode) {
+    // "salvar p/ mim" vira deck do JOGADOR — checa sem a liberdade de ignorar banlist do NPC.
+    const stStrict = deckStatus({ ignoreBanlist: false });
+    $('npc-copy').disabled = !stStrict.ok;
+    $('npc-copy').title = stStrict.ok ? '' : `não é possível salvar: ${stStrict.message}`;
+  }
 }
 
 // ---------------------------------------------------------------- render pool
@@ -182,12 +282,14 @@ function renderPool() {
       (rar ? `\nraridade: ${rar}` : '') +
       (ownedMode ? `\nvocê pode usar: ${avail}` : '') +
       (c.custom ? '\n(carta customizada — sem efeito em duelo)' : '') +
+      banlistTooltip(c.id) +
       (full ? `\n(no limite: ${avail})` : '\nclique ou arraste para adicionar') +
       '\nsegurar: ver detalhes';
     el.innerHTML = (c.custom ? '<span class="badge">CST</span>' : '') +
                    (rar ? `<span class="rarity ${rar}">${rar}</span>` : '') +
                    // no modo Coleção, mostra QUANTAS o jogador tem disponíveis (×N)
                    (ownedMode ? `<span class="avail">×${avail}</span>` : '') +
+                   banlistBadges(c.id, { hasTopLeft: c.custom, hasTopRight: !!rar }) +
                    `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">` +
                    (copies ? `<span class="count">${copies}</span>` : '');
 
@@ -250,8 +352,11 @@ function enterNpcModeUI() {
   $('npc-back').onclick = () => {
     if (confirmDiscard()) location.href = '/web/npcs.html';
   };
-  // salva o deck atual do NPC como um deck SEU (ex.: "joey 1")
+  // salva o deck atual do NPC como um deck SEU (ex.: "joey 1"). Vira deck do
+  // JOGADOR — o "ignorar banlist" do NPC não viaja junto, checa sem essa liberdade.
   $('npc-copy').onclick = () => {
+    const st = deckStatus({ ignoreBanlist: false });
+    if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
     const n = (npcDeckIndex ?? 0) + 1;
     const name = `${npcMode.id} ${n}`;
     saveDeck(new Deck({ name, main: deck.main, extra: deck.extra }), null);
@@ -316,6 +421,9 @@ function tryPickCover(id) {
 }
 
 async function saveNpcDeckFromUI() {
+  const st = deckStatus({ ignoreBanlist: $('npc-ignore-banlist').checked });
+  if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
+
   const sig = Number($('npc-drop').value) || npcSignature;
   const name = $('deck-name').value.trim() || `Deck ${npcMode.name}`;
   // Prêmio em DP por vencer este deck. Campo vazio = padrão; 0 é válido.
@@ -330,16 +438,14 @@ async function saveNpcDeckFromUI() {
   npcSignature = sig;
   markDirty(false);
 
-  const v = deck.validate();
-  const aviso = v.valid ? '' : ` (incompleto: ${v.errors[0]})`;
   if (r.path) {
-    toast(`salvo em decks/${r.path}${aviso}`);
+    toast(`salvo em decks/${r.path}`);
   } else if (r.downloaded) {
     // Sem servidor de desenvolvimento não dá para escrever no projeto; o .ydk
     // foi baixado e precisa ser colocado em decks/ na mão.
     toast('servidor fora do ar — .ydk baixado, mova para decks/npc/');
   } else {
-    toast(`salvo${aviso}`);
+    toast('salvo');
   }
 }
 
@@ -505,6 +611,12 @@ function applyFilters() {
   // Carta fora de qualquer booster não tem raridade e some com qualquer filtro aqui.
   const rar = $('f-rar').value;
   if (rar) poolResults = poolResults.filter((c) => rarIdx.get(c.id)?.rarity === rar);
+  // Banlist (web/banlist.html): acha as cartas que já têm regra atribuída.
+  const bl = $('f-banlist').value;
+  if (bl === 'limit1') poolResults = poolResults.filter((c) => banlist.cardLimits[String(c.id)] === 1);
+  else if (bl === 'limit2') poolResults = poolResults.filter((c) => banlist.cardLimits[String(c.id)] === 2);
+  else if (bl === 'points') poolResults = poolResults.filter((c) => (banlist.cardPoints[String(c.id)] ?? 0) > 0);
+  else if (bl === 'group') poolResults = poolResults.filter((c) => (banlist.cardGroups[String(c.id)] ?? 0) > 0);
   // Lista 1: restringe ao pool jogável desta fase.
   if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
   // Coleção: no Deck Builder "real", só o que o jogador possui.
@@ -578,13 +690,14 @@ function confirmDiscard() {
 
 $('btn-save').onclick = () => {
   if (npcMode) return void saveNpcDeckFromUI();
+  const st = deckStatus();   // fora do modo NPC, ignoreBanlist é sempre false
+  if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
   deck.name = $('deck-name').value.trim() || 'Novo Deck';
   deckIndex = saveDeck(deck, deckIndex);
   setActiveIndex(deckIndex);
   markDirty(false);
   refreshDeckSelect();
-  const v = deck.validate();
-  toast(v.valid ? 'deck salvo' : `salvo (incompleto: ${v.errors[0]})`);
+  toast('deck salvo');
 };
 
 $('btn-new').onclick = () => {
@@ -617,6 +730,8 @@ $('btn-export').onclick = () => {
 // Grava o deck em decks/player/ — diferente de "salvar", que é localStorage e
 // fica preso a este navegador. O que vai para o projeto viaja no git.
 $('btn-project').onclick = async () => {
+  const st = deckStatus();   // este botão só existe fora do modo NPC
+  if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
   deck.name = $('deck-name').value.trim() || 'deck';
   const path = playerDeckPath(deck.name);
   const r = await saveProjectDeck(path, deck, { updated: new Date().toISOString() });
@@ -667,9 +782,15 @@ $('deck-name').oninput = () => markDirty();
 $('npc-reward').oninput = () => markDirty();
 
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
-const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-rar', 'f-sort',
+const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-rar', 'f-banlist', 'f-sort',
                     'f-lvmin', 'f-lvmax', 'f-atk', 'f-def'];
 for (const id of [...FILTER_IDS, 'f-lista1']) $(id).addEventListener('input', applyFilters);
+// A banlist só vale com a Lista 1 ligada — ligar/desligar o filtro muda o
+// status de validade do deck sem tocar em nenhuma carta, então precisa
+// recalcular o status mesmo sem passar por `refresh()`. O mesmo vale pro
+// "ignorar banlist" do modo NPC.
+$('f-lista1').addEventListener('input', renderDeck);
+$('npc-ignore-banlist').addEventListener('input', renderDeck);
 
 // os 3 selects de tipo são mutuamente exclusivos: ativar um zera os outros
 for (const id of TYPE_IDS) {
@@ -929,6 +1050,8 @@ configureCardDetail({
 await hydrateBoosters();
 await hydrateWallet();
 await hydrateCustomNpcs();   // adversários criados na Área de Teste (outra máquina inclusive)
+await hydrateBanlist();
+banlist = getBanlist();
 
 for (const c of listCustom()) injectCustom(c);
 // Marca as cartas com a raridade/booster salvos (tags + selo).

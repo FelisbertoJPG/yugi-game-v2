@@ -4,7 +4,7 @@
  * recompensa (+100 DP e a carta-assinatura) ao vencer.
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { NPCS, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/js/npcs.js';
+import { NPCS, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, listCampaignNames } from '/web/js/npcs.js';
 import { getDP, hydrateWallet } from '/web/js/wallet.js';
 
 const $ = (id) => document.getElementById(id);
@@ -22,34 +22,64 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+function npcCard(npc) {
+  const active = getNpcActiveDeck(npc.id);      // deck ativo do NPC (pode ser null)
+  const cover = active?.coverId ?? active?.signatureId ?? npc.signatureId;
+  const sig = active?.signatureId ?? npc.signatureId;
+  const temDeck = active && active.deck && active.deck.main.length > 0;
+
+  const el = document.createElement('div');
+  el.className = 'npc';
+  el.innerHTML =
+    `<div class="art" style="${cover ? `background-image:url('${ART(cover)}')` : ''}"></div>` +
+    `<div class="body">` +
+      `<span class="name">${npc.name}</span>` +
+      `<span class="theme">${npc.theme}</span>` +
+      `<span class="reward">recompensa: ${sig ? nameOf(sig) : '—'}</span>` +
+      `<button class="go btn-primary" ${temDeck ? '' : 'disabled'}>` +
+        (temDeck ? 'duelar' : 'sem deck (monte na Área de Teste)') +
+      `</button>` +
+    `</div>`;
+  el.querySelector('.go').onclick = () => {
+    if (!temDeck) return;
+    location.href = `/web/duel.html?npc=${npc.id}`;
+  };
+  return el;
+}
+
+function campaignSection(nome, npcs) {
+  const sec = document.createElement('div');
+  sec.className = 'campaign';
+  const h = document.createElement('h2');
+  h.textContent = nome;
+  sec.append(h);
+  const grid = document.createElement('div');
+  grid.className = 'npcs';
+  for (const npc of npcs) grid.append(npcCard(npc));
+  sec.append(grid);
+  return sec;
+}
+
+// A página é organizada só por campanha (sem lista "todos" solta) — cada
+// adversário mora numa seção; quem ainda não tem `campaign` definida cai
+// numa seção "Sem campanha" pra não sumir da tela.
 function render() {
   $('dp').textContent = `${getDP()} DP`;
-  const frag = document.createDocumentFragment();
-  for (const npc of NPCS) {
-    const active = getNpcActiveDeck(npc.id);      // deck ativo do NPC (pode ser null)
-    const cover = active?.coverId ?? active?.signatureId ?? npc.signatureId;
-    const sig = active?.signatureId ?? npc.signatureId;
-    const temDeck = active && active.deck && active.deck.main.length > 0;
+  const wrap = $('campaigns');
 
-    const el = document.createElement('div');
-    el.className = 'npc';
-    el.innerHTML =
-      `<div class="art" style="${cover ? `background-image:url('${ART(cover)}')` : ''}"></div>` +
-      `<div class="body">` +
-        `<span class="name">${npc.name}</span>` +
-        `<span class="theme">${npc.theme}</span>` +
-        `<span class="reward">recompensa: ${sig ? nameOf(sig) : '—'}</span>` +
-        `<button class="go btn-primary" ${temDeck ? '' : 'disabled'}>` +
-          (temDeck ? 'duelar' : 'sem deck (monte na Área de Teste)') +
-        `</button>` +
-      `</div>`;
-    el.querySelector('.go').onclick = () => {
-      if (!temDeck) return;
-      location.href = `/web/duel.html?npc=${npc.id}`;
-    };
-    frag.append(el);
+  const campanhas = listCampaignNames();
+  const soltos = NPCS.filter((n) => !n.campaign);
+  if (!campanhas.length && !soltos.length) {
+    wrap.replaceChildren();
+    return;
   }
-  $('npcs').replaceChildren(frag);
+
+  const frag = document.createDocumentFragment();
+  for (const nome of campanhas) {
+    frag.append(campaignSection(nome, NPCS.filter((n) => n.campaign === nome)));
+  }
+  if (soltos.length) frag.append(campaignSection('Sem campanha', soltos));
+  wrap.replaceChildren(frag);
 }
 
 $('btn-home').onclick = () => (location.href = '/web/index.html');

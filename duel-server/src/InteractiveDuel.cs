@@ -18,6 +18,10 @@ namespace DuelServer
 
         /// <summary>Liga o despejo hexadecimal das mensagens ainda em investigação.</summary>
         public static bool DebugSelect = false;
+        /// <summary>Liga o log de TODO tipo de mensagem bruto que passa por Parse()
+        /// (tipo + tamanho), pra achar empiricamente onde um mecanismo novo aparece
+        /// no protocolo sem precisar adivinhar. Ver [[ocgcore-protocolo]].</summary>
+        public static bool DumpAllTypes = false;
         static bool _dumpedUnselect;
 
         readonly DuelSession _s;
@@ -56,6 +60,7 @@ namespace DuelServer
         readonly NpcBrain _npc;
         readonly bool _npcEnabled;
         List<object> _events;   // para o NPC registrar o que fez
+        uint? _pendingFieldSpellEvent; // Bônus de Campo injetado antes do 1º Advance()
 
         /// <summary>Gancho de diagnóstico do SELECT_CHAIN cru (só o --probe-chain liga).</summary>
         public static Action<byte[], int, int> ChainProbe;
@@ -65,6 +70,9 @@ namespace DuelServer
             public string kind;                  // idle | place | battle | position | chain | unknown
             public int player;
             public List<Act> summonable = new();
+            // Invocação Especial disponível AGORA vinda do Extra Deck (Sincro/Xyz
+            // com material já em campo). location vem 0x40 (LOCATION_EXTRA).
+            public List<Act> spSummonable = new();
             public List<Act> settable = new();   // monstros setáveis (facedown defense)
             public List<Act> settableST = new(); // magias/armadilhas setáveis
             public List<Act> activatable = new();// cartas ativáveis AGORA (condição ok)
@@ -85,6 +93,7 @@ namespace DuelServer
             public bool chainForced;             // chain: TEM de ativar algo (não pode recusar)
             public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
             public byte posMask;                 // position: posições que o motor aceita
+            public List<uint> options = new();   // selectoption: ids das opções de texto do motor
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
@@ -119,15 +128,20 @@ namespace DuelServer
 
         public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed,
                                ulong flags = 0, bool npc = true, uint[] npcDeck = null,
-                               uint[] extra = null, uint[] npcExtra = null)
+                               uint[] extra = null, uint[] npcExtra = null, uint? fieldSpell = null)
         {
             // Sem `npcDeck` o oponente joga com o SEU deck; o Extra segue a mesma
             // regra, senão ele duelaria com o seu main e o extra de outro deck.
             _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags,
-                                 extra, npcDeck != null ? npcExtra : (npcExtra ?? extra));
+                                 extra, npcDeck != null ? npcExtra : (npcExtra ?? extra), fieldSpell);
             _npcEnabled = npc;
             _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
                                 HandOf, StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf);
+            // `DuelSession` já colocou a carta no motor (antes de OCG_StartDuel),
+            // mas isso não gera MSG_MOVE — o front só sabe de campo por evento.
+            // Sem isto, o Bônus de Campo funciona (o motor aplica o efeito) mas
+            // a tela nasce com a zona de campo vazia, como se não tivesse nada.
+            _pendingFieldSpellEvent = fieldSpell;
         }
 
         /// <summary>Cartas na mão de um jogador (para a IA achar Reborn/dragões).</summary>
@@ -212,6 +226,20 @@ namespace DuelServer
         {
             var r = new Result();
             _events = r.events;   // o NPC anexa aqui o que decidiu
+
+            // Sintético, só na 1ª chamada: avisa o front que o Bônus de Campo já
+            // está na zona (mesmo formato de um MSG_MOVE — fromLoc 0 = "veio do
+            // nada", igual a carta nasceu ali).
+            if (_pendingFieldSpellEvent.HasValue)
+            {
+                r.events.Add(new
+                {
+                    type = "move", code = _pendingFieldSpellEvent.Value,
+                    fromCtrl = (byte)0, fromLoc = (byte)0, fromSeq = 0,
+                    controller = (byte)0, loc = (byte)0x8, seq = 5, pos = 1,
+                });
+                _pendingFieldSpellEvent = null;
+            }
             for (int guard = 0; guard < 5000; guard++)
             {
                 int status = YgoCoreAPI.OCG_DuelProcess(_s.Handle);
@@ -247,10 +275,13 @@ namespace DuelServer
 
                 if (q.player != HUMAN) { AutoPass(q); continue; }          // oponente desligado
 
-                // Seleção de cartas do jogador: se houver escolha real, devolve
-                // pro front. Sem escolha (só dá para pegar o mínimo), resolve
-                // sozinho — pedir clique para uma decisão que não existe irrita.
-                if (q.kind is "selectcard" or "selecttribute")
+                // Alvos de carta são sempre uma decisão visível do jogador. Mesmo
+                // com um único alvo legal (ex.: uma Equip Spell e um monstro), o
+                // front precisa mostrar qual carta receberá o efeito, em vez de
+                // equipar silenciosamente. Tributos continuam automáticos quando
+                // não há escolha real.
+                if (q.kind == "selectcard") { r.question = q; return r; }
+                if (q.kind == "selecttribute")
                 {
                     if (HasRealChoice(q)) { r.question = q; return r; }
                     _s.Respond(AutoSelect(q));
@@ -319,6 +350,7 @@ namespace DuelServer
             {
                 "activate" => I32((play.Index << 16) | 5),
                 "summon" => I32(play.Index << 16),
+                "spsummon" => I32((play.Index << 16) | 1),   // Invocacao Especial (Sincro/Xyz/Toon)
                 "setmonster" => I32((play.Index << 16) | 3),
                 "setspell" => I32((play.Index << 16) | 4),   // seta magia/armadilha
                 "battle" => I32(6),   // vai para a Battle Phase
@@ -399,7 +431,7 @@ namespace DuelServer
         /// </summary>
         static readonly Dictionary<string, string[]> AcoesValidas = new()
         {
-            ["idle"] = new[] { "summon", "reposition", "setmonster", "setspell",
+            ["idle"] = new[] { "summon", "spsummon", "reposition", "setmonster", "setspell",
                                "activate", "battle", "endturn" },
             ["place"] = new[] { "place" },
             ["battle"] = new[] { "attack", "battleactivate", "tomain2", "endbattle" },
@@ -410,6 +442,7 @@ namespace DuelServer
             ["position"] = new[] { "position" },
             ["chain"] = new[] { "chain" },
             ["yesno"] = new[] { "yesno" },
+            ["option"] = new[] { "option" },
         };
 
         /// <summary>Aplica a jogada do player e avança de novo.</summary>
@@ -446,6 +479,7 @@ namespace DuelServer
         byte[] Encode(string action, int arg) => action switch
         {
             "summon" => I32(arg << 16),               // idle, comando 0 = Normal Summon
+            "spsummon" => I32((arg << 16) | 1),       // idle, comando 1 = Invocação Especial (Sincro/Xyz)
             "reposition" => I32((arg << 16) | 2),     // idle, comando 2 = mudar posição
             "setmonster" => I32((arg << 16) | 3),     // idle, comando 3 = Set (monstro)
             "setspell" => I32((arg << 16) | 4),       // idle, comando 4 = Set (magia/armadilha)
@@ -461,6 +495,7 @@ namespace DuelServer
             "endbattle" => I32(3),                    // battlecmd, comando 3 = End Phase
             "chain" => I32(arg),                      // corrente: índice a ativar, ou -1 recusa
             "yesno" => I32(arg),                      // sim/não: 1 = sim, 0 = não
+            "option" => I32(arg),                      // SELECT_OPTION: índice da opção escolhida
             // Posição escolhida: 0x1 ataque, 0x4 defesa com a FACE PARA CIMA.
             // Faltava aqui: "position" já constava em AcoesValidas, mas caía no
             // `_ => I32(-1)` e o motor recusava tudo. Passou despercebido porque
@@ -497,6 +532,11 @@ namespace DuelServer
                     _events?.Add(new { type = "npc", action = "yesno", why = "aceita o efeito opcional" });
                     _s.Respond(I32(1));
                     break;
+                case "option":
+                    // O motor espera o índice, não o identificador textual da opção.
+                    // Para o NPC, a primeira opção é uma escolha determinística segura.
+                    _s.Respond(I32(0));
+                    break;
                 case "selectcard":
                 case "selecttribute": _s.Respond(NpcSelect(q)); break;
                 case "selectunselect":
@@ -532,6 +572,9 @@ namespace DuelServer
         void Parse(byte[] d, int o, int mlen, List<object> ev)
         {
             byte type = d[o];
+            if (DumpAllTypes)
+                Log.Info($"[raw] type={type} len={mlen} : " +
+                         BitConverter.ToString(d, o, Math.Min(mlen, 40)).Replace("-", " "));
             switch (type)
             {
                 case 1: // MSG_RETRY — o motor recusou a última resposta
@@ -566,9 +609,11 @@ namespace DuelServer
                     _gameOver = true;
                     _winByte = d[o + 1];
                     break;
+                case 93: ParseEquip(d, o, mlen, ev); break; // MSG_EQUIP
                 case 40: ev.Add(new { type = "turn", player = d[o + 1] }); break;
                 case 41: ev.Add(new { type = "phase", phase = (int)BitConverter.ToInt16(d, o + 1) }); break;
                 case 60: ev.Add(new { type = "summoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF }); break;
+                case 62: ev.Add(new { type = "spsummoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF }); break; // MSG_SPSUMMONING (Sincro/Xyz)
                 case 50: // MOVE
                 {
                     int p = o + 1;
@@ -654,6 +699,26 @@ namespace DuelServer
                 case 91: LpChange(d, o, -1, ev); break; // MSG_DAMAGE: perde LP
                 case 92: LpChange(d, o, +1, ev); break; // MSG_RECOVER: ganha LP
                 case 100: LpChange(d, o, -1, ev); break; // MSG_PAY_LPCOST: paga LP
+                case 115: // MSG_TOSS_COIN: player(1) count(1) res(count)
+                {
+                    byte player = d[o + 1];
+                    byte count = d[o + 2];
+                    var results = new List<int>();
+                    for (int i = 0; i < count && (o + 3 + i) < (o + mlen); i++)
+                        results.Add(d[o + 3 + i]);
+                    ev.Add(new { type = "coin", player, results });
+                    break;
+                }
+                case 116: // MSG_TOSS_DICE: player(1) count(1) res(count)
+                {
+                    byte player = d[o + 1];
+                    byte count = d[o + 2];
+                    var results = new List<int>();
+                    for (int i = 0; i < count && (o + 3 + i) < (o + mlen); i++)
+                        results.Add(d[o + 3 + i]);
+                    ev.Add(new { type = "dice", player, results });
+                    break;
+                }
                 case 11: _pending = ParseIdle(d, o, mlen); break;
                 case 18: _pending = ParsePlace(d, o); break;
                 case 10: _pending = ParseBattle(d, o, mlen); break;
@@ -664,6 +729,10 @@ namespace DuelServer
                 // código da carta cujo efeito é oferecido; o 13 é um sim/não puro.
                 case 12: _pending = new Question { kind = "yesno", player = d[o + 1], askCode = BitConverter.ToUInt32(d, o + 2) & 0x7FFFFFFF }; break;
                 case 13: _pending = new Question { kind = "yesno", player = d[o + 1] }; break;
+                // MSG_SELECT_OPTION: player(1), quantidade(1), ids de texto uint32.
+                // A resposta é int32 com o índice (0-based). O Time Wizard chega
+                // aqui ao pedir para declarar cara ou coroa antes de lançar a moeda.
+                case 14: _pending = ParseSelectOption(d, o, mlen); break;
                 case 16:
                     ChainProbe?.Invoke(d, o, mlen);   // diagnóstico do layout (--probe-chain)
                     _pending = ParseSelectChain(d, o, mlen);
@@ -684,17 +753,104 @@ namespace DuelServer
             }
         }
 
-        // Idle: parseia só a lista de invocáveis (início, entradas de 10 bytes) e
-        // lê os flags do FIM da mensagem (3 bytes: to_bp, to_ep, shuffle). As listas
-        // do meio (spsummon/repos/set/activate) têm tamanho variável e são ignoradas
-        // por ora — isso mantém o parse à prova de estouro.
+        Question ParseSelectOption(byte[] d, int o, int mlen)
+        {
+            var q = new Question { kind = "option", player = d[o + 1] };
+            int count = d[o + 2];
+            int p = o + 3;
+            if (p + count * 4 > o + mlen)
+                throw new InvalidOperationException($"SELECT_OPTION truncado: {count} opcoes em {mlen} bytes");
+            for (int i = 0; i < count; i++, p += 4)
+                q.options.Add(BitConverter.ToUInt32(d, p));
+            Log.Info($"[select option] p={q.player} opcoes=[{string.Join(",", q.options)}]");
+            return q;
+        }
+
+        /// <summary>
+        /// MSG_EQUIP traz dois loc_info de 10 bytes: a Equip Spell e o monstro.
+        /// Depois que o motor confirma o vínculo, consultamos o ATK atual do alvo
+        /// diretamente no core. Não tentamos inferir bônus por texto/Lua: efeitos
+        /// acumulados, reduções e modificadores condicionais já estão resolvidos ali.
+        /// </summary>
+        void ParseEquip(byte[] d, int o, int mlen, List<object> ev)
+        {
+            const int locInfoSize = 10;
+            if (mlen < 1 + locInfoSize * 2) return;
+            int target = o + 1 + locInfoSize;
+            byte controller = d[target], location = d[target + 1];
+            int sequence = BitConverter.ToInt32(d, target + 2);
+            if (location != LOCATION_MZONE || controller > 1) return;
+
+            var (atk, baseAtk) = QueryAtk(controller, sequence);
+            if (atk != null)
+            {
+                Log.Info($"[equip] alvo P{controller} M{sequence}: ATK {baseAtk ?? atk.Value} -> {atk.Value}");
+                ev.Add(new { type = "stats", controller, loc = location, seq = sequence,
+                             atk = atk.Value, baseAtk = baseAtk ?? atk.Value });
+            }
+        }
+
+        /// <summary>
+        /// ATK atual (com todo modificador contínuo já resolvido pelo core — Equip
+        /// Spell, magia de campo tipo Forest, etc.) e ATK base de um monstro na
+        /// zona. Extraído do `ParseEquip` pra também servir os testes de
+        /// aceitação (ex.: `TestFieldBonus`), que precisam confirmar um bônus de
+        /// campo sem inferir nada do Lua — só perguntando ao motor.
+        /// </summary>
+        internal (int? atk, int? baseAtk) QueryAtk(int controller, int sequence)
+        {
+            var info = new OCG_QueryInfo
+            {
+                flags = 0x100 | 0x400, // QUERY_ATTACK | QUERY_BASE_ATTACK
+                con = (byte)controller,
+                loc = LOCATION_MZONE,
+                seq = (uint)sequence,
+            };
+            IntPtr ptr = YgoCoreAPI.OCG_DuelQuery(_s.Handle, out uint len, ref info);
+            if (ptr == IntPtr.Zero || len == 0)
+            {
+                Log.Warn($"[query] ATK de P{controller} M{sequence} vazio (ptr={ptr}, len={len})");
+                return (null, null);
+            }
+            var data = new byte[len];
+            Marshal.Copy(ptr, data, 0, (int)len);
+
+            int? atk = null, baseAtk = null;
+            // A DLL 11.0 distribuída pelo projeto prefixa cada campo de query
+            // com uint16 (não uint32, como a API mais nova): tamanho, flag, valor.
+            for (int p = 0; p + 6 <= data.Length;)
+            {
+                int size = BitConverter.ToUInt16(data, p);
+                if (size < 4 || p + 2 + size > data.Length) break;
+                uint flag = BitConverter.ToUInt32(data, p + 2);
+                if (flag == 0x80000000) break; // QUERY_END
+                if (size >= 8)
+                {
+                    int value = BitConverter.ToInt32(data, p + 6);
+                    if (flag == 0x100) atk = value;
+                    else if (flag == 0x400) baseAtk = value;
+                }
+                p += 2 + size;
+            }
+            return (atk, baseAtk);
+        }
+
+        // Idle: parseia a lista de invocáveis e de Invocação Especial (início,
+        // entradas de 10 bytes) e lê os flags do FIM da mensagem (3 bytes: to_bp,
+        // to_ep, shuffle). repos/set/activate vêm depois, cada um com seu próprio
+        // tamanho de entrada.
         Question ParseIdle(byte[] d, int o, int mlen)
         {
             int limit = o + mlen;
             var q = new Question { kind = "idle", player = d[o + 1] };
             int p = o + 2;
             q.summonable = ReadActs(d, ref p, limit);       // summon (entradas de 10 bytes)
-            ReadActs(d, ref p, limit);                      // special summon
+            // special summon (Sincro/Xyz com material já em campo, vindo do Extra
+            // Deck). Assume o mesmo tamanho de entrada (10 bytes) que summon/mset/
+            // sset — não confirmado empiricamente até este ponto, então o guard de
+            // alinhamento logo abaixo ("sobra != 3") é quem denuncia se estiver
+            // errado, em vez de desalinhar em silêncio.
+            q.spSummonable = ReadActs(d, ref p, limit);
             q.repositionable = ReadActs(d, ref p, limit, 7); // reposition — 7 bytes (seq 1 byte)!
             q.settable = ReadActs(d, ref p, limit);         // mset — monstro setável
             q.settableST = ReadActs(d, ref p, limit);       // sset — magia/armadilha setável
@@ -709,9 +865,9 @@ namespace DuelServer
             if (sobra != 3)
             {
                 Log.Err($"[idle] desalinhado: sobraram {sobra} bytes (esperado 3). " +
-                        $"summon={q.summonable.Count} mset={q.settable.Count} " +
-                        $"sset={q.settableST.Count} act={q.activatable.Count} — " +
-                        "algum tamanho de entrada mudou no motor.");
+                        $"summon={q.summonable.Count} spsummon={q.spSummonable.Count} " +
+                        $"mset={q.settable.Count} sset={q.settableST.Count} " +
+                        $"act={q.activatable.Count} — algum tamanho de entrada mudou no motor.");
             }
 
             q.canBattle = d[limit - 3] != 0;

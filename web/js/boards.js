@@ -1,0 +1,157 @@
+/**
+ * Tabuleiros — layouts de campo desenhados no editor (`web/campo.html`).
+ *
+ * Um tabuleiro é um retângulo por ZONA FUNCIONAL do campo (as que o `ocgcore`
+ * realmente entende — nada inventado): 5 zonas de monstro, 5 de magia/
+ * armadilha, campo, deck, extra, cemitério e mão, por jogador. O `duel.html`
+ * lê o board ATIVO (se houver) e desenha o campo com essas posições em vez do
+ * layout padrão fixo.
+ *
+ * Persistência em dois níveis, mesmo padrão dos decks (ver `storage.js` /
+ * `projectdecks.js`):
+ *   - o CONTEÚDO dos tabuleiros é versionado no projeto (`boards/*.json`,
+ *     via `projectboards.js`) — não mora aqui;
+ *   - qual tabuleiro está ATIVO é preferência local de quem está testando,
+ *     então fica só no localStorage (`ygo:activeBoard`) — isso sim é este
+ *     módulo.
+ */
+
+const KEY_ACTIVE = 'ygo:activeBoard';
+
+/** Proporção padrão de carta (a mesma de `.zone`/`.pilezone` no duel.html). */
+export const CARD_ASPECT = 59 / 86;
+
+/** Resolução de referência: as coordenadas de um board vivem nesse espaço,
+ *  escalado pro tamanho real da tela na hora de desenhar. */
+export const CANVAS = { w: 1600, h: 900 };
+
+/**
+ * Bônus de Campo: os 6 campos básicos já na Lista 1 (`web/js/lista1.js`),
+ * cartas REAIS com script no ocgcore — nenhum efeito reimplementado aqui. Um
+ * tabuleiro pode fixar um deles como sempre ativo (estilo "campo de Floresta
+ * do Weevil": você entra no duelo e a magia de campo já está lá, valendo pra
+ * sempre nesse cenário). O `duel-server` só precisa COLOCAR a carta virada
+ * pra cima na zona de campo antes do duelo começar — o Lua dela faz o resto.
+ */
+export const FIELD_SPELLS = [
+  { code: 59197169, name: 'Yami' },
+  { code: 87430998, name: 'Forest' },
+  { code: 50913601, name: 'Mountain' },
+  { code: 86318356, name: 'Sogen' },
+  { code: 22702055, name: 'Umi' },
+  { code: 23424603, name: 'Wasteland' },
+];
+
+/**
+ * Todas as zonas funcionais válidas, na ordem em que aparecem no campo.
+ * `kind: 'slot'` = tamanho único (a largura; altura segue a proporção da
+ * carta). `kind: 'area'` = largura E altura livres (só a mão, por enquanto).
+ */
+export function zoneIds(player) {
+  const p = `p${player}`;
+  const ids = [];
+  for (let i = 0; i < 5; i++) ids.push({ id: `${p}:m${i}`, kind: 'slot', label: `M${i}` });
+  ids.push({ id: `${p}:f`, kind: 'slot', label: 'Campo' });
+  for (let i = 0; i < 5; i++) ids.push({ id: `${p}:s${i}`, kind: 'slot', label: `S${i}` });
+  ids.push({ id: `${p}:deck`, kind: 'slot', label: 'Deck' });
+  ids.push({ id: `${p}:extra`, kind: 'slot', label: 'Extra' });
+  ids.push({ id: `${p}:gy`, kind: 'slot', label: 'Cemitério' });
+  ids.push({ id: `${p}:hand`, kind: 'area', label: 'Mão' });
+  return ids;
+}
+
+/**
+ * Elementos de UI que não são zona do motor (LP e indicador de fase não têm
+ * localização nenhuma pro `ocgcore` — não existe carta que "more" ali), mas
+ * o usuário quer poder posicionar do mesmo jeito. Um item só, não é por
+ * jogador: LP dos dois lados e as fases moram na mesma barra.
+ */
+export function uiZoneIds() {
+  return [{ id: 'mid', kind: 'area', label: 'Fases / LP' }];
+}
+
+export function allZoneIds() {
+  return [...zoneIds(0), ...zoneIds(1), ...uiZoneIds()];
+}
+
+/** A zona é válida (existe no schema)? Usado pelo editor pra nunca deixar
+ *  gravar um `id` inventado. */
+export function isKnownZone(id) {
+  return allZoneIds().some((z) => z.id === id);
+}
+
+/**
+ * Agrupamentos prontos pra escala em bloco no editor ("mão", "campo" ou
+ * "tudo", separado ou junto — dos dois jogadores de uma vez, porque escalar
+ * só o seu lado sem o do oponente desalinharia o tabuleiro).
+ */
+export function zoneGroups() {
+  const all = allZoneIds().map((z) => z.id);
+  const hand = all.filter((id) => id.endsWith(':hand'));
+  const field = all.filter((id) => !id.endsWith(':hand'));   // inclui 'mid'
+  return { hand, field, all };
+}
+
+/**
+ * Layout padrão: reproduz a disposição atual do `duel.html` (flexbox) como
+ * ponto de partida — um board novo não nasce em branco.
+ *
+ * Espelha `fieldRows()`: por jogador, uma fileira com [Campo, M0..M4, GY] e
+ * outra com [S0..S4, Deck, Extra]; o jogador de baixo tem a fileira de
+ * monstro mais perto do centro (a de magia abaixo dela), o de cima é o
+ * espelho. A mão de cada um fica na borda correspondente (baixo/cima).
+ */
+export function defaultLayout(name = 'Padrão') {
+  const zones = {};
+  const SIZE = 92;
+  const GAP = 14;
+
+  // Distribui `count` slots de largura SIZE, centralizados, a partir de x0.
+  function row(ids, y, x0 = null) {
+    const w = ids.length * SIZE + (ids.length - 1) * GAP;
+    let x = x0 ?? (CANVAS.w - w) / 2;
+    for (const id of ids) { zones[id] = { x, y, size: SIZE }; x += SIZE + GAP; }
+  }
+
+  for (const player of [0, 1]) {
+    const p = `p${player}`;
+    // jogador 0 (você) embaixo: monstro perto do centro, magia abaixo dele.
+    // jogador 1 (oponente) em cima: espelhado.
+    const meio = CANVAS.h / 2;
+    const monstroY = player === 0 ? meio + 20 : meio - 20 - SIZE * (86 / 59);
+    const magiaY = player === 0
+      ? monstroY + SIZE * (86 / 59) + GAP
+      : monstroY - SIZE * (86 / 59) - GAP;
+    const handY = player === 0 ? CANVAS.h - 130 : 20;
+
+    row([`${p}:f`, `${p}:m0`, `${p}:m1`, `${p}:m2`, `${p}:m3`, `${p}:m4`, `${p}:gy`], monstroY);
+    row([`${p}:s0`, `${p}:s1`, `${p}:s2`, `${p}:s3`, `${p}:s4`, `${p}:deck`, `${p}:extra`], magiaY);
+    zones[`${p}:hand`] = { x: (CANVAS.w - 1000) / 2, y: handY, w: 1000, h: 110 };
+  }
+
+  // Fases/LP: na faixa estreita entre as duas fileiras de monstro (o "meio"
+  // de sempre no layout flexbox).
+  zones.mid = { x: (CANVAS.w - 600) / 2, y: CANVAS.h / 2 - 20, w: 600, h: 40 };
+
+  return { name, canvas: { ...CANVAS }, background: null, fieldSpell: null, zones };
+}
+
+// ---------------------------------------------------------------- ativo ----
+
+/** Nome do tabuleiro ativo, ou null (= layout padrão do `duel.html`). */
+export function getActiveBoard() {
+  try { return localStorage.getItem(KEY_ACTIVE) || null; }
+  catch { return null; }
+}
+
+/** Ativa (ou, com null, desativa — volta pro layout padrão). */
+export function setActiveBoard(name) {
+  try {
+    if (name) localStorage.setItem(KEY_ACTIVE, name);
+    else localStorage.removeItem(KEY_ACTIVE);
+    return true;
+  } catch (e) {
+    console.error('[boards] falha ao gravar tabuleiro ativo', e);
+    return false;
+  }
+}

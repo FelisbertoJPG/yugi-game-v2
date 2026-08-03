@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de Campo — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .topbar select, .topbar input[type=text] { min-width: 160px; }
+  .work { flex: 1; display: flex; min-height: 0; }
+
+  .canvas-wrap {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    background: var(--bg2); overflow: auto; padding: 16px;
+  }
+  #stage { position: relative; }
+  #canvas {
+    position: relative; background: #0a0f16; border: 2px solid var(--line);
+    background-image:
+      linear-gradient(#141c2c 1px, transparent 1px),
+      linear-gradient(90deg, #141c2c 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  #guides { position: absolute; inset: 0; pointer-events: none; }
+  .guide { position: absolute; background: var(--gold); opacity: .8; }
+  .guide-v { top: 0; bottom: 0; width: 1px; }
+  .guide-h { left: 0; right: 0; height: 1px; }
+
+  .ez-bg {
+    position: absolute; left: 0; top: 0; object-fit: cover; pointer-events: none;
+    display: none; z-index: 0;
+  }
+  .ez {
+    position: absolute; border: 1px dashed var(--line2); background: #12192880;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: move; user-select: none; box-sizing: border-box; z-index: 1;
+  }
+  .ez.sel { border: 2px solid var(--gold); box-shadow: 0 0 0 2px #e8c46a44; }
+  .ez-label { position: absolute; top: 2px; left: 3px; font-size: 9px; color: var(--dim); pointer-events: none; }
+  .ez-art { width: 100%; height: 100%; display: flex; flex-wrap: wrap; gap: 2px;
+    align-items: center; justify-content: center; overflow: hidden; font-size: 11px; color: var(--ink); }
+  .ez-art img.ez-card { height: 90%; aspect-ratio: 59/86; object-fit: cover; border-radius: 2px; }
+  .ez-handle {
+    position: absolute; right: -5px; bottom: -5px; width: 12px; height: 12px;
+    background: var(--gold); border: 1px solid #1a1408; border-radius: 2px; cursor: nwse-resize;
+  }
+
+  .sidebar {
+    width: 280px; flex: none; background: var(--panel); border-left: 2px solid var(--line);
+    display: flex; flex-direction: column; overflow-y: auto; padding: 12px; gap: 14px;
+  }
+  .sidebar h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
+  .sidebar .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sidebar .row button { flex: 1; font-size: 11px; padding: 6px 4px; }
+  .board-list { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+  .board-item {
+    display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: var(--panel2);
+    border: 1px solid var(--line); cursor: pointer; font-size: 11px;
+  }
+  .board-item:hover { border-color: var(--gold); }
+  .board-item.active { border-color: var(--green); color: var(--green); }
+  .board-item .del { margin-left: auto; color: var(--dim); }
+  .board-item .del:hover { color: var(--red); }
+  .active-pill { font-size: 10px; padding: 4px 8px; border: 1px solid var(--line); color: var(--dim); }
+  .active-pill.on { color: var(--green); border-color: var(--green); }
+  .hint { font-size: 10px; color: var(--dim); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <b style="color:var(--gold)">⚙ Editor de Campo</b>
+  <span style="flex:1"></span>
+  <label>preview com deck: <select id="deck-sel"></select></label>
+  <button id="btn-redraw">🔄 sortear de novo</button>
+  <span id="conn" style="font-size:11px; color:var(--dim)"></span>
+  <button id="btn-back">← Área de Teste</button>
+</div>
+
+<div class="work">
+  <div class="canvas-wrap">
+    <div id="stage">
+      <div id="canvas"></div>
+      <div id="guides"></div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div>
+      <h3>Tabuleiro</h3>
+      <input type="text" id="board-name" placeholder="nome do tabuleiro" style="width:100%">
+      <div class="row" style="margin-top:6px">
+        <button id="btn-new">＋ novo</button>
+        <button id="btn-save" class="btn-primary">salvar</button>
+        <button id="btn-reset">resetar</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Salvos no projeto</h3>
+      <div class="board-list" id="board-list"></div>
+    </div>
+
+    <div>
+      <h3>No Treino de duelo</h3>
+      <button id="btn-activate" class="active-pill" style="width:100%">usar layout padrão</button>
+    </div>
+
+    <div>
+      <h3>Seleção (<span id="sel-count">0</span>)</h3>
+      <div class="row">
+        <button id="sel-all">selecionar tudo (Ctrl+A)</button>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <button id="al-left" disabled>◧ esq.</button>
+        <button id="al-cx" disabled>⇔ centro X</button>
+        <button id="al-right" disabled>◨ dir.</button>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <button id="al-top" disabled>◫ topo</button>
+        <button id="al-cy" disabled>⇕ centro Y</button>
+        <button id="al-bottom" disabled>⊟ base</button>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <button id="al-size" disabled>= tamanho</button>
+        <button id="al-distx" disabled>⟷ distribuir</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Escala em bloco (%)</h3>
+      <div class="hint" style="margin-bottom:4px">
+        Encolhe/amplia o grupo inteiro em volta do próprio centro — não move
+        as zonas soltas, mantém a formação.
+      </div>
+      <div class="row" style="align-items:center; margin-bottom:4px">
+        <span style="width:44px; font-size:11px">mão</span>
+        <input type="number" id="pct-hand" value="100" min="10" max="300" style="width:60px">
+        <button id="apply-hand">aplicar</button>
+      </div>
+      <div class="row" style="align-items:center; margin-bottom:4px">
+        <span style="width:44px; font-size:11px">campo</span>
+        <input type="number" id="pct-field" value="100" min="10" max="300" style="width:60px">
+        <button id="apply-field">aplicar</button>
+      </div>
+      <div class="row" style="align-items:center">
+        <span style="width:44px; font-size:11px">tudo</span>
+        <input type="number" id="pct-all" value="100" min="10" max="300" style="width:60px">
+        <button id="apply-all">aplicar</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Imagem de fundo</h3>
+      <div class="row">
+        <input type="file" id="bg-file" accept="image/*" style="flex:1; font-size:10px">
+      </div>
+      <div class="row" style="margin-top:4px">
+        <button id="bg-clear">remover fundo</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Bônus de Campo</h3>
+      <div class="hint" style="margin-bottom:4px">
+        A magia de campo escolhida já entra ATIVA nesse tabuleiro, desde o
+        início do duelo — igual o campo de Floresta do Weevil no anime. É a
+        carta de verdade fazendo o efeito dela, não uma simulação.
+      </div>
+      <select id="field-spell" style="width:100%"></select>
+    </div>
+
+    <div>
+      <h3>Grade</h3>
+      <label style="font-size:11px"><input type="checkbox" id="grid-on"> grudar na grade (40un)</label>
+    </div>
+
+    <div class="hint">
+      Arraste pra mover, puxe a alça dourada pra redimensionar. Shift+clique
+      soma à seleção. Shift+arrasta = passo maior (10un). Bordas/centros e
+      tamanhos/espaçamentos parecidos grudam sozinhos.
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { listDecks } from '/web/js/storage.js';
+import {
+  CANVAS, defaultLayout, getActiveBoard, setActiveBoard, zoneGroups, allZoneIds, FIELD_SPELLS,
+} from '/web/js/boards.js';
+import {
+  listProjectBoards, saveProjectBoard, deleteProjectBoard, slugify,
+} from '/web/js/projectboards.js';
+import { createEditor } from '/web/js/campoeditor.js';
+
+const $ = (id) => document.getElementById(id);
+const SRV = 'http://localhost:8770';
+const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+
+let boards = [];          // [{path, board}] vindos do projeto
+let currentPath = null;   // arquivo atual sendo editado (null = ainda não salvo)
+
+$('canvas').style.width = `${CANVAS.w}px`;
+$('canvas').style.height = `${CANVAS.h}px`;
+
+const editor = createEditor({
+  canvasEl: $('canvas'),
+  guidesEl: $('guides'),
+  onChange: () => { /* estado já vive dentro do próprio editor.getBoard() */ },
+  onSelect: (ids) => {
+    $('sel-count').textContent = ids.length;
+    for (const btn of ['al-left', 'al-right', 'al-top', 'al-bottom', 'al-cx', 'al-cy', 'al-size'])
+      $(btn).disabled = ids.length < 2;
+    $('al-distx').disabled = ids.length < 3;
+  },
+});
+
+// -------------------------------------------------------- bonus de campo ---
+$('field-spell').replaceChildren(
+  new Option('— nenhum —', ''),
+  ...FIELD_SPELLS.map((f) => new Option(f.name, String(f.code))),
+);
+function syncFieldSpellSelect() {
+  $('field-spell').value = editor.getBoard()?.fieldSpell ? String(editor.getBoard().fieldSpell) : '';
+}
+$('field-spell').onchange = (e) => {
+  editor.setFieldSpell(e.target.value ? Number(e.target.value) : null);
+};
+
+editor.setBoard(defaultLayout('Novo tabuleiro'));
+$('board-name').value = editor.getBoard().name;
+syncFieldSpellSelect();
+
+// ---------------------------------------------------------------- decks ----
+function populateDecks() {
+  const decks = listDecks();
+  $('deck-sel').replaceChildren(...decks.map((d, i) => new Option(d.name, String(i))));
+  if (!decks.length) $('deck-sel').append(new Option('(nenhum deck salvo)', ''));
+}
+populateDecks();
+
+// ------------------------------------------------------------ preview viva --
+async function startPreview() {
+  const decks = listDecks();
+  const i = Number($('deck-sel').value);
+  const deck = decks[i];
+  if (!deck) { editor.setPreview(null); return; }
+  try {
+    const body = { deck: deck.main, npc: false };
+    if (deck.extra?.length) body.extra = deck.extra;
+    const r = await fetch(`${SRV}/start`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(String(r.status));
+    const j = await r.json();
+    $('conn').textContent = '● duel-server conectado';
+    $('conn').style.color = 'var(--green)';
+
+    let hand0 = [], hand1 = 0;
+    const deckCount = { 0: deck.main.length, 1: deck.main.length };
+    for (const ev of j.events || []) {
+      if (ev.type !== 'draw') continue;
+      if (ev.player === 0) hand0.push(...ev.cards.map((c) => c.code));
+      else hand1 += ev.cards.length;
+      deckCount[ev.player] = Math.max(0, deckCount[ev.player] - ev.cards.length);
+    }
+    const extraLen = deck.extra?.length ?? 0;
+    editor.setPreview({
+      hand: { 0: hand0.map(ART), 1: hand1 },
+      deck: deckCount,
+      extra: { 0: extraLen, 1: extraLen },
+      gy: { 0: 0, 1: 0 },
+    });
+  } catch {
+    $('conn').textContent = '○ sem duel-server (preview com placeholders)';
+    $('conn').style.color = 'var(--dim)';
+    editor.setPreview(null);
+  }
+}
+$('btn-redraw').onclick = startPreview;
+$('deck-sel').onchange = startPreview;
+startPreview();
+
+// ------------------------------------------------------- salvar/carregar ----
+async function refreshBoardList() {
+  boards = await listProjectBoards();
+  const active = getActiveBoard();
+  $('board-list').replaceChildren(...boards.map(({ path, board }) => {
+    const el = document.createElement('div');
+    el.className = 'board-item' + (path === active ? ' active' : '');
+    const name = document.createElement('span');
+    name.textContent = board.name || path;
+    name.style.flex = '1';
+    name.onclick = () => loadBoard(path, board);
+    const del = document.createElement('span');
+    del.className = 'del'; del.textContent = '✕'; del.title = 'excluir';
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Excluir "${board.name}"?`)) return;
+      await deleteProjectBoard(path);
+      if (active === path) setActiveBoard(null);
+      refreshBoardList();
+    };
+    el.append(name, del);
+    return el;
+  }));
+  updateActivePill();
+}
+
+/** Um board salvo antes de uma zona nova existir (ex.: `mid`, adicionado
+ *  depois) não tem esse `id` em `zones` — completa com a posição padrão em
+ *  vez de deixar a zona invisível/impossível de selecionar no editor. */
+function backfillMissingZones(board) {
+  const fallback = defaultLayout();
+  for (const { id } of allZoneIds()) {
+    if (!board.zones[id] && fallback.zones[id]) board.zones[id] = fallback.zones[id];
+  }
+  return board;
+}
+
+function loadBoard(path, board) {
+  currentPath = path;
+  editor.setBoard(backfillMissingZones(structuredClone(board)));
+  $('board-name').value = board.name;
+  syncFieldSpellSelect();
+  refreshBoardList();
+}
+
+function updateActivePill() {
+  const active = getActiveBoard();
+  const btn = $('btn-activate');
+  const mine = currentPath && currentPath === active;
+  btn.classList.toggle('on', !!active);
+  if (!active) btn.textContent = 'usar layout padrão (nenhum ativo)';
+  else if (mine) btn.textContent = '✓ este é o layout ativo';
+  else {
+    const b = boards.find((x) => x.path === active);
+    btn.textContent = `ativo: ${b?.board?.name ?? active} — clique pra usar este`;
+  }
+}
+
+$('btn-new').onclick = () => {
+  currentPath = null;
+  editor.setBoard(defaultLayout('Novo tabuleiro'));
+  $('board-name').value = editor.getBoard().name;
+  syncFieldSpellSelect();
+  updateActivePill();
+};
+
+$('btn-reset').onclick = () => {
+  const name = $('board-name').value || 'Tabuleiro';
+  const fieldSpell = editor.getBoard()?.fieldSpell ?? null;   // "resetar" é só layout — mantém o bônus escolhido
+  editor.setBoard(defaultLayout(name));
+  editor.setFieldSpell(fieldSpell);
+  syncFieldSpellSelect();
+};
+
+$('btn-save').onclick = async () => {
+  const board = editor.getBoard();
+  board.name = $('board-name').value.trim() || 'Tabuleiro sem nome';
+  const path = currentPath ?? slugify(board.name);
+  const r = await saveProjectBoard(path, board);
+  if (r.ok) {
+    currentPath = r.path;
+    await refreshBoardList();
+  } else if (r.downloaded) {
+    alert('Sem servidor de desenvolvimento no ar: o tabuleiro foi baixado — '
+        + 'coloque o arquivo em boards/ na mão.');
+  } else {
+    alert('Falha ao salvar: ' + (r.error ?? '?'));
+  }
+};
+
+$('btn-activate').onclick = () => {
+  if (!currentPath) { alert('Salve o tabuleiro antes de ativar.'); return; }
+  const active = getActiveBoard();
+  setActiveBoard(active === currentPath ? null : currentPath);
+  refreshBoardList();
+};
+
+refreshBoardList();
+
+// ------------------------------------------------------------ ferramentas --
+$('sel-all').onclick = editor.selectAll;
+$('al-left').onclick = editor.alignLeft;
+$('al-right').onclick = editor.alignRight;
+$('al-top').onclick = editor.alignTop;
+$('al-bottom').onclick = editor.alignBottom;
+$('al-cx').onclick = editor.centerX;
+$('al-cy').onclick = editor.centerY;
+$('al-size').onclick = editor.equalizeSize;
+$('al-distx').onclick = () => editor.distribute('x');
+$('grid-on').onchange = (e) => editor.setGrid(e.target.checked ? 40 : null);
+
+// ------------------------------------------------------ escala em bloco ----
+const GROUPS = zoneGroups();
+// "mão"/"campo": cada zona escala em torno do PRÓPRIO centro (scaleEach) —
+// as duas mãos ficam em pontas opostas do canvas, e um centro compartilhado
+// (scaleGroup) empurraria uma pra fora do canvas a qualquer % diferente de
+// 100. "tudo" é a exceção de propósito: aí sim faz sentido encolher/ampliar
+// o desenho inteiro em torno do próprio centro, como um zoom do layout.
+$('apply-hand').onclick = () => editor.scaleEach(GROUPS.hand, Number($('pct-hand').value) || 100);
+$('apply-field').onclick = () => editor.scaleEach(GROUPS.field, Number($('pct-field').value) || 100);
+$('apply-all').onclick = () => editor.scaleGroup(GROUPS.all, Number($('pct-all').value) || 100);
+
+// ------------------------------------------------------------ fundo (BG) --
+// Recomprime pra JPEG num teto de 1600px (mesmo espírito de customcards.js:
+// base64 cru de uma foto de celular estoura o boards/*.json à toa).
+async function readAndCompress(file) {
+  const bitmap = await createImageBitmap(file);
+  const maxW = CANVAS.w;
+  const scale = Math.min(1, maxW / bitmap.width);
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bitmap.width * scale);
+  cv.height = Math.round(bitmap.height * scale);
+  cv.getContext('2d').drawImage(bitmap, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/jpeg', 0.82);
+}
+$('bg-file').onchange = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    editor.setBackground(await readAndCompress(file));
+  } catch (err) {
+    alert('Não consegui ler essa imagem: ' + (err.message ?? err));
+  } finally {
+    e.target.value = '';
+  }
+};
+$('bg-clear').onclick = () => editor.setBackground(null);
+
+$('btn-back').onclick = () => (location.href = '/web/teste.html');
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') editor.clearSelection();
+});
+</script>
+</body>
+</html>

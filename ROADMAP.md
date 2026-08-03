@@ -270,6 +270,81 @@ tocar nesse ponto.
 
 ---
 
+## Aula: como se escreve uma carta de BUSCA
+
+> Aprendida comparando duas cartas oficiais que já estão no projeto. Se for
+> escrever Lua um dia, comece por aqui — busca é a família mais fácil.
+
+### As duas cartas são o MESMO arquivo
+
+Ponha lado a lado a Fusion Sage e a Reinforcement of the Army:
+
+```lua
+-- c26902560.lua (Fusion Sage)          -- c32807846.lua (ROTA)
+function s.initial_effect(c)            function s.initial_effect(c)
+  local e1=Effect.CreateEffect(c)         local e1=Effect.CreateEffect(c)
+  e1:SetCategory(CATEGORY_TOHAND          e1:SetCategory(CATEGORY_TOHAND
+                +CATEGORY_SEARCH)                       +CATEGORY_SEARCH)
+  e1:SetType(EFFECT_TYPE_ACTIVATE)        e1:SetType(EFFECT_TYPE_ACTIVATE)
+  e1:SetCode(EVENT_FREE_CHAIN)            e1:SetCode(EVENT_FREE_CHAIN)
+  e1:SetTarget(s.target)                  e1:SetTarget(s.target)
+  e1:SetOperation(s.activate)             e1:SetOperation(s.activate)
+  c:RegisterEffect(e1)                    c:RegisterEffect(e1)
+end                                     end
+```
+
+Idênticos. `target` e `activate` também. **A diferença inteira entre as duas
+cartas é uma linha:**
+
+```lua
+-- Fusion Sage: busca por NOME
+function s.filter(c)
+  return c:IsCode(CARD_POLYMERIZATION) and c:IsAbleToHand()
+end
+
+-- ROTA: busca por CARACTERÍSTICA
+function s.filter(c)
+  return c:IsLevelBelow(4) and c:IsRace(RACE_WARRIOR) and c:IsAbleToHand()
+end
+```
+
+### O que cada parte faz
+
+| Parte | Papel |
+|---|---|
+| `SetCategory(TOHAND+SEARCH)` | dica para IA e para o motor: "isto busca" |
+| `SetType(EFFECT_TYPE_ACTIVATE)` | é a ativação de uma magia (não ignição de monstro) |
+| `SetCode(EVENT_FREE_CHAIN)` | pode ser ativada a qualquer momento em que magia possa |
+| `s.target` com `chk==0` | **a condição**: só oferece a carta se houver alvo no deck |
+| `s.activate` | **o efeito**: escolhe e move para a mão |
+| `s.filter` | **o que muda de carta para carta** |
+
+O `chk==0` é a parte que importa entender: é ele que faz a carta aparecer (ou
+não) na lista de ativáveis. Sem alvo no deck, a magia nem é oferecida — e é por
+isso que o host nunca precisa validar nada.
+
+### Receita para uma busca customizada
+
+1. Copie `ygo-data/data/scripts/official/c32807846.lua`
+2. Renomeie para `c<seu id>.lua` (a faixa customizada começa em 900000000)
+3. Troque **só** o `s.filter`
+4. Deixe o resto intacto
+
+Predicados úteis no filtro: `IsCode(id)`, `IsRace(RACE_*)`, `IsAttribute(ATTRIBUTE_*)`,
+`IsLevelBelow(n)`, `IsType(TYPE_*)`, `IsSetCard(arquétipo)`. Combine com `and`.
+
+> **Antes de escrever, procure.** A ROTA parecia carta a criar e já existia
+> pronta, com script. São 12.702 scripts oficiais no repositório; `db.search()`
+> do `ygodb.js` acha por nome. Escrever Lua é o último recurso, não o primeiro.
+
+### Do lado do NPC
+
+Toda busca deve entrar no `BUSCA_ESPECIFICA` do `NpcBrain.cs`. É o conjunto que
+faz o NPC buscar **antes** de comprar — comprar primeiro pode trazer a carta que
+a busca traria, e aí a busca vira carta morta.
+
+---
+
 ## Etapa 4 — efeitos (o Lua de verdade)
 
 Só aqui entra o custo alto, e por isso é a última.

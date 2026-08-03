@@ -68,6 +68,16 @@
       <span>Navegador de cartas</span>
       <span class="why">banco completo</span>
     </button>
+    <button id="btn-campo">
+      <span class="k">6</span>
+      <span>Editor de Campo</span>
+      <span class="why">desenhar layouts de tabuleiro</span>
+    </button>
+    <button id="btn-banlist">
+      <span class="k">7</span>
+      <span>Banlist</span>
+      <span class="why">pontos e grupos de cópias por cima da Lista 1</span>
+    </button>
   </div>
 
   <button class="back" id="btn-home">← voltar para a home</button>
@@ -92,6 +102,8 @@ $('btn-booster').onclick = () => (location.href = '/web/booster.html');
 $('btn-npcs').onclick = () => (location.href = '/web/npcs.html');
 $('btn-train').onclick = () => (location.href = '/web/duel.html');
 $('btn-cards').onclick = () => (location.href = '/ygo-data/examples/web-demo.html');
+$('btn-campo').onclick = () => (location.href = '/web/campo.html');
+$('btn-banlist').onclick = () => (location.href = '/web/banlist.html');
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 document.addEventListener('keydown', (e) => {
   if (e.key === '1') $('btn-deck').click();
@@ -99,6 +111,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '3') $('btn-npcs').click();
   if (e.key === '4') $('btn-train').click();
   if (e.key === '5') $('btn-cards').click();
+  if (e.key === '6') $('btn-campo').click();
+  if (e.key === '7') $('btn-banlist').click();
   if (e.key === 'Escape') $('btn-home').click();
 });
 </script>

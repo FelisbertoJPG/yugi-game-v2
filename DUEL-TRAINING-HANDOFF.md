@@ -200,6 +200,8 @@ posição NÃO emite MSG_MOVE — sem tratar o 53, a carta vira no motor e não 
 Medido com `--probe-pos`.
 **MSG_DRAW (90):** `player(1) count(4)` + por carta `code(4) status(4)` (bit 0x80000000=oculta).
 **MSG_DAMAGE(91)/RECOVER(92)/PAY_LPCOST(100):** `player(1) amount(4)`. LP começa 8000.
+**MSG_TOSS_COIN (115):** `player(1) count(1) res(count bytes)` (1 = Cara / Heads, 0 = Coroa / Tails). Emitido em efeitos como o Mago do Tempo.
+**MSG_TOSS_DICE (116):** `player(1) count(1) res(count bytes)` (resultados de 1 a 6).
 NEW_TURN=40, NEW_PHASE=41 (int16), SUMMONING=60, SUMMONED=61.
 
 **Constantes (`.../YGODemo/script/constant.lua`):** LOCATION_MZONE=0x4, SZONE=0x8,

@@ -142,12 +142,19 @@ namespace DuelServer
             uint[] npcExtra = ReadDeck(body, "npcExtra");
             if (npcExtra.Length == 0) npcExtra = null;
 
+            // Bônus de Campo (editor de tabuleiro): código de UMA magia de campo
+            // já ativa desde o início do duelo. Opcional — sem tabuleiro
+            // customizado com isso setado, nada muda.
+            uint? fieldSpell = body.TryGetProperty("fieldSpell", out var fs) && fs.ValueKind == JsonValueKind.Number
+                ? (uint)fs.GetInt64()
+                : (uint?)null;
+
             Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
-                     $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed}");
+                     $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")}");
             lock (_lock)
             {
                 _duel?.Dispose();
-                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra);
+                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell);
                 return _duel.Advance();
             }
         }

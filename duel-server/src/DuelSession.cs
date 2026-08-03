@@ -33,7 +33,7 @@ namespace DuelServer
         public DatabaseManager Cards => _db;
 
         public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0,
-                           uint[] extra0 = null, uint[] extra1 = null)
+                           uint[] extra0 = null, uint[] extra1 = null, uint? fieldSpell = null)
         {
             _db = new DatabaseManager(streamingAssets);
             _sm = new ScriptManager(streamingAssets);
@@ -91,6 +91,13 @@ namespace DuelServer
             InjectExtra(team: 0, controller: 0, extra: extra0);
             InjectExtra(team: 1, controller: 1, extra: extra1);
 
+            // Bônus de Campo (editor de tabuleiro, web/campo.html): a magia de
+            // campo já entra ATIVA, sem ninguém precisar comprá-la nem gastar
+            // Main Phase pra ativar — igual "você caiu no campo de Floresta do
+            // Weevil". É a carta de VERDADE, com o Lua dela rodando normal; não
+            // reimplementamos efeito nenhum aqui.
+            if (fieldSpell.HasValue) InjectField(team: 0, controller: 0, code: fieldSpell.Value);
+
             YgoCoreAPI.OCG_StartDuel(_duel);
         }
 
@@ -129,6 +136,30 @@ namespace DuelServer
                 };
                 YgoCoreAPI.OCG_DuelNewCard(_duel, ref card);
             }
+        }
+
+        /// <summary>
+        /// Bota UMA magia de campo virada pra cima na zona de campo, antes do
+        /// duelo começar. Mesma zona que `InteractiveDuel`/`duel.html` já usam
+        /// pra "Campo" (SZONE seq=5 — ver o comentário em `CLAUDE.md` sobre por
+        /// que não é LOCATION_FZONE=0x100 nesta configuração). Só materializa a
+        /// carta; o registro do efeito contínuo dela (ex.: Forest dando +200 de
+        /// ATK a Inseto) é o `initial_effect` do PRÓPRIO script rodando — nada
+        /// escrito aqui sabe o que a carta faz.
+        /// </summary>
+        private void InjectField(byte team, byte controller, uint code)
+        {
+            var card = new OCG_NewCardInfo
+            {
+                team = team,
+                duelist = 0,
+                code = code,
+                con = controller,
+                loc = 0x8,  // LOCATION_SZONE
+                seq = 5,    // zona de campo, dentro do grupo de magia/armadilha
+                pos = 1     // POS_FACEUP_ATTACK — magia de campo não tem defesa
+            };
+            YgoCoreAPI.OCG_DuelNewCard(_duel, ref card);
         }
 
         private void InjectDeck(byte team, byte controller, uint[] deck)

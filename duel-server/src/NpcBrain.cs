@@ -28,6 +28,8 @@ namespace DuelServer
         const uint MONSTER_REBORN = 83764718;    // reanima o mais forte do GY
         const uint TRIBUTE_TO_DOOMED = 79759861;  // descarta 1 → destrói 1 monstro
         const uint BURST_STREAM = 17655904;       // destrói todos os monstros do oponente (exige Blue-Eyes)
+        const uint TIME_WIZARD = 71625222;        // moeda: cara varre o campo dele, coroa varre o meu
+        const uint TOON_WORLD = 15259703;         // habilita o pacote Toon inteiro
 
         const byte HAND = 0x2, MZONE = 0x4, GRAVE = 0x10;
         const uint TYPE_SPELL = 0x2, TYPE_TRAP = 0x4, TYPE_RITUAL = 0x80;
@@ -105,6 +107,31 @@ namespace DuelServer
             // vai para o cemitério e continua servindo de matéria. Buscar com ele
             // é ganho puro, e por isso entra na mesma lista da Sage.
             79109599,
+            // Reinforcement of the Army — busca 1 Guerreiro Nv≤4. Não nomeia uma
+            // carta como as outras duas, mas é a mesma jogada: tirar do deck em
+            // vez de comprar às cegas, e por isso vale a mesma prioridade.
+            32807846,
+            // Toon Table of Contents — busca 1 carta "Toon" (qual, o DecideSelect
+            // decide: Toon World primeiro, se ainda não estiver na mão/campo).
+            89997728,
+        };
+
+        /// <summary>
+        /// Toons "clássicos": não podem ser Invocados/Setados normalmente — só
+        /// entram por Invocação Especial DA MÃO (`spSummonable`) enquanto o NPC
+        /// controla Toon World, alguns pedindo tributo (o motor só oferece a
+        /// opção quando o custo é pagável; o alvo do tributo é o DecideSelect de
+        /// sempre, que já sacrifica os mais fracos). Os Toons "modernos" (Gemini
+        /// Elf, Cannon Soldier, Barrel Dragon etc.) NÃO entram aqui: eles são
+        /// Invocação Normal comum e a lógica de beatdown (`Monstros(q.summonable)`)
+        /// já os pega de graça, sem precisar saber que são Toon.
+        /// </summary>
+        static readonly HashSet<uint> TOON_ESPECIAIS = new()
+        {
+            65458948, // Toon Mermaid — sem tributo
+            91842653, // Toon Summoned Skull — tributa 1
+            90960358, // Toon Dark Magician Girl — tributa 1
+            53183600, // Blue-Eyes Toon Dragon — tributa 2
         };
 
         readonly DatabaseManager _cards;
@@ -231,6 +258,13 @@ namespace DuelServer
             if (Ativavel(q, POT_OF_GREED))
                 return new Play("activate", IdxAtivavel(q, POT_OF_GREED), "Pote da Ganancia primeiro");
 
+            // 0.2 Toon World o quanto antes: sem ele os Toons "clássicos" da mão
+            // não têm como entrar (spsummon) e os "modernos" em campo não atacam
+            // direto. É a carta que faz o resto do pacote Toon funcionar.
+            if (Ativavel(q, TOON_WORLD))
+                return new Play("activate", IdxAtivavel(q, TOON_WORLD),
+                    "Toon World o quanto antes — habilita invocacao especial e ataque direto dos Toons");
+
             int ameaca = MaiorAtkEmCampo(foe);
             int meuMelhor = MaiorAtkEmCampo(me);
             bool oponenteTemMonstro = _fieldOf(foe).Any(c => _cards.Stats(c).IsMonster);
@@ -246,6 +280,15 @@ namespace DuelServer
             var trap = q.settableST.FirstOrDefault(a => EhArmadilha(a.code));
             if (trap.code != 0 && _stCountOf(me) <= 3)
                 return new Play("setspell", trap.index, $"seta armadilha {trap.code} (mantem zona p/ magias)");
+
+            // Diagnóstico: "o NPC parou de setar armadilha" foi relatado em duelo
+            // e a regra acima está certa (há teste). Quando ela NÃO dispara, o
+            // motivo é sempre um destes dois — e sem registrar isso a próxima
+            // investigação recomeça do zero.
+            if (q.settableST.Count > 0 || trap.code != 0)
+                _log($"nao setou armadilha: setaveis={q.settableST.Count} " +
+                     $"armadilha_entre_elas={(trap.code != 0 ? trap.code.ToString() : "nenhuma")} " +
+                     $"zonas_ocupadas={_stCountOf(me)} (limite: <=3)");
 
             // 3. Tribute to The Doomed sem o Reborn — descarta um dragão e estoura o mais forte.
             if (Ativavel(q, TRIBUTE_TO_DOOMED) && ameacaReal)
@@ -289,6 +332,49 @@ namespace DuelServer
             if (burn.code != 0)
                 return new Play("activate", burn.index, $"burn: dano fixo no oponente ({burn.code})");
 
+            // 5.6 MAGO DO TEMPO — a moeda. Cara destrói os monstros DELE, coroa
+            //     destrói os MEUS e ainda tira LP. É jogada de quem está atrás:
+            //     quando o campo já está bom, arriscar só pode piorar.
+            if (Ativavel(q, TIME_WIZARD))
+            {
+                var (arrisca, porque) = VaiArriscarAMoeda(q, me, foe, ameaca, meuMelhor);
+                if (arrisca)
+                    return new Play("activate", IdxAtivavel(q, TIME_WIZARD),
+                        $"Mago do Tempo: {porque}");
+                _log($"Mago do Tempo: NAO arrisca — {porque}");
+            }
+
+            // 5.7 PÔR O MAGO DO TEMPO EM CAMPO — com a face para cima.
+            //
+            // Sem isto a regra da moeda (5.6) nunca tinha chance: estar atrás é
+            // exatamente a condição que faz a regra de defesa SETAR o monstro
+            // mais fraco, e o Mago (500/400) é sempre o mais fraco. Setado, ele
+            // fica virado — e carta virada não ativa efeito. Observado em duelo:
+            // três turnos seguidos setando o Mago, que morria sem nunca jogar a
+            // moeda.
+            //
+            // Invocar aqui é `summon` (ataque, face para cima) de propósito. Ele
+            // morre fácil, mas o efeito é ignição de Main Phase: na decisão
+            // seguinte a regra 5.6 já o encontra ativável.
+            var mago = q.summonable.FirstOrDefault(a => a.code == TIME_WIZARD);
+            if (mago.code == TIME_WIZARD && ameacaReal
+                && AtivavelSe(q, FUSAO.Contains).code == 0)
+                return new Play("summon", mago.index,
+                    "Mago do Tempo em campo: a moeda so' existe com ele com a face para cima");
+
+            // 5.8 TOON: Invocação Especial de um Toon "clássico" da mão. Só
+            //     aparece em `spSummonable` quando o motor já confirma Toon World
+            //     em campo (e tributo pagável, se pedir) — não há condição extra
+            //     a checar aqui, o mesmo padrão da Sincro/Xyz (ver
+            //     `ocgcore-protocolo`). Prioriza o de maior ATK disponível.
+            var toonSp = Monstros(q.spSummonable)
+                .Where(c => TOON_ESPECIAIS.Contains(c.Act.code))
+                .OrderByDescending(c => c.St.AtkValue)
+                .FirstOrDefault();
+            if (toonSp.Ok)
+                return new Play("spsummon", toonSp.Act.index,
+                    $"Toon: invocacao especial de {toonSp.Act.code} (ATK {toonSp.St.AtkValue}) — Toon World ja habilita");
+
             // 6. Beatdown: monstros grandes (sacrificando os fracos) ou beater Nv4.
             //    O filtro `TributoCompensa` impede o NPC de tributar um corpo
             //    melhor do que o que vai entrar. Vale para as DUAS listas: o Set
@@ -297,7 +383,10 @@ namespace DuelServer
             //    fusão de 3200 para SETAR um Red-Eyes — o mesmo erro pela porta
             //    de trás.
             var invocaveis = Monstros(q.summonable);
-            var setaveis = Monstros(q.settable);
+            // O Mago do Tempo NUNCA entra como parede: setá-lo o vira, e virado
+            // ele perde a única coisa que vale nele (a moeda). Um 500/400 também
+            // não segura nada. Fora da lista de setáveis, portanto.
+            var setaveis = Monstros(q.settable).Where(c => c.Act.code != TIME_WIZARD).ToList();
             var altasQueCompensam = invocaveis
                 .Where(c => c.St.Level >= 5 && TributoCompensa(me, c.St, setando: false))
                 .ToList();
@@ -355,6 +444,14 @@ namespace DuelServer
                 }
                 return picks;
             }
+
+            // Busca (ex.: Toon Table of Contents): se Toon World está entre as
+            // opções e o NPC ainda não o tem nem na mão nem em campo, ele vem
+            // em primeiro — sem ele nenhum outro Toon funciona por completo.
+            // `release==0` aqui de propósito: nunca colide com o tributo acima.
+            var toonWorld = q.choices.FirstOrDefault(c => c.code == TOON_WORLD);
+            if (toonWorld.code == TOON_WORLD && !NaMao(me, TOON_WORLD) && !_faceUpStOf(me).Contains(TOON_WORLD))
+                return new List<int> { toonWorld.index };
 
             byte loc = q.choices[0].location;
             var ordem = loc == HAND
@@ -606,6 +703,57 @@ namespace DuelServer
             }
             return outp;
         }
+
+        /// <summary>
+        /// Vale arriscar a moeda do Mago do Tempo?
+        ///
+        /// O efeito é simétrico e cruel: cara varre o campo do oponente, coroa
+        /// varre o MEU e ainda cobra metade do ATK perdido em LP. Ou seja, o
+        /// valor da jogada depende inteiramente de quem tem mais a perder.
+        ///
+        /// Três recusas, em ordem — cada uma vem de um jeito de a aposta ser
+        /// ruim mesmo quando "dá para ativar":
+        ///
+        ///   1. **Tenho fusão pronta.** Se a Polymerization está ativável, o
+        ///      motor está dizendo que há material suficiente na mão/campo. Pôr
+        ///      um corpo grande é melhor do que jogar moeda — e o material que a
+        ///      coroa destruiria era justamente o da fusão.
+        ///   2. **O oponente não tem monstro.** Cara não destrói nada, coroa
+        ///      destrói tudo que é meu. Aposta sem prêmio.
+        ///   3. **Meu campo já dá conta.** Se o meu melhor monstro alcança a
+        ///      ameaça, estou ganhando a troca sem moeda nenhuma.
+        ///
+        /// Sobra o caso em que a regra existe: estou atrás, o oponente tem corpo
+        /// que eu não supero, e a moeda é a única saída.
+        /// </summary>
+        (bool arrisca, string porque) VaiArriscarAMoeda(
+            InteractiveDuel.Question q, int me, int foe, int ameaca, int meuMelhor)
+        {
+            if (AtivavelSe(q, FUSAO.Contains).code != 0)
+                return (false, "tenho fusao pronta — material vale mais que a moeda");
+
+            if (!_fieldPosOf(foe).Any(m => _cards.Stats(m.code).IsMonster))
+                return (false, "o oponente nao tem monstro — cara nao destroi nada");
+
+            // "Campo bom" também é ter algo grande, mesmo que a ameaça seja maior:
+            // o monstro grande costuma ser o que a coroa levaria embora.
+            int meuMaiorCorpo = _fieldPosOf(me)
+                .Where(m => _cards.Stats(m.code).IsMonster)
+                .Select(m => _cards.Stats(m.code).AtkValue)
+                .DefaultIfEmpty(-1).Max();
+
+            if (meuMelhor >= ameaca && meuMelhor >= 0)
+                return (false, $"meu campo ({meuMelhor}) ja alcanca a ameaca ({ameaca})");
+
+            if (meuMaiorCorpo >= CORPO_GRANDE)
+                return (false, $"tenho corpo grande em campo ({meuMaiorCorpo}) — nao arrisco perder");
+
+            return (true, $"estou atras ({meuMelhor} contra {ameaca}) — a moeda e' a saida");
+        }
+
+        /// <summary>A partir daqui um monstro é "grande" demais para se arriscar
+        /// a perder numa moeda. 2000 é a faixa dos Nv6/Nv7 e das fusões básicas.</summary>
+        const int CORPO_GRANDE = 2000;
 
         /// <summary>
         /// Quantos tributos um monstro deste nível exige (regra oficial):

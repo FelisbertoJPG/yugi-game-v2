@@ -23,6 +23,9 @@ export const LISTA1_SPELLTRAP = [
   66788016, // Fissure
   79759861, // Tribute to The Doomed
   72892473, // Card Destruction
+  95281259,  // The Warrior Returning Alive
+  70828912, // Premature Burial
+  13048472, // Pre-Preparation of Rites
 
   // --- armadilhas ---
   4206964,  // Trap Hole
@@ -72,6 +75,7 @@ export const LISTA1_SPELLTRAP = [
   // aqui. Ver `inLista1` no fim deste arquivo.
   24094653, // Polymerization
   26902560, // Fusion Sage — busca 1 Polymerization no deck (consistência da fusão)
+  32807846, // Reinforcement of the Army — busca 1 Guerreiro Nv≤4 do deck
 
   // Substitutos de matéria. Não são vanilla (têm efeito), mas o efeito já vem
   // pronto do ocgcore: cada um declara `EFFECT_FUSION_SUBSTITUTE` no PRÓPRIO
@@ -79,6 +83,51 @@ export const LISTA1_SPELLTRAP = [
   // mão, do campo E do cemitério.
   79109599, // King of the Swamp — substituto + descarta para buscar Polymerization
   30451366, // Mystical Sheep #1 — só substituto
+  71625222, // Time Wizard (Mago do Tempo) — sorteio de moeda: destrói monstros do oponente ou do próprio campo
+  50259460, // Versago the Destroyer — só substituto
+  53493204, // Goddess with the Third Eye — só substituto
+  99426834, // Beastking of the Swamp — só substituto
+  31786629, // thunder dragon
+
+  // --- Sincro / Xyz (teste) ---
+  // Nem Sincro nem Xyz são Normal/Fusion, então `inLista1` não pega sozinho —
+  // precisam entrar aqui explicitamente, um por um.
+  44508094, // Stardust Dragon — Sincro Nv8 (Tuner + não-Tuner somando 8)
+  // Rose, Warrior of Revenge — Tuner Nv4 (material do Stardust, com Battle Ox).
+  // NÃO é Debris Dragon (a escolha "óbvia", por ser Dragão como o Stardust):
+  // ele registra `EFFECT_CANNOT_BE_SYNCHRO_MATERIAL` no próprio script
+  // (c14943837.lua) e barra a invocação mesmo com material de sobra — medido
+  // empiricamente no `--test-synchro`. Rose não tem essa restrição.
+  1557341,  // Rose, Warrior of Revenge
+  84013237, // Number 39: Utopia — Xyz Rank 4 (2 materiais Nv4, ex.: 2x Battle Ox)
+
+  // --- Toon (o deck do Pegasus) ---
+  // Toon World habilita os dois lados do pacote: os Toons "clássicos" abaixo
+  // só entram por Invocação-Especial (spsummon) enquanto ele está em campo, e
+  // os "modernos" (Normais/tributo comuns) ganham ataque direto e são
+  // destruídos junto se ele sair. Tudo script real do ocgcore — ver
+  // `--test-toon` e `duel-server/src/NpcBrain.cs`.
+  15259703, // Toon World (Magia Contínua) — ativa pagando 1000 LP
+  89997728, // Toon Table of Contents — busca 1 carta "Toon" do deck (Toon World primeiro)
+  // Clássicos: "Não pode ser Invocado/Set normalmente. Invoca-se por Invocação
+  // Especial da MÃO enquanto controla Toon World" (alguns pedem tributo).
+  65458948, // Toon Mermaid (Nv4 1400/1500) — sem tributo
+  91842653, // Toon Summoned Skull (Nv6 2500/1200) — tributa 1 monstro
+  90960358, // Toon Dark Magician Girl (Nv6 2000/1700) — tributa 1 monstro
+  53183600, // Blue-Eyes Toon Dragon (Nv8 3000/2500) — tributa 2 monstros
+  // Modernos: Invocação Normal comum (com tributo se o nível pedir); o bônus
+  // Toon (ataque direto, destruído se Toon World sair) vem de graça no Lua.
+  42386471, // Toon Gemini Elf (Nv4 1900/900)
+  79875176, // Toon Cannon Soldier (Nv4 1400/1300)
+  16392422, // Toon Masked Sorcerer (Nv4 900/1400)
+  15270885, // Toon Goblin Attack Force (Nv4 2300/0)
+  83629030, // Toon Cyber Dragon (Nv5 2100/1600) — 1 tributo
+  21296502, // Toon Dark Magician (Nv7 2500/2100) — 1 tributo
+  31733941, // Red-Eyes Toon Dragon (Nv7 2400/2000) — 1 tributo
+  28112535, // Toon Barrel Dragon (Nv7 2600/2200) — 1 tributo
+  61190918, // Toon Buster Blader (Nv7 2600/2300) — 1 tributo
+  7171149,  // Toon Ancient Gear Golem (Nv8 3000/3000) — 2 tributos
+
 
   // --- rituais SEM efeito (vanilla) ---
   5405694,  // Black Luster Soldier (Nv 8, 3000/2500)

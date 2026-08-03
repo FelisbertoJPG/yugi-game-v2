@@ -138,6 +138,17 @@
     font-size: 9px; line-height: 1; padding: 1px 4px; border-radius: 2px;
     background: #04121fcc; color: var(--green); font-weight: bold;
   }
+
+  /* selos da banlist (web/banlist.html) — mesma linguagem visual de lá.
+     `top` vem inline (builder.js empurra pra 2ª linha se CST/raridade já
+     ocuparem o canto), aqui só a cor/posição horizontal de cada tipo. */
+  .thumb .bl-badge {
+    position: absolute; z-index: 2; font-size: 8px; line-height: 1;
+    padding: 1px 3px; border-radius: 2px; font-weight: bold; background: #04121fd0;
+  }
+  .thumb .bl-badge.bl-limit  { left: 2px; color: var(--red); }
+  .thumb .bl-badge.bl-group  { left: 2px; color: var(--gold); }
+  .thumb .bl-badge.bl-points { right: 2px; color: var(--blue); }
   .thumb.full .avail { color: var(--dim); }
 
   /* ---------- modal de importar carta ---------- */
@@ -213,6 +224,10 @@
     prêmio:
     <input type="number" id="npc-reward" min="0" step="50" placeholder="100"
            style="width:74px; font-size:11px"> DP
+  </label>
+  <label style="display:flex; gap:5px; align-items:center"
+         title="adversário não precisa respeitar a banlist (pontos/grupos) — só ele, o jogador nunca pode ignorar">
+    <input type="checkbox" id="npc-ignore-banlist"> ignorar banlist
   </label>
   <button id="npc-copy" title="salvar este deck nos seus decks (ex.: joey 1)">salvar p/ mim</button>
   <button id="npc-back">← NPCs</button>
@@ -297,6 +312,13 @@
         <option value="SR">SR</option>
         <option value="R">R</option>
         <option value="N">N</option>
+      </select>
+      <select id="f-banlist" title="filtrar por regra de banlist (web/banlist.html)">
+        <option value="">banlist: todas</option>
+        <option value="limit1">Limitada (1)</option>
+        <option value="limit2">Semilimitada (2)</option>
+        <option value="points">com pontos</option>
+        <option value="group">lista compartilhada</option>
       </select>
       <select id="f-sort" title="ordenar as cartas">
         <option value="">ordem: padrão</option>

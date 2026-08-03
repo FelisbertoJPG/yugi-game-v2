@@ -46,8 +46,8 @@ namespace DuelServer
             using var duel = new InteractiveDuel(sa, deck.ToArray(), 31337UL, 0x1000000UL, npc: false);
             var r = duel.Advance();
 
-            bool invocou = false, equipou = false, atacou = false;
-            int danoDireto = 0;
+            bool invocou = false, equipou = false, atacou = false, pediuAlvo = false;
+            int danoDireto = 0, atkAtual = 0, atkBase = 0;
 
             for (int guard = 0; guard < 120 && !r.ended && danoDireto == 0; guard++)
             {
@@ -66,10 +66,18 @@ namespace DuelServer
                         int delta = Convert.ToInt32(t.GetProperty("delta")?.GetValue(e) ?? 0);
                         if (pl == 1 && delta < 0) danoDireto = -delta;
                     }
+                    if (kind == "stats")
+                    {
+                        atkAtual = Convert.ToInt32(t.GetProperty("atk")?.GetValue(e) ?? 0);
+                        atkBase = Convert.ToInt32(t.GetProperty("baseAtk")?.GetValue(e) ?? 0);
+                    }
                 }
 
                 var q = r.question;
                 if (q == null) break;
+
+                if (q.kind == "selectcard" && q.player == 0)
+                    pediuAlvo = q.choices.Any(c => c.code == CELTIC && c.location == 0x4);
 
                 if (q.kind == "idle" && q.player == 0)
                 {
@@ -97,7 +105,10 @@ namespace DuelServer
             }
 
             Check("o Celtic Guardian foi invocado", invocou);
+            Check("o motor pediu que o jogador escolhesse o alvo do equipamento", pediuAlvo);
             Check("a Legendary Sword foi equipada (entrou em campo)", equipou);
+            Check("o ATK atual do Celtic foi consultado (1400 + 300)", atkAtual == 1700 && atkBase == 1400,
+                  $"(atual={atkAtual}, base={atkBase})");
             Check("houve ataque direto", atacou);
             Check("o dano foi 1700 (1400 + 300 do equipamento)", danoDireto == 1700,
                   $"(veio {danoDireto})");

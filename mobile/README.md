@@ -63,8 +63,46 @@ netsh http add urlacl url=http://+:8770/ user=%USERNAME%
 netsh http add urlacl url=http://+:8080/ user=%USERNAME%
 ```
 
+Se mesmo assim der erro 1332 de novo ("Falha ao criar SDDL"), a resolução de
+nome do `netsh` pode estar quebrando — pula ela de vez com o SDDL pronto
+(troque o SID pelo seu, `([System.Security.Principal.WindowsIdentity]::
+GetCurrent()).User.Value`; **as aspas em volta do `sddl=...` são
+obrigatórias no PowerShell**, senão ele tenta interpretar os parênteses):
+
+```powershell
+netsh http add urlacl url=http://+:8770/ "sddl=D:(A;;GX;;;SEU-SID-AQUI)"
+netsh http add urlacl url=http://+:8080/ "sddl=D:(A;;GX;;;SEU-SID-AQUI)"
+```
+
 Sem `--lan`, nada muda: o jogo no PC continua exatamente como sempre foi
 (só localhost).
+
+### Firewall do Windows
+
+Além da reserva de URL acima, o **Firewall do Windows** também precisa
+liberar a entrada nas portas — sem isso o servidor sobe normalmente, mas
+ninguém de fora alcança (timeout, não "recusado"). Num terminal
+administrador:
+
+```powershell
+New-NetFirewallRule -DisplayName "Duel Academy (8770 RPC)" -Direction Inbound -Protocol TCP -LocalPort 8770 -Profile Domain,Private,Public -Action Allow
+New-NetFirewallRule -DisplayName "Duel Academy (8080 front)" -Direction Inbound -Protocol TCP -LocalPort 8080 -Profile Domain,Private,Public -Action Allow
+```
+
+Testado restringir a regra por programa (`-Program "caminho\do\duel-server.exe"`,
+mais preciso — só aquele executável recebe conexão) mas o Firewall do
+Windows seguiu **dropando** o tráfego mesmo com o caminho batendo
+exatamente (visto no log, `netsh advfirewall set allprofiles logging
+droppedconnections enable` + ler
+`C:\Windows\System32\LogFiles\Firewall\pfirewall.log`) — parece uma
+limitação/bug do motor de correspondência por programa. Regra só por porta,
+sem `-Program`, é o que funciona de verdade hoje.
+
+Se tiver **outro firewall/antivírus** instalado (Kaspersky, Norton, etc.),
+ele pode ter o PRÓPRIO firewall, separado do Windows — `New-NetFirewallRule`
+não mexe nele. Sintoma: tudo acima parece certo, mas a conexão do celular
+ainda não chega. Precisa liberar a exceção dentro das configurações
+daquele programa também (ou desativar o firewall dele).
 
 ### Leitura sim, escrita não
 

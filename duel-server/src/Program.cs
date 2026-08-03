@@ -96,9 +96,10 @@ namespace DuelServer
             // fino deste mesmo servidor) conseguir falar com /start,/respond e
             // ler /__decks,/__store (GET — StaticServer.cs continua recusando
             // POST fora de localhost, entao gravar continua so' no PC). Escutar
-            // em "+" no Windows pode pedir reserva de URL sem admin: `netsh http
-            // add urlacl url=http://+:8770/ user=%USERNAME%` (mensagem já
-            // aparece sozinha se a porta recusar por falta de permissao).
+            // em "+" no Windows pode exigir uma reserva de URL feita UMA vez,
+            // como administrador (`netsh http add urlacl ...` — a mensagem de
+            // erro completa, com a sintaxe certa pro PowerShell, já aparece
+            // sozinha se a porta recusar por falta de permissao).
             if (app)
             {
                 bool lan = Array.IndexOf(args, "--lan") >= 0;

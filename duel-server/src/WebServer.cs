@@ -43,7 +43,9 @@ namespace DuelServer
             {
                 Log.Err($"Não consegui abrir {url}{(extraUrl != null ? " / " + extraUrl : "")}: {e.Message}");
                 Log.Err("Porta ocupada? Feche outra instância (duel-academy-stop.exe) e tente de novo.");
-                Log.Err($"Se for acesso negado: netsh http add urlacl url={url} user=%USERNAME%");
+                Log.Err("Se for acesso negado (comum com --lan): reserve a URL, como administrador.");
+                Log.Err($"  PowerShell: netsh http add urlacl url={url} user=$env:USERNAME");
+                Log.Err($"  cmd.exe:    netsh http add urlacl url={url} user=%USERNAME%");
                 return;
             }
 

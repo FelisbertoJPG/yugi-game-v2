@@ -39,9 +39,26 @@ Esse é o endereço que você digita nas **Configurações** do app.
 
 **Só na primeira vez**, o Windows pode recusar escutar em todas as
 interfaces sem uma reserva de URL (erro "Acesso negado"). Resolve com UM
-comando, num terminal **como administrador**:
+comando, num terminal **como administrador**.
 
+No **PowerShell** (padrão do Windows 10/11 — `%USERNAME%` é sintaxe de
+`cmd.exe` e não expande aqui; usar isso dá "Falha ao criar SDDL. Erro: 1332"):
+
+```powershell
+netsh http add urlacl url=http://+:8770/ user=$env:USERNAME
+netsh http add urlacl url=http://+:8080/ user=$env:USERNAME
 ```
+
+Se mesmo assim der erro de SDDL, tenta com o nome qualificado pela máquina:
+
+```powershell
+netsh http add urlacl url=http://+:8770/ user="$env:COMPUTERNAME\$env:USERNAME"
+netsh http add urlacl url=http://+:8080/ user="$env:COMPUTERNAME\$env:USERNAME"
+```
+
+No **cmd.exe** (`%USERNAME%` funciona normalmente):
+
+```bat
 netsh http add urlacl url=http://+:8770/ user=%USERNAME%
 netsh http add urlacl url=http://+:8080/ user=%USERNAME%
 ```

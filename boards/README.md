@@ -61,6 +61,15 @@ ou o `duel-academy.exe`): salvar escreve o arquivo aqui direto, pelo endpoint
 dentro desta pasta. Sem servidor no ar, o editor baixa o arquivo para você
 colocar aqui na mão.
 
+## Duplicar
+
+O ⧉ ao lado de cada tabuleiro na lista do editor grava uma cópia num arquivo
+**novo** (`oficial.json` → `oficial_copia.json`, depois `oficial_copia_2.json`…)
+e já passa a editar a cópia. O original não é tocado — é para isso que serve:
+testar um layout à vontade sem estragar o que já está bom. O nome livre é
+escolhido comparando o **arquivo**, não o nome, porque é o arquivo que seria
+sobrescrito.
+
 ## Qual tabuleiro está "ativo"
 
 Isso **não** é conteúdo do jogo — é preferência de quem está testando, então

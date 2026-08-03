@@ -60,7 +60,9 @@
   }
   .board-item:hover { border-color: var(--gold); }
   .board-item.active { border-color: var(--green); color: var(--green); }
-  .board-item .del { margin-left: auto; color: var(--dim); }
+  .board-item .dup { margin-left: auto; color: var(--dim); }
+  .board-item .dup:hover { color: var(--gold); }
+  .board-item .del { color: var(--dim); }
   .board-item .del:hover { color: var(--red); }
   .active-pill { font-size: 10px; padding: 4px 8px; border: 1px solid var(--line); color: var(--dim); }
   .active-pill.on { color: var(--green); border-color: var(--green); }
@@ -185,7 +187,7 @@
 </div>
 
 <script type="module">
-import { listDecks } from '/web/js/storage.js';
+import { listDecks, hydrateDecks } from '/web/js/storage.js';
 import {
   CANVAS, defaultLayout, getActiveBoard, setActiveBoard, zoneGroups, allZoneIds, FIELD_SPELLS,
 } from '/web/js/boards.js';
@@ -238,6 +240,7 @@ function populateDecks() {
   $('deck-sel').replaceChildren(...decks.map((d, i) => new Option(d.name, String(i))));
   if (!decks.length) $('deck-sel').append(new Option('(nenhum deck salvo)', ''));
 }
+await hydrateDecks();   // o preview usa deck de verdade: leia decks/player/ antes
 populateDecks();
 
 // ------------------------------------------------------------ preview viva --
@@ -293,6 +296,12 @@ async function refreshBoardList() {
     name.textContent = board.name || path;
     name.style.flex = '1';
     name.onclick = () => loadBoard(path, board);
+    const dup = document.createElement('span');
+    dup.className = 'dup'; dup.textContent = '⧉'; dup.title = 'duplicar';
+    dup.onclick = (e) => {
+      e.stopPropagation();
+      duplicateBoard(board);
+    };
     const del = document.createElement('span');
     del.className = 'del'; del.textContent = '✕'; del.title = 'excluir';
     del.onclick = async (e) => {
@@ -302,7 +311,7 @@ async function refreshBoardList() {
       if (active === path) setActiveBoard(null);
       refreshBoardList();
     };
-    el.append(name, del);
+    el.append(name, dup, del);
     return el;
   }));
   updateActivePill();
@@ -325,6 +334,34 @@ function loadBoard(path, board) {
   $('board-name').value = board.name;
   syncFieldSpellSelect();
   refreshBoardList();
+}
+
+/** Nome e arquivo livres para a cópia de um tabuleiro: "Oficial" vira
+ *  "Oficial (cópia)", depois "Oficial (cópia 2)"… Compara pelo ARQUIVO, não
+ *  pelo nome — é o arquivo que seria sobrescrito, e dois nomes diferentes
+ *  podem virar o mesmo slug. */
+function freeCopy(name) {
+  const taken = new Set(boards.map((b) => b.path));
+  let candidate = `${name} (cópia)`;
+  for (let n = 2; taken.has(slugify(candidate)); n++) candidate = `${name} (cópia ${n})`;
+  return { name: candidate, path: slugify(candidate) };
+}
+
+/** Copia um tabuleiro salvo para um arquivo NOVO e passa a editar a cópia —
+ *  o original fica intocado, que é justamente pra isso que serve: mexer à
+ *  vontade sem estragar o que já está bom. */
+async function duplicateBoard(board) {
+  const copy = structuredClone(board);
+  const { name, path } = freeCopy(board.name || 'Tabuleiro');
+  copy.name = name;
+  const r = await saveProjectBoard(path, copy);
+  if (r.downloaded) {
+    alert('Sem servidor de desenvolvimento no ar: a cópia foi baixada — '
+        + 'coloque o arquivo em boards/ na mão.');
+    return;
+  }
+  if (!r.ok) { alert('Falha ao duplicar: ' + (r.error ?? '?')); return; }
+  loadBoard(r.path, copy);
 }
 
 function updateActivePill() {

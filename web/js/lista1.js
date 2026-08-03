@@ -35,18 +35,36 @@ export const LISTA1_SPELLTRAP = [
   56120475, // Sakuretsu Armor
   97077563, // Call of the Haunted — revive 1 monstro do cemitério (Armadilha Contínua)
 
-  // --- equipamentos por tipo (pouco ATK, bem básicos) ---
+  // --- equipamentos clássicos: +300 ATK/DEF por TIPO ---
+  // O ciclo inteiro da era clássica, um equipamento por Tipo de monstro.
+  // Pouco ATK, bem básicos, e todos com Lua pronto no ocgcore.
   1435851,  // Dragon Treasure — Dragão
   91595718, // Book of Secret Arts — Mago
   61854111, // Legendary Sword — Guerreiro
   46009906, // Beast Fangs — Besta
   25769732, // Machine Conversion Factory — Máquina
   77007920, // Laser Cannon Armor — Inseto
-  77027445, // Power of Kaishin — ÁGUA
+  77027445, // Power of Kaishin — Aqua (o TIPO Aqua, não o atributo ÁGUA)
   51267887, // Raise Body Heat — Dinossauro
-  32268901, // Salamandra — FOGO
-  37120512, // Sword of Dark Destruction — TREVAS
   39774685, // Vile Germs — Planta
+  15052462, // Violet Crystal — Zumbi (o "cristal roxo")
+  1557499,  // Silver Bow and Arrow — Fada
+  4614116,  // Dark Energy — Demônio
+  37820550, // Electro-Whip — Trovão
+  98252586, // Follow Wind — Besta Alada
+  36607978, // Mystical Moon — Besta-Guerreira
+
+  // --- equipamentos clássicos: +400 ATK / −200 DEF por ATRIBUTO ---
+  // O outro ciclo da mesma era; estes seis fecham a série (um por atributo).
+  37120512, // Sword of Dark Destruction — TREVAS
+  2370081,  // Steel Shell — ÁGUA
+  18937875, // Burning Spear — FOGO
+  39897277, // Elf's Light — LUZ
+  55321970, // Gust Fan — VENTO
+  98374133, // Invigoration — TERRA
+
+  // --- equipamento clássico avulso (fora dos dois ciclos) ---
+  32268901, // Salamandra — +700 de ATK a monstro de FOGO
 
   // --- burn simples (dano fixo) ---
   19523799, // Ookazi (800)
@@ -128,6 +146,21 @@ export const LISTA1_SPELLTRAP = [
   61190918, // Toon Buster Blader (Nv7 2600/2300) — 1 tributo
   7171149,  // Toon Ancient Gear Golem (Nv8 3000/3000) — 2 tributos
 
+  // --- linha da Mariposa (o deck do Weevil) ---
+  // O Petit Moth (Nv1 300/200) é vanilla e já entra sozinho pela regra do
+  // `inLista1`; o resto da evolução não é, mas nenhum efeito precisa ser
+  // escrito: a contagem de turnos dentro do casulo mora no Lua da própria
+  // carta no ocgcore. Equipe o Cocoon num Petit Moth e, conforme os SEUS
+  // turnos passam, ele pode ser tributado por uma mariposa cada vez maior.
+  40240595, // Cocoon of Evolution (Nv3 0/2000) — equipa-se da mão a 1 Petit
+            // Moth; enquanto equipado, o Petit Moth usa o ATK/DEF do casulo
+  87756343, // Larvae Moth (Nv2 500/400) — 2º turno dentro do casulo
+  14141448, // Great Moth (Nv8 2600/2500) — 4º turno
+  48579379, // Perfectly Ultimate Great Moth (Nv8 3500/3000) — 6º turno
+  96965364, // Insect Imitation — tributa 1 monstro e invoca especialmente do
+            // DECK 1 Inseto de nível +1 (o atalho pra chegar no casulo)
+  3492538,  // Insect Armor with Laser Cannon — equipamento de Inseto (+700).
+            // Não é o mesmo que Laser Cannon Armor (77007920, +300), lá em cima
 
   // --- rituais SEM efeito (vanilla) ---
   5405694,  // Black Luster Soldier (Nv 8, 3000/2500)

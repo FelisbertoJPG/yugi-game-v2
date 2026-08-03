@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "id": "wevil",
+    "name": "Wevil",
+    "theme": "Insetos",
+    "signatureId": null,
+    "custom": true,
+    "campaign": "Reino dos Duelistas",
+    "board": "oficial_copia.json"
+  }
+]

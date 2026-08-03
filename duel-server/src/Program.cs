@@ -198,6 +198,18 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-toon") >= 0)
                 return TestToon.Run(streamingAssets);
 
+            // Teste de aceitacao das cartas COM EFEITO que o deck do Weevil
+            // trouxe pra Lista 1 (casulo/mariposas, Insect Imitation, o
+            // equipamento de Inseto): o Lua delas roda de verdade no motor.
+            if (Array.IndexOf(args, "--test-weevil") >= 0)
+                return TestWeevil.Run(streamingAssets);
+
+            // Teste de aceitacao dos dois ciclos de equipamento classico da
+            // Lista 1 (+300 por Tipo, +400/-200 por Atributo): cada carta
+            // aplica o bonus no alvo certo, ATK consultado no motor.
+            if (Array.IndexOf(args, "--test-equip-classicos") >= 0)
+                return TestEquipClassicos.Run(streamingAssets);
+
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)
             {

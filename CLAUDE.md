@@ -22,11 +22,15 @@ npm run stop                 # encerra front e duel-server de forma limpa
 
 npm run launcher:build       # gera duel-academy.exe / duel-academy-stop.exe (SDK .NET 8)
 npm run pack                 # gera dist/DuelAcademy.exe (jogo inteiro num arquivo)
+
+cd duel-server && dotnet run -- --app --lan   # o mesmo --app, mas alcançável de outro
+                                                # aparelho na rede (app mobile) — ver mobile/README.md
+cd mobile && flutter pub get && flutter run   # app mobile (cliente fino do duel-server)
 ```
 
 Não existe `npm install` — o front tem **zero dependências**. Requer Node >= 18;
 o duelo requer .NET 8 e **Windows x64** (`ocgcore.dll`/`sqlite3.dll` são nativas,
-em `duel-server/native/`).
+em `duel-server/native/`). O app mobile (`mobile/`) requer o Flutter SDK.
 
 **Rodar um teste isolado do duelo:** cada suíte é uma flag do binário em
 `.\duel-server\bin\Debug\net8.0\win-x64\duel-server.exe`:
@@ -155,12 +159,24 @@ O `duel-server` também sabe servir o front sozinho (`StaticServer.cs`,
 modo `--app`), que é como o `dist/DuelAcademy.exe` roda tudo num processo só,
 com o payload embutido instalado em `%LOCALAPPDATA%\DuelAcademy\game`.
 
+**`mobile/`** — app Flutter, **cliente fino** do MESMO `duel-server` (fala o
+mesmo RPC `/start`/`/respond` que `web/duel.html`, nenhuma regra reimplementada
+— o `ocgcore` só existe como DLL Windows, então o motor continua no PC). Por
+padrão o servidor só aceita `localhost`; a flag `--app --lan` (`Program.cs`)
+abre pra rede local, imprimindo o IP pro celular digitar nas Configurações do
+app. Ver `mobile/README.md`. É uma segunda casca por cima da mesma engine —
+`web/` continua existindo do jeito que sempre foi, sem nenhuma dependência
+nova.
+
 ### Persistência em três níveis
 
 1. **`localStorage`** — cópia de trabalho, rápida e síncrona. Não viaja entre
    máquinas nem sobrevive a limpar os dados do site.
 2. **`decks/*.ydk` e `store/*.json`** — a verdade, versionada no git. Gravados
-   pelo dev-server em `/__decks/*` e `/__store/*`, que **só aceitam localhost**.
+   pelo dev-server em `/__decks/*` e `/__store/*` — **POST** (gravar) só de
+   localhost, sempre; **GET** (ler) libera de qualquer IP da rede quando o
+   servidor sobe com `--lan` (é o que o app `mobile/` usa pra listar
+   NPCs/decks sem escrever nada).
    Sem servidor no ar, a leitura ainda funciona por HTTP estático e a gravação
    cai para download do arquivo.
 3. `.ydk` é o formato do ygopro — o mesmo que o `ocgcore` consome; nossos

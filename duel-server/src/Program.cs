@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using YGO;
 
@@ -88,13 +89,29 @@ namespace DuelServer
             // abre o navegador sozinho. A janela fica aberta porque ELA e' o jogo:
             // fechar o console encerra o servidor, que e' o comportamento esperado
             // de um programa avulso.
+            //
+            // --lan: por padrao o HttpListener escuta so' em localhost (nada de
+            // fora do PC alcanca). Com --lan ele escuta em TODAS as interfaces
+            // (host "+"), pra um aparelho na mesma rede (o app mobile, cliente
+            // fino deste mesmo servidor) conseguir falar com /start,/respond e
+            // ler /__decks,/__store (GET — StaticServer.cs continua recusando
+            // POST fora de localhost, entao gravar continua so' no PC). Escutar
+            // em "+" no Windows pode pedir reserva de URL sem admin: `netsh http
+            // add urlacl url=http://+:8770/ user=%USERNAME%` (mensagem já
+            // aparece sozinha se a porta recusar por falta de permissao).
             if (app)
             {
+                bool lan = Array.IndexOf(args, "--lan") >= 0;
+                string bindHost = lan ? "+" : "localhost";
+                string duelBindUrl = $"http://{bindHost}:8770/";
+                string frontBindUrl = $"http://{bindHost}:8080/";
                 WebServer.Run(streamingAssets,
+                    url: duelBindUrl,
                     webRoot: appRoot,
-                    extraUrl: FrontUrl,
+                    extraUrl: frontBindUrl,
                     onReady: () =>
                     {
+                        if (lan) ImprimeEnderecosLan();
                         if (Array.IndexOf(args, "--no-browser") >= 0) return;
                         AbrirNavegador(FrontUrl + "web/duel.html");
                     });
@@ -102,9 +119,13 @@ namespace DuelServer
             }
 
             // Modo servidor de treino (web): sobe o HttpListener e transmite via SSE.
+            // (Este modo nao serve web/ sozinho — precisa do `npm run dev` do
+            // Node ao lado; --lan aqui so' abre a porta do duelo em si.)
             if (serve)
             {
-                WebServer.Run(streamingAssets);
+                bool lanServe = Array.IndexOf(args, "--lan") >= 0;
+                WebServer.Run(streamingAssets, url: $"http://{(lanServe ? "+" : "localhost")}:8770/",
+                    onReady: lanServe ? ImprimeEnderecosLan : null);
                 return 0;
             }
 
@@ -338,6 +359,32 @@ namespace DuelServer
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// Lista os IPs da(s) rede(s) local(is) do PC — sem isso o usuario teria
+        /// que descobrir sozinho (`ipconfig`) qual endereco digitar nas
+        /// Configuracoes do app mobile. So' chamado com `--lan`.
+        /// </summary>
+        private static void ImprimeEnderecosLan()
+        {
+            Log.Info("--lan ligado: escutando em todas as interfaces de rede.");
+            try
+            {
+                var ips = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(ni => ni.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
+                              && ni.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                    .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
+                    .Where(ip => ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    .Select(ip => ip.Address.ToString())
+                    .Distinct();
+                foreach (var ip in ips)
+                    Log.Info($"  no app mobile, servidor: {ip}:8770");
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"nao consegui listar os IPs da rede ({e.Message}). Use `ipconfig` e ache o IPv4.");
+            }
         }
 
         private static void AbrirNavegador(string url)

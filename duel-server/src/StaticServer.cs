@@ -50,8 +50,12 @@ namespace DuelServer
             var res = ctx.Response;
             string path = Uri.UnescapeDataString(req.Url?.AbsolutePath ?? "/");
 
-            // Escrever no disco nao e' coisa que se deixe aberta para a rede.
-            if (path.StartsWith("/__") && !req.IsLocal) { Status(res, 403, "403"); return true; }
+            // Escrever no disco nao e' coisa que se deixe aberta para a rede — mas
+            // LER (GET: listar decks, ver store/banlist) precisa funcionar de outro
+            // aparelho na LAN (ex.: o app mobile, que e' cliente fino deste mesmo
+            // servidor). So' bloqueia fora de localhost quando o metodo NAO e' GET.
+            if (path.StartsWith("/__") && req.HttpMethod != "GET" && !req.IsLocal)
+            { Status(res, 403, "403"); return true; }
 
             if (path.StartsWith("/__decks/")) return Decks(ctx, root, path.Substring("/__decks/".Length));
             if (path.StartsWith("/__store/")) return Store(ctx, root, path.Substring("/__store/".Length));

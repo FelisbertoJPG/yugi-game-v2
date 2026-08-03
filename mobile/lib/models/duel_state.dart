@@ -43,12 +43,15 @@ class DuelState {
           _applyMove(m);
           break;
         case 'draw':
+          // Cada item de `cards` é {code, hidden} (InteractiveDuel.cs, MSG_DRAW),
+          // não o código cru — hidden só importaria pra mão do oponente, que a
+          // gente nem rastreia por código (só a contagem).
           final p = m['player'] as int;
-          final n = (m['cards'] as List).length;
+          final cartas = (m['cards'] as List).cast<Map<String, dynamic>>();
           if (p == 0) {
-            hand0.addAll((m['cards'] as List).map((c) => (c as num).toInt()));
+            hand0.addAll(cartas.map((c) => (c['code'] as num).toInt()));
           } else {
-            handCount1 += n;
+            handCount1 += cartas.length;
           }
           break;
         case 'turn':

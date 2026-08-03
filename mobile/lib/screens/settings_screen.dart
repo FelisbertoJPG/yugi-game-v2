@@ -30,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
     final cfg = ServerConfig(host: _host.text.trim(), port: int.tryParse(_port.text.trim()) ?? ServerConfig.defaultPort);
     final ok = await ApiClient(cfg).health();
+    if (!mounted) return;   // saiu da tela enquanto o teste ainda rodava
     setState(() {
       _testing = false;
       _status = ok ? 'conectado!' : 'não alcancei o servidor';

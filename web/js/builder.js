@@ -9,7 +9,7 @@ import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { Deck, RULES, isExtraDeck } from '/web/js/deck.js';
 import {
   listDecks, saveDeck, deleteDeck, getActiveIndex, setActiveIndex,
-  downloadYdk, importYdk,
+  downloadYdk, importYdk, hydrateDecks,
 } from '/web/js/storage.js';
 import {
   listCustom, saveCustom, parseCardmaker, buildCard, downscaleDataUrl,
@@ -18,7 +18,6 @@ import {
 import {
   getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks, hydrateCustomNpcs,
 } from '/web/js/npcs.js';
-import { saveProjectDeck, playerDeckPath } from '/web/js/projectdecks.js';
 import { inLista1 } from '/web/js/lista1.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
@@ -253,8 +252,6 @@ function renderDeck() {
   const motivo = st.ok ? '' : `não é possível salvar: ${st.message}`;
   $('btn-save').disabled = !st.ok;
   $('btn-save').title = motivo;
-  $('btn-project').disabled = !st.ok;
-  $('btn-project').title = motivo;
   if (npcMode) {
     // "salvar p/ mim" vira deck do JOGADOR — checa sem a liberdade de ignorar banlist do NPC.
     const stStrict = deckStatus({ ignoreBanlist: false });
@@ -340,8 +337,7 @@ function enterNpcModeUI() {
   $('npc-bar').hidden = false;
   $('npc-name').textContent = npcMode.name;
   // o campo de nome passa a ser o nome DESTE deck do NPC (editável).
-  // 'btn-project' sai porque no modo NPC o próprio salvar já grava em decks/npc/.
-  for (const id of ['deck-select', 'btn-new', 'btn-delete', 'btn-project']) $(id).hidden = true;
+  for (const id of ['deck-select', 'btn-new', 'btn-delete']) $(id).hidden = true;
   const cover = $('npc-cover');
   cover.onclick = () => (pickingCover ? cancelPickCover() : startPickCover());
   cover.onkeydown = (e) => {
@@ -727,23 +723,6 @@ $('btn-export').onclick = () => {
   toast('.ydk exportado');
 };
 
-// Grava o deck em decks/player/ — diferente de "salvar", que é localStorage e
-// fica preso a este navegador. O que vai para o projeto viaja no git.
-$('btn-project').onclick = async () => {
-  const st = deckStatus();   // este botão só existe fora do modo NPC
-  if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
-  deck.name = $('deck-name').value.trim() || 'deck';
-  const path = playerDeckPath(deck.name);
-  const r = await saveProjectDeck(path, deck, { updated: new Date().toISOString() });
-  if (r.ok) {
-    toast(`salvo em decks/${r.path} — dê commit para levar para outra máquina`);
-  } else if (r.downloaded) {
-    toast('servidor fora do ar — .ydk baixado, mova para decks/player/');
-  } else {
-    toast(`falhou: ${r.error}`);
-  }
-};
-
 $('btn-import').onclick = async () => {
   if (!confirmDiscard()) return;
   const d = await importYdk();
@@ -1049,6 +1028,7 @@ configureCardDetail({
 // Boosters + carteira do projeto (store/*.json) antes de ler raridade/coleção.
 await hydrateBoosters();
 await hydrateWallet();
+await hydrateDecks();        // decks/player/*.ydk ANTES de qualquer gravação
 await hydrateCustomNpcs();   // adversários criados na Área de Teste (outra máquina inclusive)
 await hydrateBanlist();
 banlist = getBanlist();

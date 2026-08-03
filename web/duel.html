@@ -430,7 +430,7 @@
 
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { getActiveDeck, listDecks, getActiveIndex } from '/web/js/storage.js';
+import { getActiveDeck, listDecks, getActiveIndex, hydrateDecks } from '/web/js/storage.js';
 import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/js/npcs.js';
 import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
@@ -2056,6 +2056,7 @@ $('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $
 $('log-fab').onclick = () => $('log').classList.toggle('show');
 
 await hydrateWallet();   // carteira do projeto antes de premiar vitórias
+await hydrateDecks();    // o deck com que você vai duelar vem de decks/player/
 await hydrateCustomNpcs();
 // Um adversário criado noutra máquina só existe no disco: refaz a busca agora
 // que o hydrate sincronizou (a busca lá em cima rodou antes de qualquer await).

@@ -20,7 +20,7 @@ import {
   getDP, getCollection, totalCards, distinctCards,
   sellCards, sellPriceOf, SELL_PRICE, hydrateWallet, removeCards,
 } from '/web/js/wallet.js';
-import { listDecks, saveDeck, getActiveIndex, setActiveIndex } from '/web/js/storage.js';
+import { listDecks, saveDeck, getActiveIndex, setActiveIndex, hydrateDecks } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
 import { showCardDetail, configureCardDetail } from '/web/js/carddetail.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
@@ -461,6 +461,7 @@ for (const id of ['venda-back', 'cover-back']) {
 // ---------------------------------------------------------------- boot
 await hydrateBoosters();   // raridades (store/boosters.json)
 await hydrateWallet();     // DP + coleção (store/wallet.json)
+await hydrateDecks();      // decks do jogador (decks/player/*.ydk)
 
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });

@@ -102,11 +102,12 @@
 <div class="toast" id="toast"></div>
 
 <script type="module">
-import { getActiveDeck, listDecks } from '/web/js/storage.js';
+import { getActiveDeck, listDecks, hydrateDecks } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
 import { getDP, totalCards, hydrateWallet } from '/web/js/wallet.js';
 
 await hydrateWallet();   // traz DP + coleção do projeto (store/wallet.json)
+await hydrateDecks();    // e os decks de decks/player/*.ydk
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;

@@ -44,7 +44,15 @@ em `duel-server/native/`). O app mobile (`mobile/`) requer o Flutter SDK.
 `--test-fieldbonus` (Bônus de Campo do editor de tabuleiro: Forest injetada
 ativa dá +200 de ATK de verdade a um Inseto, consultado no motor), `--test-toon`
 (NpcBrain ativa Toon World e invoca especialmente — `spsummon` — os Toons
-"clássicos" da mão, ex.: Toon Mermaid/Toon Summoned Skull).
+"clássicos" da mão, ex.: Toon Mermaid/Toon Summoned Skull), `--test-weevil`
+(as cartas COM EFEITO que o deck do Weevil trouxe pra Lista 1: Cocoon of
+Evolution equipado troca o ATK do Petit Moth, Insect Imitation invoca do deck,
+o equipamento de Inseto dá +700, e as três mariposas só ficam invocáveis no
+2º/4º/6º turno com o casulo — contagem lida do próprio motor),
+`--test-equip-classicos` (os dois ciclos completos de equipamento da Lista 1,
++300 por Tipo e +400/−200 por Atributo: cada carta equipada no monstro certo,
+ATK conferido no motor — um equipamento sem alvo válido nunca é oferecido pelo
+core e ficaria morto na lista sem ninguém notar).
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
@@ -183,8 +191,17 @@ nova.
    metadados vão em comentários `#chave valor`, que qualquer parser ignora.
 
 Ordem que importa: **hidrate antes de gravar** (`hydrateWallet`, `hydrateBoosters`,
-`loadNpcDecks` no boot da página). Gravar antes de ler é como um estado vazio
-sobrescreve dados bons — já aconteceu.
+`hydrateDecks`, `loadNpcDecks` no boot da página). Gravar antes de ler é como um
+estado vazio sobrescreve dados bons — já aconteceu.
+
+O deck do jogador foi o último a entrar nesse esquema (antes só existia no
+`localStorage`, e mudar de máquina mostrava os decks antigos daquele navegador).
+`hydrateDecks` (`web/js/storage.js`) faz uma coisa a mais que os outros
+`hydrate*`: antes de sobrescrever o cache local ele **migra** todo deck que só
+existe naquele navegador para `decks/player/`, sempre num arquivo livre — nunca
+por cima de um `.ydk` vindo de outra máquina. Sem servidor no ar ele não faz
+nada, de propósito: mexer no `localStorage` sem conseguir ler o disco só
+destruiria a cópia de trabalho.
 
 ## Armadilhas conhecidas
 

@@ -13,10 +13,22 @@ decks/
 ## Por que aqui e não no navegador
 
 O `localStorage` some quando você limpa os dados do site e não viaja entre
-máquinas. Deck de NPC é conteúdo do jogo — pertence ao repositório.
+máquinas. Deck é conteúdo do jogo — do NPC **e do jogador** — então pertence ao
+repositório.
 
-O que **continua** no navegador é só preferência local: qual deck de cada NPC
-está ativo, e os decks do jogador em edição.
+Vale para os dois: salvar um deck no builder grava aqui na hora, e o boot da
+página lê daqui de volta (`hydrateDecks` em `web/js/storage.js`). O
+`localStorage` é só cópia de trabalho.
+
+O que **continua** no navegador é só preferência local: qual deck está ativo
+(o seu e o de cada NPC).
+
+> Isso já foi diferente. Até então o deck do jogador só existia no navegador, e
+> o sintoma era levar a pasta para outra máquina e continuar vendo os decks
+> antigos DAQUELE navegador — os `.ydk` viajavam no git, mas nada os lia de
+> volta. Se você tem um deck preso num navegador antigo, abra o builder lá uma
+> vez com o servidor no ar: o `hydrateDecks` migra o que é local-only para cá
+> antes de sincronizar, num arquivo novo, sem passar por cima de nada.
 
 ## Formato
 

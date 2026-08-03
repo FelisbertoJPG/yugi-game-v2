@@ -1,3 +1,23 @@
+# DADOS DO JOGO — NUNCA ignore estas pastas.
+#
+#   decks/player/*.ydk    seus decks
+#   decks/npc/**/*.ydk    decks dos adversarios
+#   store/*.json          carteira, boosters, banlist, NPCs
+#   boards/*.json         tabuleiros do editor de campo
+#
+# Elas sao a VERDADE do jogo, nao cache. O front grava nelas pelo dev-server e
+# le de volta no boot de cada pagina (hydrateDecks, hydrateWallet,
+# hydrateBoosters, hydrateBanlist, loadNpcDecks); o localStorage do navegador e'
+# so a copia de trabalho, e ela nao viaja entre maquinas.
+#
+# Ignorar qualquer uma delas nao da erro nenhum: o commit sobe, e na outra
+# maquina o jogo simplesmente aparece vazio ou com os dados velhos DAQUELE
+# navegador. Foi exatamente esse o sintoma enquanto o deck do jogador ainda nao
+# era lido de volta do disco.
+#
+# `store/*.json` nascem sozinhos enquanto se joga — depois de mexer na
+# Loja/Booster Builder, confira `git status` antes de commitar.
+
 # Ferramentas
 .claude/
 node_modules/

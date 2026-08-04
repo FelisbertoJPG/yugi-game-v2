@@ -212,6 +212,34 @@ por cima de um `.ydk` vindo de outra máquina. Sem servidor no ar ele não faz
 nada, de propósito: mexer no `localStorage` sem conseguir ler o disco só
 destruiria a cópia de trabalho.
 
+### Conta (login/registro)
+
+`store/wallet.json` e `decks/player/*.ydk` viraram dado de **conta**, não da
+aplicação: pertencem a `store/users/<usuário>/wallet.json` e
+`decks/users/<usuário>/player/*.ydk`, e exigem sessão pra ler/gravar — o
+resto de `store/` (`banlist.json`, `boosters.json`, `npcs.json`) e
+`decks/npc/*` continuam globais, sem sessão nenhuma. `web/js/auth.js`
+(`register`/`login`/`logout`/`me`/`requireLogin`) fala com `/__auth/*`, que
+`tools/serve.mjs` **e** `duel-server/src/StaticServer.cs` implementam em
+paralelo (mesmo algoritmo — PBKDF2-HMAC-SHA256, 210 mil iterações — e mesmo
+formato de arquivo nos dois, então uma conta funciona idêntica em qualquer
+um dos dois back-ends). Sessão por cookie httpOnly (`store/sessions.json`);
+como o front sempre fala com o mesmo origin da API, `fetch` já manda o
+cookie sozinho, sem precisar mexer em nenhuma chamada existente.
+
+`requireLogin()` no boot de `index/loja/deck/inventario/adversario/duel.html`
+redireciona pra `web/login.html` sem sessão. `deck.html` só exige login FORA
+do modo NPC (`?npc=<id>` edita o deck do ADVERSÁRIO, não mexe em nada seu);
+`npcs.html`/`campo.html`/`banlist.html` (Área de Teste) não pedem login —
+são ferramenta de configuração do jogo, não progresso de ninguém.
+
+`store/accounts/`, `store/users/`, `decks/users/` e `store/sessions.json`
+estão no `.gitignore` — ao contrário do resto de `store/`/`decks/` (que é
+verdade do jogo versionada de propósito), dado de conta não tem por que ir
+pro git. `store/wallet.legacy-backup.json` e `decks/legacy-backup-player/`
+são o que existia ANTES do login existir, preservado como histórico —
+nenhuma conta nova herda esses dados automaticamente.
+
 ## Armadilhas conhecidas
 
 - **Caminhos são absolutos** (`/web/js/...`) e o dev-server redireciona `/` com

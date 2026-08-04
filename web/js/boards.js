@@ -18,6 +18,13 @@
 
 const KEY_ACTIVE = 'ygo:activeBoard';
 
+/** O tabuleiro "Oficial" (`boards/oficial.json`) é o layout padrão de
+ *  verdade do jogo — quem nunca escolheu nada explicitamente cai nele, não
+ *  no flexbox cru de bootstrap. `loadActiveBoard()` (duel.html) já tolera
+ *  sozinho um path que não existe (servidor fora do ar, arquivo apagado):
+ *  cai pro flexbox em silêncio, então apontar pra cá sem checar é seguro. */
+const DEFAULT_BOARD = 'oficial.json';
+
 /** Proporção padrão de carta (a mesma de `.zone`/`.pilezone` no duel.html). */
 export const CARD_ASPECT = 59 / 86;
 
@@ -146,13 +153,14 @@ export function defaultLayout(name = 'Padrão') {
 
 // ---------------------------------------------------------------- ativo ----
 
-/** Nome do tabuleiro ativo, ou null (= layout padrão do `duel.html`). */
+/** Nome do tabuleiro ativo — o "Oficial" por padrão, até alguém escolher
+ *  outro explicitamente (ou desativar, o que também volta pro Oficial). */
 export function getActiveBoard() {
-  try { return localStorage.getItem(KEY_ACTIVE) || null; }
-  catch { return null; }
+  try { return localStorage.getItem(KEY_ACTIVE) || DEFAULT_BOARD; }
+  catch { return DEFAULT_BOARD; }
 }
 
-/** Ativa (ou, com null, desativa — volta pro layout padrão). */
+/** Ativa (ou, com null, desativa — volta pro Oficial, o padrão do jogo). */
 export function setActiveBoard(name) {
   try {
     if (name) localStorage.setItem(KEY_ACTIVE, name);

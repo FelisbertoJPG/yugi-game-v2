@@ -97,6 +97,7 @@
         <button id="btn-save" class="btn-primary">salvar</button>
         <button id="btn-reset">resetar</button>
       </div>
+      <div id="save-status" style="margin-top:4px;font-size:11px;color:var(--dim)"></div>
     </div>
 
     <div>
@@ -209,7 +210,7 @@ $('canvas').style.height = `${CANVAS.h}px`;
 const editor = createEditor({
   canvasEl: $('canvas'),
   guidesEl: $('guides'),
-  onChange: () => { /* estado já vive dentro do próprio editor.getBoard() */ },
+  onChange: () => scheduleAutosave(),
   onSelect: (ids) => {
     $('sel-count').textContent = ids.length;
     for (const btn of ['al-left', 'al-right', 'al-top', 'al-bottom', 'al-cx', 'al-cy', 'al-size'])
@@ -365,12 +366,13 @@ async function duplicateBoard(board) {
 }
 
 function updateActivePill() {
+  // getActiveBoard() nunca devolve vazio — sem escolha explícita, cai no
+  // "Oficial" (o padrão do jogo), não num estado "nenhum ativo".
   const active = getActiveBoard();
   const btn = $('btn-activate');
   const mine = currentPath && currentPath === active;
-  btn.classList.toggle('on', !!active);
-  if (!active) btn.textContent = 'usar layout padrão (nenhum ativo)';
-  else if (mine) btn.textContent = '✓ este é o layout ativo';
+  btn.classList.add('on');
+  if (mine) btn.textContent = '✓ este é o layout ativo';
   else {
     const b = boards.find((x) => x.path === active);
     btn.textContent = `ativo: ${b?.board?.name ?? active} — clique pra usar este`;
@@ -393,21 +395,78 @@ $('btn-reset').onclick = () => {
   syncFieldSpellSelect();
 };
 
-$('btn-save').onclick = async () => {
+/**
+ * Autosave — SEM isto, tudo que se desenha no canvas só existe na memória da
+ * aba: fechar, recarregar ou o servidor de dev cair no meio do caminho perde
+ * o trabalho inteiro sem aviso nenhum (foi exatamente o que aconteceu e
+ * destruiu um tabuleiro de verdade). Todo `onChange` do editor agenda uma
+ * gravação; `persist()` também roda na hora ao clicar "salvar", ao trocar o
+ * nome, e ao sair da página (flush síncrono, sem esperar o debounce).
+ */
+const AUTOSAVE_MS = 700;
+let autosaveTimer = null;
+let saving = false;
+let pendingAgain = false;
+
+function setStatus(text, color) {
+  const el = $('save-status');
+  el.textContent = text;
+  el.style.color = color ? `var(${color})` : 'var(--dim)';
+}
+
+function scheduleAutosave() {
+  setStatus('alterado — salvando em breve…');
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(persist, AUTOSAVE_MS);
+}
+
+/** Grava agora mesmo (usado pelo autosave, pelo botão, e no flush de saída).
+ *  Serializa chamadas concorrentes: se `persist()` já está em voo quando
+ *  outra mudança chega, marca `pendingAgain` e roda de novo ao terminar —
+ *  nunca duas gravações do MESMO tabuleiro disputando a escrita. */
+async function persist() {
+  clearTimeout(autosaveTimer);
+  if (saving) { pendingAgain = true; return; }
+  saving = true;
+  setStatus('salvando…');
+
   const board = editor.getBoard();
   board.name = $('board-name').value.trim() || 'Tabuleiro sem nome';
   const path = currentPath ?? slugify(board.name);
   const r = await saveProjectBoard(path, board);
+
+  saving = false;
   if (r.ok) {
     currentPath = r.path;
+    setStatus('✓ salvo', '--green');
     await refreshBoardList();
   } else if (r.downloaded) {
-    alert('Sem servidor de desenvolvimento no ar: o tabuleiro foi baixado — '
-        + 'coloque o arquivo em boards/ na mão.');
+    setStatus('⚠ sem servidor — baixado como arquivo', '--gold');
   } else {
-    alert('Falha ao salvar: ' + (r.error ?? '?'));
+    setStatus('⚠ falha ao salvar: ' + (r.error ?? '?'), '--red');
   }
-};
+
+  if (pendingAgain) { pendingAgain = false; persist(); }
+}
+
+/** Flush síncrono: dá pra sair da página sem esperar o debounce de 700ms
+ *  segurar a última mudança. `keepalive` deixa o fetch sobreviver ao
+ *  descarregamento da página (senão o navegador cancela a requisição). */
+function flushOnLeave() {
+  if (!autosaveTimer && !saving) return;   // nada pendente
+  clearTimeout(autosaveTimer);
+  const board = editor.getBoard();
+  board.name = $('board-name').value.trim() || 'Tabuleiro sem nome';
+  const path = currentPath ?? slugify(board.name);
+  saveProjectBoard(path, board, { keepalive: true });
+}
+window.addEventListener('beforeunload', flushOnLeave);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushOnLeave();
+});
+
+$('board-name').addEventListener('input', () => scheduleAutosave());
+$('btn-save').onclick = () => persist();
 
 $('btn-activate').onclick = () => {
   if (!currentPath) { alert('Salve o tabuleiro antes de ativar.'); return; }

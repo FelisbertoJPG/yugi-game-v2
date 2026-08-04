@@ -60,15 +60,19 @@ export async function listProjectBoards() {
 /**
  * Grava um tabuleiro no projeto. Se o servidor não estiver disponível, baixa
  * o arquivo para você colocar em `boards/` na mão.
+ * @param {{keepalive?: boolean}} [opts] `keepalive: true` pro flush de saída
+ *   da página (`beforeunload`/`visibilitychange`) — sem isso o navegador
+ *   cancela o fetch no meio do descarregamento.
  * @returns {Promise<{ok: boolean, path?: string, downloaded?: boolean, error?: string}>}
  */
-export async function saveProjectBoard(path, board) {
+export async function saveProjectBoard(path, board, opts = {}) {
   const content = JSON.stringify(board, null, 2);
   try {
     const r = await fetch(`${API}/save`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path, content }),
+      keepalive: !!opts.keepalive,
     });
     const j = await r.json();
     if (!r.ok || !j.ok) throw new Error(j.error || String(r.status));

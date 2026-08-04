@@ -114,7 +114,7 @@ namespace DuelServer
                     {
                         if (lan) ImprimeEnderecosLan();
                         if (Array.IndexOf(args, "--no-browser") >= 0) return;
-                        AbrirNavegador(FrontUrl + "web/duel.html");
+                        AbrirNavegador(FrontUrl + "web/index.html");
                     });
                 return 0;
             }

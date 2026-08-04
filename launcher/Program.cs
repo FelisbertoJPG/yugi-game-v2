@@ -19,7 +19,7 @@ internal static class Program
     const string DuelUrl = "http://localhost:8770";
     const string FrontProbe = FrontUrl + "/web/index.html";
     const string DuelProbe = DuelUrl + "/health";
-    const string OpenPage = FrontUrl + "/web/duel.html";
+    const string OpenPage = FrontUrl + "/web/index.html";
     const string FrontShutdown = FrontUrl + "/__shutdown";
     const string DuelShutdown = DuelUrl + "/shutdown";
 
@@ -77,12 +77,12 @@ internal static class Program
             return Hold(4, true);
 
         // ---- 3. conferir a pagina final ----------------------------------
-        Step(3, "conferindo a pagina de duelo");
+        Step(3, "conferindo a home");
         var (ok, code) = Probe(OpenPage).GetAwaiter().GetResult();
         if (!ok)
         {
             Fail($"{OpenPage} respondeu {code}.");
-            Console.WriteLine("  Os servidores subiram, mas a pagina nao. web/duel.html sumiu?");
+            Console.WriteLine("  Os servidores subiram, mas a pagina nao. web/index.html sumiu?");
             return Hold(5, true);
         }
         Ok($"200 OK  {OpenPage}");

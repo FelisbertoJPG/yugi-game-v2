@@ -68,8 +68,9 @@
 import { login, register } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
-const params = new URLSearchParams(location.search);
-const next = params.get('next') || '/web/index.html';
+
+// Entrar e criar conta terminam os dois na home, sempre — ver `requireLogin`.
+const HOME = '/web/index.html';
 
 let mode = 'login'; // 'login' | 'register'
 
@@ -94,7 +95,7 @@ $('form').onsubmit = async (e) => {
   const r = mode === 'login' ? await login(username, password) : await register(username, password);
   $('submit').disabled = false;
   if (!r.ok) { $('error').textContent = r.error || 'algo deu errado'; return; }
-  location.href = next;
+  location.href = HOME;
 };
 
 render();

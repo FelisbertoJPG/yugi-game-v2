@@ -45,11 +45,15 @@ export async function me() {
  * Sem sessão, manda pro login e devolve null — quem chamou deve parar ali
  * (a página real só continua depois do redirect, então `null` nunca chega a
  * importar de verdade, mas o caller não precisa saber disso).
+ *
+ * NÃO leva junto de onde veio: entrar sempre termina na home. Voltar pra
+ * página de origem soava útil, mas na prática significava cair direto no
+ * Treino (`duel.html` sem `?npc=`) só porque foi ali que a sessão faltou —
+ * quem acabou de entrar quer o menu, não a tela em que esbarrou no login.
  */
 export async function requireLogin() {
   const username = await me();
   if (username) return username;
-  const next = encodeURIComponent(location.pathname + location.search);
-  location.href = `/web/login.html?next=${next}`;
+  location.href = '/web/login.html';
   return null;
 }

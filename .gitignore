@@ -18,6 +18,17 @@
 # `store/*.json` nascem sozinhos enquanto se joga — depois de mexer na
 # Loja/Booster Builder, confira `git status` antes de commitar.
 
+# DADOS DE CONTA — o OPOSTO da regra acima, de proposito. Com login de
+# verdade (senha com hash, sessao), carteira/decks passaram a pertencer ao
+# USUARIO, nao ao checkout do projeto: nao faz sentido nenhum commitar a
+# senha (com hash ou nao) ou o DP de alguem no git. sessions.json em
+# especial NUNCA pode ir pro repositorio: um token de sessao vazado e' o
+# mesmo que a conta vazada.
+store/accounts/
+store/users/
+store/sessions.json
+decks/users/
+
 # Ferramentas
 .claude/
 node_modules/

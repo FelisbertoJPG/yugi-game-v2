@@ -446,6 +446,13 @@ import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 import { getActiveBoard, allZoneIds, CARD_ASPECT } from '/web/js/boards.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
+import { requireLogin } from '/web/js/auth.js';
+
+// Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
+// agora são dado de conta. Gate incondicional, diferente do deck.html (lá
+// `?npc=` edita o deck do NPC, não mexe em nada seu).
+const username = await requireLogin();
+if (!username) throw new Error('redirecionando para login');
 
 // Modo Adversário: duel.html?npc=<id>. Sem npc = Treino (Área de Teste, sem
 // recompensa). Com npc, o NPC usa o próprio deck e vencer dá o prêmio em DP

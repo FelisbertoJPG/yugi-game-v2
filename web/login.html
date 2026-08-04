@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duel Academy — Entrar</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 0%, #1b2438 0%, var(--bg) 60%);
+  }
+  .home { width: min(420px, 94vw); }
+
+  .title { text-align: center; margin-bottom: 22px; border-bottom: 2px solid var(--line); padding-bottom: 16px; }
+  .title h1 { margin: 0; font-size: 30px; letter-spacing: 5px; color: var(--gold); text-shadow: 0 2px 0 #0008; }
+  .title p { margin: 6px 0 0; color: var(--dim); font-size: 11px; letter-spacing: 2px; }
+
+  .slot { background: var(--panel); border: 2px solid var(--line); padding: 18px; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+  .tabs button {
+    flex: 1; padding: 8px; font-size: 12px; letter-spacing: 1px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--dim);
+  }
+  .tabs button.on { background: var(--panel); border-color: var(--gold); color: var(--gold); }
+
+  form { display: grid; gap: 10px; }
+  label { font-size: 11px; letter-spacing: 1px; color: var(--dim); display: block; margin-bottom: 4px; }
+  input { width: 100%; }
+
+  .error { color: var(--red); font-size: 11px; min-height: 14px; }
+  .hint { color: var(--dim); font-size: 10px; margin-top: -4px; }
+
+  button[type="submit"] { width: 100%; padding: 10px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="home">
+  <div class="title">
+    <h1>DUEL ACADEMY</h1>
+    <p>YUGI GAME V2</p>
+  </div>
+
+  <div class="slot">
+    <div class="tabs">
+      <button id="tab-login" class="on">entrar</button>
+      <button id="tab-register">criar conta</button>
+    </div>
+
+    <form id="form">
+      <div>
+        <label for="username">usuário</label>
+        <input id="username" name="username" autocomplete="username" required>
+      </div>
+      <div>
+        <label for="password">senha</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="hint" id="hint" hidden>3-20 letras/números/_ · senha com pelo menos 8 caracteres</div>
+      <div class="error" id="error"></div>
+      <button type="submit" class="btn-primary" id="submit">entrar</button>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+import { login, register } from '/web/js/auth.js';
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const next = params.get('next') || '/web/index.html';
+
+let mode = 'login'; // 'login' | 'register'
+
+function render() {
+  $('tab-login').classList.toggle('on', mode === 'login');
+  $('tab-register').classList.toggle('on', mode === 'register');
+  $('submit').textContent = mode === 'login' ? 'entrar' : 'criar conta';
+  $('password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('hint').hidden = mode !== 'register';
+  $('error').textContent = '';
+}
+
+$('tab-login').onclick = () => { mode = 'login'; render(); };
+$('tab-register').onclick = () => { mode = 'register'; render(); };
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('error').textContent = '';
+  $('submit').disabled = true;
+  const username = $('username').value.trim();
+  const password = $('password').value;
+  const r = mode === 'login' ? await login(username, password) : await register(username, password);
+  $('submit').disabled = false;
+  if (!r.ok) { $('error').textContent = r.error || 'algo deu errado'; return; }
+  location.href = next;
+};
+
+render();
+</script>
+</body>
+</html>

@@ -86,7 +86,9 @@
 <div class="home">
   <div class="topline">
     <span class="dp" id="dp">— DP</span>
+    <span class="muted" id="user-tag"></span>
     <span class="spacer"></span>
+    <button class="test-link" id="btn-logout">sair</button>
     <button class="test-link" id="btn-test">⚙ Área de Teste</button>
   </div>
 
@@ -137,9 +139,15 @@
 import { getActiveDeck, listDecks, hydrateDecks } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
 import { getDP, totalCards, hydrateWallet } from '/web/js/wallet.js';
+import { requireLogin, logout } from '/web/js/auth.js';
 
-await hydrateWallet();   // traz DP + coleção do projeto (store/wallet.json)
-await hydrateDecks();    // e os decks de decks/player/*.ydk
+// Sem sessão, redireciona pro login e para aqui — wallet/decks são dados de
+// CONTA, não dá pra hidratar antes de saber de quem é a sessão.
+const username = await requireLogin();
+if (!username) throw new Error('redirecionando para login');
+
+await hydrateWallet();   // traz DP + coleção do projeto (store/users/<u>/wallet.json)
+await hydrateDecks();    // e os decks de decks/users/<u>/player/*.ydk
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -193,6 +201,9 @@ document.addEventListener('click', (e) => {
   const popup = $('deck-popup');
   if (popup.classList.contains('show') && !popup.contains(e.target)) popup.classList.remove('show');
 });
+
+$('user-tag').textContent = username;
+$('btn-logout').onclick = async () => { await logout(); location.href = '/web/login.html'; };
 
 $('btn-shop').onclick = () => (location.href = '/web/loja.html');
 $('btn-deck').onclick = () => (location.href = '/web/deck.html?owned=1');

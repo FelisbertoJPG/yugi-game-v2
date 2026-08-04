@@ -13,6 +13,7 @@ import {
   getDP, spendDP, addCards, getPity, bumpPity, hydrateWallet,
   addUrSpend, urPityReady, consumeUrPity, getUrSpend,
 } from '/web/js/wallet.js';
+import { requireLogin } from '/web/js/auth.js';
 
 const priceOf = (b) => (Number.isFinite(b.price) ? b.price : DEFAULT_PRICE);
 const pityKey = (b) => b.name;   // identidade do booster para o contador "a cada 10"
@@ -144,6 +145,9 @@ $('reveal-back').addEventListener('click', (e) => {
 $('reveal-again').onclick = () => { if (lastBought) buy(lastBought); };
 
 // ---------------------------------------------------------------- boot
+const username = await requireLogin();
+if (!username) throw new Error('redirecionando para login');
+
 // Traz boosters + carteira do projeto (store/*.json) antes de desenhar.
 await hydrateBoosters();
 await hydrateWallet();

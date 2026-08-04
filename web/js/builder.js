@@ -22,6 +22,7 @@ import { inLista1 } from '/web/js/lista1.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
+import { requireLogin } from '/web/js/auth.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
@@ -1023,12 +1024,25 @@ configureCardDetail({
   descOf: (id) => customDesc.get(Number(id)),
 });
 
+// modo NPC (?npc=<id>) é ferramenta da Área de Teste, não tela de progresso
+// do jogador — não exige login, e por isso também não toca wallet/decks DO
+// JOGADOR (que agora são dado de conta). Lido cedo, antes do gate.
+const params = new URLSearchParams(location.search);
+const npcId = params.get('npc');
+
+if (!npcId) {
+  const username = await requireLogin();
+  if (!username) throw new Error('redirecionando para login');
+}
+
 // injeta as cartas customizadas salvas (localStorage) antes de tudo que usa
 // o índice — assim elas aparecem no pool e nos decks que já as referenciam.
 // Boosters + carteira do projeto (store/*.json) antes de ler raridade/coleção.
 await hydrateBoosters();
-await hydrateWallet();
-await hydrateDecks();        // decks/player/*.ydk ANTES de qualquer gravação
+if (!npcId) {
+  await hydrateWallet();
+  await hydrateDecks();        // decks/users/<u>/player/*.ydk ANTES de qualquer gravação
+}
 await hydrateCustomNpcs();   // adversários criados na Área de Teste (outra máquina inclusive)
 await hydrateBanlist();
 banlist = getBanlist();
@@ -1048,8 +1062,7 @@ $('f-race').append(...uniq((c) => c.r).map((v) => new Option(v, v)));
 $('f-arch').append(...uniq((c) => c.a[0]).map((v) => new Option(v, v)));
 
 // modo NPC (?npc=<id>&deck=<i|new>) tem prioridade sobre os decks do jogador
-const params = new URLSearchParams(location.search);
-const npcId = params.get('npc');
+// (params/npcId já foram lidos lá em cima, antes do gate de login)
 const npc = npcId ? getNpc(npcId) : null;
 if (npc) {
   npcMode = npc;

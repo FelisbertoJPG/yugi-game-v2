@@ -24,6 +24,7 @@ import { listDecks, saveDeck, getActiveIndex, setActiveIndex, hydrateDecks } fro
 import { RULES } from '/web/js/deck.js';
 import { showCardDetail, configureCardDetail } from '/web/js/carddetail.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
+import { requireLogin } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -459,9 +460,12 @@ for (const id of ['venda-back', 'cover-back']) {
 }
 
 // ---------------------------------------------------------------- boot
+const username = await requireLogin();
+if (!username) throw new Error('redirecionando para login');
+
 await hydrateBoosters();   // raridades (store/boosters.json)
-await hydrateWallet();     // DP + coleção (store/wallet.json)
-await hydrateDecks();      // decks do jogador (decks/player/*.ydk)
+await hydrateWallet();     // DP + coleção (store/users/<u>/wallet.json)
+await hydrateDecks();      // decks do jogador (decks/users/<u>/player/*.ydk)
 
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });

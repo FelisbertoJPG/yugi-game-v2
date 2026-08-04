@@ -6,6 +6,7 @@
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { NPCS, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, listCampaignNames } from '/web/js/npcs.js';
 import { getDP, hydrateWallet } from '/web/js/wallet.js';
+import { requireLogin } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards/${id}.jpg`;
@@ -85,6 +86,9 @@ function render() {
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 
 // ---------------------------------------------------------------- boot
+const username = await requireLogin();
+if (!username) throw new Error('redirecionando para login');
+
 await hydrateWallet();
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });

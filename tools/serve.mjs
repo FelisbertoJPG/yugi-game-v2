@@ -36,6 +36,9 @@ const MIME = {
   '.ydk': 'text/plain; charset=utf-8',
   '.cdb': 'application/vnd.sqlite3',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
 };
 
 const server = createServer(async (req, res) => {

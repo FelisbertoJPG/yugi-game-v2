@@ -10,8 +10,13 @@
 Mini-RPG de Yu-Gi-Oh com duelo **fiel às regras** (o motor é o `ocgcore` + os
 scripts Lua oficiais). O duelo roda num **servidor C# (.NET 8)** que expõe o motor
 via HTTP local; o front web (`web/duel.html`) desenha o estado e manda as jogadas.
-O objetivo do "treino" é (a) validar a mecânica e (b) **gravar as jogadas do jogador**
-pra virar a "memória"/script dos NPCs depois.
+O objetivo do "treino" é **validar a mecânica** — jogar contra o motor e ver o que
+quebra.
+
+> A IA dos NPCs é escrita **só em código**, no `NpcBrain.cs`, como regras
+> explícitas. Houve um plano de gravar as jogadas do jogador (`localStorage:
+> ygo:plays`) pra virar "memória" do NPC; foi **descartado**, e o botão "salvar
+> jogada" saiu do `duel.html`. Não reintroduza.
 
 ## 1.1. NPC do Teste de Batalha
 
@@ -102,8 +107,8 @@ que o protocolo abaixo foi decifrado — use pra achar novos formatos).
 - `SelfPlay.cs` — harness de diagnóstico do protocolo.
 
 **Web (`web/duel.html`):** carrega o deck escolhido, desenha o campo (zonas M/S/F dos
-2 lados, cemitério clicável, LP), traduz eventos→estado, mostra as ações da carta
-selecionada (Invocar/Utilizar/Setar), e grava jogadas em `localStorage: ygo:plays`.
+2 lados, cemitério clicável, LP), traduz eventos→estado e mostra as ações da carta
+selecionada (Invocar/Utilizar/Setar).
 
 ## 4. Protocolo ocgcore (edo9300, DLL 11.0) — DECIFRADO empiricamente
 
@@ -230,7 +235,6 @@ PHASE_MAIN1=0x4, BATTLE=0x80, END=0x200.
 - **Turnos rodam sem travar** (NO_HAND_LIMIT evita o descarte por limite de mão).
 - **Parse correto do turno 3+** (bug do reposition 7-byte corrigido).
 - Erros de JS agora aparecem numa barra vermelha (não trava mais em silêncio).
-- **Gravar jogada** (`ygo:plays`): turno, mão, mão/campo do oponente, sequência de ações.
 
 ## 6. O que FALTA / bugs conhecidos (prioridade)
 
@@ -240,9 +244,7 @@ PHASE_MAIN1=0x4, BATTLE=0x80, END=0x200.
    pelo status END e o vencedor é inferido pelos LP.
 3. **`SELECT_YESNO/EFFECTYN/OPTION` (12/13/14)** — hoje "não suportado"; quando
    aparecer (efeitos opcionais), tratar.
-3. **Ativar magia/armadilha JÁ SETADA no campo** (hoje só ativa da mão).
-4. **Usar as jogadas gravadas (`ygo:plays`) como script de IA dos NPCs** — o objetivo
-   final do treino. Ainda não começado.
+4. **Ativar magia/armadilha JÁ SETADA no campo** (hoje só ativa da mão).
 5. **Cartas customizadas do usuário** (Kuriboh etc.) — precisam de Lua manual
    (Estágio 2, ver `continue.md`); as cartas da **Lista 1** são reais e já funcionam.
 

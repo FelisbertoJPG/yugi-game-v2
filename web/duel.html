@@ -30,8 +30,11 @@
   .zone .zl { position: absolute; top: 1px; left: 2px; font-size: 7px; color: #3a4756; letter-spacing: .5px; }
   .zone .atk, .zone .def { position: absolute; right: 1px; z-index: 2; padding: 1px 3px;
     background: #07151acc; color: #9daebb; font: 700 9px/1 ui-monospace, monospace; text-shadow: 0 1px #000; }
-  .zone .atk { bottom: 1px; }
-  .zone .def { bottom: 12px; }   /* empilha acima do ATK, mesmo canto */
+  /* Mesmo canto, empilhados: ATK em cima, DEF embaixo — a mesma ordem em que
+     a carta de verdade imprime os dois valores. Como são absolutos, quem manda
+     é o `bottom` daqui, não a ordem em que o render() insere os elementos. */
+  .zone .atk { bottom: 12px; }
+  .zone .def { bottom: 1px; }
   .zone .atk.boost, .zone .def.boost { color: #39e5d2; background: #08383bcc; text-shadow: 0 0 5px #0cebd5; }
   .zone .atk.reduced, .zone .def.reduced { color: #ff6b6b; background: #3a0e0ecc; text-shadow: 0 0 5px #ff3b3b; }
   .zone.mz { border-color: #6b4a1e; }
@@ -47,28 +50,48 @@
   .card.playable { outline: 2px solid var(--green); outline-offset: -2px; cursor: pointer; }
   .card.playable:hover { outline-color: var(--gold); }
   .card.selected { outline: 3px solid var(--gold); outline-offset: -2px; }
+  /* Verso da carta — uma definição só, usada pela zona virada, pela mão do
+     oponente e pelo fantasma da animação (#fx .ghost). A arte mora em web/
+     porque é a pasta que o tools/pack.ps1 copia inteira pro payload do
+     DuelAcademy.exe; fora dela, o verso quebraria só no jogo empacotado.
+     `cover` no lugar de `contain`: a imagem é 248x364 (0.681) contra o
+     59/86 (0.686) da zona, então o corte é de menos de 1% — invisível,
+     e evita a tarja de fundo que o contain deixaria. */
   .back {
-    width:100%; height:100%;
-    background:
-      radial-gradient(circle at 50% 42%, #b8863a 0 18%, #7c5417 19% 34%, #59380d 35% 100%),
-      linear-gradient(135deg,#6b4a1e,#3a260c);
-    border: 1px solid #2a1c08; box-sizing: border-box;
+    width: 100%; height: 100%; box-sizing: border-box;
+    background: #0c141d url('/web/assets/back_card.png') center / cover no-repeat;
+    border: 1px solid #2a1c08;
   }
   .actbar { display:flex; gap:6px; align-items:center; }
   .actbar b { color: var(--gold); }
   .actbar button { font-size: 11px; padding: 3px 10px; }
 
-  /* LP fica FORA do grupo que quebra linha — senão, quando o texto do botão
-     de fase varia (ex.: "próxima fase" no turno de batalha do oponente), o
-     LP do canto direito é o primeiro a sobrar pra segunda linha e some da
-     tela sem rolar até lá. */
+  /* LP fica FORA do grupo elástico do meio, senão ele encolhe o LP do canto
+     direito antes de encolher a si mesmo. */
   .midbar { display: flex; align-items: center; gap: 10px; padding: 4px; background: var(--panel); border: 1px solid var(--line); }
   .midbar .lp { flex: none; }
-  .mid-phases { display: flex; align-items: center; gap: 10px; justify-content: center; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
-  .phase-pill { padding: 1px 7px; border: 1px solid var(--line); font-size: 10px; color: var(--dim); }
-  .phase-pill.on { color: var(--gold); border-color: var(--gold); }
+  .mid-phases { display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-width: 0; }
+  /* Só a fase ATUAL, como no Tag Force. Antes ficavam aqui as 6 pastilhas
+     (DP/SP/M1/BP/M2/EP) mais os dois botões de fase; as 5 pastilhas apagadas
+     não diziam nada que a acesa já não dissesse, e os botões foram pro lado
+     do Deck (zona `acts`) — o meio do campo virou espaço livre de propósito. */
+  .phase-now {
+    padding: 3px 16px; border: 1px solid var(--gold); color: var(--gold);
+    background: #07151acc; letter-spacing: 2px; white-space: nowrap;
+    font: 700 12px/1 ui-monospace, monospace; text-transform: uppercase;
+  }
+  /* No turno do oponente o rótulo continua ali, mas apagado: a fase é dele. */
+  .phase-now.opp { color: var(--dim); border-color: var(--line); }
   .lp { font-size: 12px; color: var(--ink); }
-  .midbar button { font-size: 11px; padding: 3px 10px; }
+
+  /* Botões de fase, ao lado do Deck. Empilhados porque a caixa é estreita e
+     os rótulos são longos ("▶ Main Phase 2"); lado a lado quebrariam linha. */
+  /* Largura FIXA de propósito: o contrapeso do outro lado da fileira (ver
+     fieldRows) copia esse número pra manter a linha de magia centrada no
+     mesmo eixo da linha de monstro. Com tabuleiro ativo o `applyZonePosition`
+     sobrescreve por estilo inline, e aí quem manda é a zona `acts`. */
+  .phase-acts { width: 150px; flex: none; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 0 6px; box-sizing: border-box; }
+  .phase-acts button { font-size: 11px; padding: 4px 8px; white-space: nowrap; width: 100%; }
 
   /* ---------- zona interativa (mudar posição / ativar em campo) ---------- */
   .zone.actionable { outline: 2px solid var(--green); outline-offset: -2px; cursor: pointer; }
@@ -94,12 +117,8 @@
     transition: transform var(--fxdur, .28s) cubic-bezier(.4,.1,.2,1), opacity .2s;
   }
   #fx .ghost img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  #fx .ghost .back {
-    width: 100%; height: 100%; box-sizing: border-box; border: 1px solid #2a1c08;
-    background:
-      radial-gradient(circle at 50% 42%, #b8863a 0 18%, #7c5417 19% 34%, #59380d 35% 100%),
-      linear-gradient(135deg,#6b4a1e,#3a260c);
-  }
+  /* o verso do fantasma é o mesmo `.back` de cima — antes esta regra repetia
+     o degradê inteiro, e as duas cópias podiam divergir sem ninguém notar */
   /* tremor do alvo quando é atingido por um ataque */
   @keyframes fx-shake {
     0%,100% { transform: translate(0,0); }
@@ -334,7 +353,6 @@
   <span class="status-line">turno: <b id="turn">—</b></span>
   <select id="deck-sel" title="deck do treino" style="max-width:160px; font-size:11px"></select>
   <button id="btn-end">encerrar turno</button>
-  <button id="btn-save" class="btn-primary" title="grava a jogada deste turno p/ treinar o NPC">salvar jogada</button>
   <button id="btn-start">novo duelo</button>
   <button id="btn-home">← home</button>
 </div>
@@ -444,7 +462,7 @@ import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/
 import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
-import { getActiveBoard, allZoneIds, CARD_ASPECT } from '/web/js/boards.js';
+import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/boards.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
 import { requireLogin } from '/web/js/auth.js';
 
@@ -468,7 +486,8 @@ let rewardGiven = false;   // trava para não premiar duas vezes no mesmo duelo
 const SRV = 'http://localhost:8770';
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
-const PHASES = [[1,'DP'],[2,'SP'],[4,'M1'],[0x80,'BP'],[0x100,'M2'],[0x200,'EP']];
+// Nome por bit de fase. Cobre mais casos que os 6 "oficiais" porque o motor
+// também reporta Battle Step / Damage Step dentro da Battle Phase.
 const PHASE_NOME = {
   1: 'Draw Phase', 2: 'Standby Phase', 4: 'Main Phase 1',
   0x8: 'Battle Phase', 0x10: 'Battle Step', 0x20: 'Damage Step',
@@ -493,7 +512,6 @@ let deckCount = { 0: 0, 1: 0 };              // cartas restantes no deck de cada
 let extraCount = { 0: 0, 1: 0 };             // cartas restantes no Extra Deck de cada um
 let extraPicker = null;                       // { acts } quando a pilha do Extra foi clicada
 let selectedHand = null;                      // índice da carta da mão selecionada
-let turnPlays = [];                          // jogadas do turno atual (p/ "salvar jogada")
 let deckName = '';                            // deck em uso
 function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: null, g: [] }; }
 
@@ -501,7 +519,31 @@ function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: n
 // Sem tabuleiro ativo (o caso comum), nenhuma destas variáveis é usada e o
 // layout continua exatamente o flexbox de sempre — este bloco é só aditivo.
 let activeBoard = null;   // { name, canvas, zones } ou null
+
+// O tabuleiro é desenhado num canvas fixo (1600x900) e a tela quase nunca tem
+// essa proporção. Antes havia UMA escala, `min(sx, sy)` (contain), e o
+// tabuleiro inteiro encolhia até caber no eixo mais apertado — numa janela
+// estreita e alta isso deixava o campo espremido no topo com um vazio enorme
+// embaixo, e as cartas pequenas à toa. Agora são duas coisas separadas:
+//
+//   boardScale            escala das CARTAS. Uniforme, nunca distorce a arte.
+//   boardScaleX/Y         escala das POSIÇÕES, por eixo. >= boardScale sempre,
+//                         então esticar só AUMENTA o vão entre as zonas — nunca
+//                         encavala uma na outra (é o que torna isto seguro).
+//   boardOffX/Y           sobra centralizada, pro campo não ficar colado numa borda.
 let boardScale = 1;
+let boardScaleX = 1, boardScaleY = 1;
+let boardOffX = 0, boardOffY = 0;
+
+/**
+ * Quanto as posições podem esticar além da escala das cartas.
+ * `1` = contain puro (o comportamento antigo). Quanto maior, mais o campo
+ * ocupa a tela — mas as fileiras também ficam mais soltas, com ar demais
+ * entre elas. Se o campo parecer esparso demais numa tela, baixe; se ainda
+ * sobrar borda, suba. É o único número a mexer pra calibrar isso.
+ */
+const MAX_STRETCH = 1.35;
+
 const ZONE_KIND = new Map(allZoneIds().map((z) => [z.id, z.kind]));
 
 /** `${player}:${loc}:${seq}` (já usado em dataset.anchor) -> id do board.js. */
@@ -520,19 +562,22 @@ function applyZonePosition(el, zoneid) {
   const zv = activeBoard.zones[zoneid];
   if (!zv) return;
   el.style.position = 'absolute';
-  el.style.left = `${zv.x * boardScale}px`;
-  el.style.top = `${zv.y * boardScale}px`;
+  el.style.left = `${boardOffX + zv.x * boardScaleX}px`;
+  el.style.top = `${boardOffY + zv.y * boardScaleY}px`;
   if (ZONE_KIND.get(zoneid) === 'area') {
-    el.style.width = `${zv.w * boardScale}px`;
-    // `mid` (fases/LP) pode precisar de mais altura que o desenhado no editor
-    // — o botão de fase quebra linha quando não há ação disponível (rótulo
-    // "▶ próxima fase", o mais longo). Altura FIXA cortaria essa segunda
-    // linha; min-height deixa crescer em vez de vazar por cima do campo.
-    if (zoneid === 'mid') el.style.minHeight = `${zv.h * boardScale}px`;
-    else el.style.height = `${zv.h * boardScale}px`;
+    // Área acompanha o estiramento nos dois eixos: é isso que faz a caixa da
+    // mão ficar mais alta numa tela alta — e, por tabela, as cartas maiores.
+    el.style.width = `${zv.w * boardScaleX}px`;
+    // As zonas de UI (`mid`, `acts`) têm texto de tamanho fixo em px dentro —
+    // a escala encolhe a caixa, mas não a fonte dos botões nem do rótulo de
+    // fase. Altura FIXA cortaria o conteúdo num tabuleiro pequeno; min-height
+    // deixa a caixa crescer em vez de vazar por cima do campo.
+    if (zoneid === 'mid' || zoneid === 'acts') el.style.minHeight = `${zv.h * boardScaleY}px`;
+    else el.style.height = `${zv.h * boardScaleY}px`;
   } else {
-    // 'slot': só a largura — a CSS (.zone/.pilezone) já tem aspect-ratio
-    // fixo, então a altura acompanha sozinha.
+    // 'slot': só a largura, e pela escala UNIFORME — a CSS (.zone/.pilezone)
+    // já tem aspect-ratio fixo, então a altura acompanha sozinha e a carta
+    // nunca sai deformada, por mais desproporcional que a janela esteja.
     el.style.width = `${zv.size * boardScale}px`;
   }
 }
@@ -548,9 +593,19 @@ function scaleCard(el, player) {
   if (!activeBoard) return;
   const zv = activeBoard.zones[`p${player}:hand`];
   if (!zv) { el.style.width = `${54 * boardScale}px`; return; }
-  const boxH = zv.h * boardScale;
-  const cardH = boxH * 0.86;             // margem, senão a carta encosta na borda
-  el.style.width = `${cardH * CARD_ASPECT}px`;
+
+  const boxH = zv.h * boardScaleY;
+  const porAltura = boxH * 0.86 * CARD_ASPECT;   // margem, senão encosta na borda
+
+  // Trava de largura: a `.handrow` é `flex-wrap` com `overflow:hidden`, então
+  // carta grande demais não "vaza" — ela quebra pra uma segunda linha que fica
+  // CORTADA, e some da tela sem aviso. Com a mão cheia isso aconteceria fácil
+  // agora que a altura pode esticar. Cabe a mão inteira ou a carta encolhe.
+  const n = Math.max(1, player === 0 ? hand[0].length : hand[1]);
+  const GAP = 4;                                 // o mesmo `gap` da .handrow
+  const porLargura = (zv.w * boardScaleX - (n - 1) * GAP) / n;
+
+  el.style.width = `${Math.max(20, Math.min(porAltura, porLargura))}px`;
 }
 
 function updateBoardScale() {
@@ -572,7 +627,20 @@ function updateBoardScale() {
   const availW = arena.clientWidth;
   const availH = arena.clientHeight;
   if (!availW || !availH) return;   // ainda não teve layout resolvido; próximo frame tenta de novo
-  boardScale = Math.max(0.05, Math.min(availW / activeBoard.canvas.w, availH / activeBoard.canvas.h));
+
+  const sx = availW / activeBoard.canvas.w;
+  const sy = availH / activeBoard.canvas.h;
+
+  // Carta: o eixo mais apertado manda, senão ela não caberia.
+  boardScale = Math.max(0.05, Math.min(sx, sy));
+  // Posição: pode esticar até `MAX_STRETCH` da escala da carta, mas nunca além
+  // do que o eixo realmente tem — passar disso jogaria zona pra fora da tela.
+  boardScaleX = Math.min(sx, boardScale * MAX_STRETCH);
+  boardScaleY = Math.min(sy, boardScale * MAX_STRETCH);
+  // O que sobrou vira margem dos DOIS lados. É o que tira o campo de cima e o
+  // põe no meio quando a janela é mais alta que o tabuleiro.
+  boardOffX = Math.max(0, (availW - activeBoard.canvas.w * boardScaleX) / 2);
+  boardOffY = Math.max(0, (availH - activeBoard.canvas.h * boardScaleY) / 2);
 }
 
 /** `#hand-you`/`#hand-opp`/`#mid` são estáticos no HTML (não recriados a cada
@@ -582,18 +650,9 @@ function updateBoardScale() {
 function positionHandRows() {
   applyZonePosition($('hand-you'), 'p0:hand');
   applyZonePosition($('hand-opp'), 'p1:hand');
-  if (activeBoard.zones.mid) {
-    applyZonePosition($('mid'), 'mid');
-  } else {
-    // Tabuleiro salvo antes de `mid` existir como zona: reabrir no editor
-    // preenche sozinho (backfillMissingZones), mas até isso acontecer não
-    // deixa o indicador de fase/LP largado onde o flexbox mandar — recentraliza.
-    const mid = $('mid');
-    mid.style.position = 'absolute';
-    mid.style.left = '50%';
-    mid.style.top = '50%';
-    mid.style.transform = 'translate(-50%, -50%)';
-  }
+  // `mid` não precisa mais de fallback próprio: o backfill de `loadActiveBoard`
+  // já garante que todo tabuleiro carregado tem todas as zonas do schema.
+  applyZonePosition($('mid'), 'mid');
 }
 
 /** Carrega o tabuleiro ativo (se houver) ANTES do primeiro render, pra não
@@ -611,6 +670,15 @@ async function loadActiveBoard() {
     const entry = list.find((b) => b.path === path);
     if (!entry) return;
     activeBoard = entry.board;
+    // Um tabuleiro salvo antes de alguma zona existir (`acts` é a mais nova)
+    // não tem esse id em `zones`. Completa com a posição padrão — MESMA coisa
+    // que o `backfillMissingZones` do editor faz ao abrir. Sem isso, a zona
+    // que falta fica sem posição e o elemento dela, sozinho em fluxo numa
+    // fileira toda absoluta, cai por cima do campo.
+    const padrao = defaultLayout().zones;
+    for (const { id } of allZoneIds()) {
+      if (!activeBoard.zones[id] && padrao[id]) activeBoard.zones[id] = padrao[id];
+    }
     const arena = document.querySelector('.arena');
     if (activeBoard.background) {
       arena.style.backgroundImage = `url(${activeBoard.background})`;
@@ -679,7 +747,7 @@ async function start() {
   deckName = deck.name;
   hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
   lp = { 0: 8000, 1: 8000 };
-  ended = false; turnNo = 0; turnPlays = []; selectedHand = null;
+  ended = false; turnNo = 0; selectedHand = null;
   rewardGiven = false;
   dragging = null; pendingZone = null; fecharPopupPosicao(); fecharFimDuelo();
   $('log').replaceChildren();
@@ -719,7 +787,6 @@ async function act(action, arg, label, args) {
   busy = true;
   question = null;
   render(); renderSelection(); renderChain(); renderYesno();
-  turnPlays.push({ action, arg, label, turn: turnNo });
   try { await apply(await rpc('/respond', args ? { action, arg, args } : { action, arg })); }
   catch (e) {
     question = perguntaRespondida;
@@ -1170,7 +1237,6 @@ function handle(ev) {
       break;
     case 'turn':
       turn = ev.player; turnNo++;
-      if (ev.player === 0) turnPlays = [];
       log(`— turno ${turnNo} (jogador ${ev.player}) —`, true);
       avisoFase(ev.player === 0 ? 'Seu turno' : 'Turno do oponente');
       break;
@@ -1573,6 +1639,21 @@ function fieldRows(player, isYou) {
   // Deck logo abaixo do cemitério, que é onde ele fica de verdade na mesa.
   srow.append(deckEl(player));
   srow.append(extraEl(player, isYou));
+  // Botões de fase encostados no Deck — só do SEU lado; o oponente não decide
+  // fase nenhuma por aqui (quem joga por ele é o NpcBrain, no servidor).
+  if (isYou) {
+    // Contrapeso da mesma largura na ponta esquerda: a fileira é
+    // `justify-content:center`, então sem ele os 150px da caixa empurrariam
+    // S0–S4/Deck/Extra pra esquerda e a linha de magia sairia do eixo da
+    // linha de monstro. Só no flexbox — com tabuleiro ativo cada zona tem
+    // posição própria em px e ninguém empurra ninguém.
+    if (!activeBoard) {
+      const contrapeso = document.createElement('div');
+      contrapeso.style.cssText = 'width:150px; flex:none';
+      srow.prepend(contrapeso);
+    }
+    srow.append(phaseActsEl());
+  }
 
   // você (embaixo): monstros na linha de cima (perto do centro), magias embaixo.
   // oponente (em cima): espelhado.
@@ -1822,10 +1903,10 @@ function render() {
   };
   const midPhases = document.createElement('div');
   midPhases.className = 'mid-phases';
-  midPhases.append(
-    ...PHASES.map(([v, n]) => { const s = document.createElement('span'); s.className = 'phase-pill' + (v === phase ? ' on' : ''); s.textContent = n; return s; }),
-    ...botoesDeFase(),
-  );
+  const agora = document.createElement('span');
+  agora.className = 'phase-now' + (turn === 0 ? '' : ' opp');
+  agora.textContent = PHASE_NOME[phase] ?? `Fase ${phase}`;
+  midPhases.append(agora);
   $('mid').replaceChildren(lpEl(1), midPhases, lpEl(0));
 
   // mão do oponente (verso)
@@ -1909,6 +1990,22 @@ function render() {
  * (battle 2) ou à End Phase (battle 3). O botão traduz isso para o que faz
  * sentido no momento, e desliga quando o motor não permite.
  */
+/**
+ * Caixa dos botões de fase, ao lado do Deck. É uma zona de UI (`acts`) como a
+ * `mid`: não existe pro `ocgcore` — nenhuma carta "mora" ali —, mas é
+ * posicionável no editor de campo igual às outras.
+ */
+function phaseActsEl() {
+  const d = document.createElement('div');
+  d.className = 'phase-acts';
+  d.append(...botoesDeFase());
+  // Sem tabuleiro ativo isto não faz nada e o flexbox resolve; com tabuleiro,
+  // a zona `acts` manda — o backfill de `loadActiveBoard` garante que ela
+  // sempre existe, então não há caso "sem posição" pra adivinhar.
+  applyZonePosition(d, 'acts');
+  return d;
+}
+
 function botoesDeFase() {
   const meu = question && question.player === 0 && !ended;
   const idle = meu && question.kind === 'idle';
@@ -2016,43 +2113,11 @@ function populateDecks() {
   sel.value = (active != null && decks[active]) ? String(active) : (decks.length ? '0' : '');
 }
 
-function snapshotField() {
-  const side = (p) => ({
-    m: field[p].m.map((c) => c ? c.code : null),
-    s: field[p].s.map((c) => c ? c.code : null),
-    f: field[p].f ? field[p].f.code : null,
-    g: [...field[p].g],
-  });
-  return { you: side(0), opp: side(1) };
-}
-
 function conn(ok){ $('dot').classList.toggle('on', ok); $('conn').textContent = ok?'conectado':'desconectado'; }
 function warn(m){ $('warn').hidden=false; $('warn').textContent=m; }
 // qualquer erro de JS agora aparece na barra vermelha (nunca mais trava em silêncio)
 window.addEventListener('error', (e) => warn('ERRO JS: ' + e.message + ' @ linha ' + e.lineno));
 window.addEventListener('unhandledrejection', (e) => warn('ERRO async: ' + ((e.reason && e.reason.message) || e.reason)));
-
-// ---------- salvar jogada (memória p/ NPC) ----------
-// Snapshot do momento: turno, sua mão, a mão/campo do oponente, o campo, e a
-// sequência de ações que você fez neste turno. É a matéria-prima do "treinar NPC".
-function savePlays() {
-  if (!turnPlays.length) return log('nenhuma jogada neste turno pra salvar.');
-  const snap = {
-    at: new Date().toISOString(),
-    deck: deckName,
-    turn: turnNo,
-    phase,
-    myHand: hand[0].map((c) => ({ code: c, name: nameOf(c) })),
-    oppHandCount: hand[1],
-    field: snapshotField(),
-    plays: turnPlays,
-  };
-  let all = [];
-  try { all = JSON.parse(localStorage.getItem('ygo:plays') || '[]'); } catch {}
-  all.push(snap);
-  localStorage.setItem('ygo:plays', JSON.stringify(all));
-  log(`✔ jogada do turno ${turnNo} salva (${turnPlays.length} ações, ${snap.myHand.length} na mão). Total: ${all.length}.`, true);
-}
 
 /**
  * Recompensa do modo Adversário: só se for adversário (tem `advNpc`), se venceu,
@@ -2085,7 +2150,6 @@ function fecharFimDuelo() { $('end-overlay').hidden = true; }
 
 $('btn-start').onclick = start;
 $('btn-end').onclick = () => act('endturn', 0, 'encerrar turno');
-$('btn-save').onclick = savePlays;
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 $('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
 $('end-home').onclick = () => (location.href = '/web/index.html');

@@ -74,7 +74,14 @@ export function zoneIds(player) {
  * jogador: LP dos dois lados e as fases moram na mesma barra.
  */
 export function uiZoneIds() {
-  return [{ id: 'mid', kind: 'area', label: 'Fases / LP' }];
+  return [
+    { id: 'mid', kind: 'area', label: 'Fases / LP' },
+    // Os botões "próxima fase"/"End Phase". Moram ao lado do Deck, e não no
+    // centro junto das fases: escolher entre avançar e pular direto pro fim
+    // do turno é ação do jogador, então fica do lado de onde ele já está
+    // olhando (mão, deck), não no meio do campo.
+    { id: 'acts', kind: 'area', label: 'Botões de fase' },
+  ];
 }
 
 export function allZoneIds() {
@@ -95,7 +102,7 @@ export function isKnownZone(id) {
 export function zoneGroups() {
   const all = allZoneIds().map((z) => z.id);
   const hand = all.filter((id) => id.endsWith(':hand'));
-  const field = all.filter((id) => !id.endsWith(':hand'));   // inclui 'mid'
+  const field = all.filter((id) => !id.endsWith(':hand'));   // inclui 'mid' e 'acts'
   return { hand, field, all };
 }
 
@@ -126,6 +133,8 @@ export function defaultLayout(name = 'Padrão') {
   const FIELD_W = 7 * SIZE + 6 * GAP;
   const FIELD_X = (CANVAS.w - FIELD_W) / 2;
 
+  let magiaY0 = 0;   // linha de magia do jogador — os botões de fase alinham por ela
+
   for (const player of [0, 1]) {
     const p = `p${player}`;
     // jogador 0 (você) embaixo: monstro perto do centro, magia abaixo dele.
@@ -136,6 +145,7 @@ export function defaultLayout(name = 'Padrão') {
       ? monstroY + SIZE * (86 / 59) + GAP
       : monstroY - SIZE * (86 / 59) - GAP;
     const handY = player === 0 ? CANVAS.h - 130 : 20;
+    if (player === 0) magiaY0 = magiaY;
 
     row([`${p}:f`, `${p}:m0`, `${p}:m1`, `${p}:m2`, `${p}:m3`, `${p}:m4`, `${p}:gy`], monstroY, FIELD_X);
     row([`${p}:s0`, `${p}:s1`, `${p}:s2`, `${p}:s3`, `${p}:s4`, `${p}:deck`, `${p}:extra`], magiaY, FIELD_X);
@@ -147,6 +157,11 @@ export function defaultLayout(name = 'Padrão') {
   // estreito que isso e o rótulo mais longo do botão de fase ("▶ próxima
   // fase", quando não há ação disponível) quebra linha e vaza da caixa.
   zones.mid = { x: FIELD_X, y: CANVAS.h / 2 - 25, w: FIELD_W, h: 50 };
+
+  // Botões de fase: à direita do Extra do jogador, na mesma linha do Deck.
+  // Sobra folga de canvas ali (a fileira termina em FIELD_X+FIELD_W = 1164 de
+  // 1600), então a caixa cabe sem espremer nada do campo.
+  zones.acts = { x: FIELD_X + FIELD_W + GAP, y: magiaY0, w: 160, h: 64 };
 
   return { name, canvas: { ...CANVAS }, background: null, fieldSpell: null, zones };
 }

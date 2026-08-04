@@ -210,6 +210,12 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-equip-classicos") >= 0)
                 return TestEquipClassicos.Run(streamingAssets);
 
+            // Teste de aceitacao: o NpcBrain sabe pilotar o COMBO do Wevil sozinho
+            // (Cocoon of Evolution -> evolucao das mariposas), nao so as cartas
+            // rodarem quando alguem manda ativar (isso e' o --test-weevil).
+            if (Array.IndexOf(args, "--test-weevil-npc") >= 0)
+                return TestWeevilNpc.Run(streamingAssets);
+
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)
             {

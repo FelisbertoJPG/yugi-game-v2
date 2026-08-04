@@ -31,6 +31,25 @@ namespace DuelServer
         const uint TIME_WIZARD = 71625222;        // moeda: cara varre o campo dele, coroa varre o meu
         const uint TOON_WORLD = 15259703;         // habilita o pacote Toon inteiro
 
+        // Pacote do Wevil: o casulo transforma um Inseto fraco em Larvae/Great/
+        // Perfectly Ultimate Great Moth depois de 2/4/6 turnos equipado — o motor
+        // já faz a contagem sozinha (ver TestWeevil), o NPC só precisa: equipar
+        // no inseto MAIS FRACO (não no melhor atacante — o ATK dele vira 0
+        // enquanto durar), e depois Invocar Especialmente cada mariposa assim
+        // que o motor a oferecer em `spSummonable`.
+        const uint COCOON_OF_EVOLUTION = 40240595;
+        const uint INSECT_ARMOR_LASER = 3492538;   // +700 ATK — o alvo default (maior ATK) já serve
+        const uint INSECT_IMITATION = 96965364;    // tributa 1 inseto fraco, traz 1 mais forte do deck
+        // O Lua do Cocoon (s.filter) só aceita Petit Moth COM A FACE PRA CIMA
+        // como alvo — setado (virado) não serve nunca. Só existe 1 código.
+        const uint PETIT_MOTH = 58192742;
+        static readonly HashSet<uint> MARIPOSAS_CASULO = new()
+        {
+            87756343, // Larvae Moth
+            14141448, // Great Moth
+            48579379, // Perfectly Ultimate Great Moth
+        };
+
         const byte HAND = 0x2, MZONE = 0x4, GRAVE = 0x10;
         const uint TYPE_SPELL = 0x2, TYPE_TRAP = 0x4, TYPE_RITUAL = 0x80;
 
@@ -318,6 +337,47 @@ namespace DuelServer
                 return new Play("activate", fusao.index,
                     $"Fusao: corpo grande em campo e materiais no cemiterio p/ o Reborn ({fusao.code})");
 
+            // 5.15 Petit Moth com a face pra CIMA: se eu tenho Cocoon of
+            //      Evolution na mão, o alvo do equip PRECISA estar face para
+            //      cima (exigência do próprio Lua, `s.filter`). A defesa
+            //      genérica (passo 6, mais abaixo) setaria o Petit Moth virado
+            //      assim que aparecesse qualquer ameaça — e virado ele fica
+            //      PERMANENTEMENTE inválido como alvo daquela cópia do casulo,
+            //      matando o combo antes de começar. Mesmo espírito da regra
+            //      5.7 (Mago do Tempo em ataque pela moeda): força a carta pra
+            //      cima na hora certa, antes que a lógica de defesa a esconda.
+            var petitParaCasulo = q.summonable.FirstOrDefault(a => a.code == PETIT_MOTH);
+            if (petitParaCasulo.code == PETIT_MOTH && NaMao(me, COCOON_OF_EVOLUTION))
+                return new Play("summon", petitParaCasulo.index,
+                    "Petit Moth em ataque (nao setado): tenho Cocoon of Evolution na mao " +
+                    "e o alvo do equip precisa estar com a face para cima");
+
+            // 5.2 Cocoon of Evolution — equipa no inseto mais FRACO em campo (o
+            //     motor só oferece a ativação quando existe alvo válido, então
+            //     não é preciso checar "tenho inseto em campo" aqui). Marca
+            //     `_proximoAlvoEquipFraco` para o DecideSelect que vem em seguida.
+            if (!_casuloJaEquipado && Ativavel(q, COCOON_OF_EVOLUTION))
+            {
+                _proximoAlvoEquipFraco = true;
+                _casuloJaEquipado = true;
+                return new Play("activate", IdxAtivavel(q, COCOON_OF_EVOLUTION),
+                    "Cocoon of Evolution: equipa no inseto mais fraco, comeca a contagem da evolucao");
+            }
+
+            // 5.3 Insect Armor with Laser Cannon — +700 ATK fixo. O alvo default
+            //     do DecideSelect (maior ATK) já é o que se quer aqui: reforça o
+            //     melhor atacante em vez de pouco importar.
+            if (Ativavel(q, INSECT_ARMOR_LASER))
+                return new Play("activate", IdxAtivavel(q, INSECT_ARMOR_LASER),
+                    "Insect Armor with Laser Cannon: +700 ATK no melhor atacante");
+
+            // 5.4 Insect Imitation — tributa 1 inseto (o DecideSelect já sacrifica
+            //     o de menor ATK) para trazer um Inseto de nível +1 do PRÓPRIO
+            //     deck. Sempre vale: troca o inseto mais fraco por um mais forte.
+            if (Ativavel(q, INSECT_IMITATION))
+                return new Play("activate", IdxAtivavel(q, INSECT_IMITATION),
+                    "Insect Imitation: tributa o inseto mais fraco por um mais forte do deck");
+
             // 5.5 Remoção e burn (decks de queima como o do Joey):
             //   • remoção de monstro (Raigeki/Dark Hole/Fissure) só com alvo;
             //   • remoção de magia/armadilha (Harpie's/MST) só se o oponente tiver S/T;
@@ -375,6 +435,19 @@ namespace DuelServer
                 return new Play("spsummon", toonSp.Act.index,
                     $"Toon: invocacao especial de {toonSp.Act.code} (ATK {toonSp.St.AtkValue}) — Toon World ja habilita");
 
+            // 5.9 MARIPOSA DO CASULO: o motor só oferece Larvae/Great/Perfectly
+            //     Ultimate Great Moth em `spSummonable` depois de 2/4/6 turnos com
+            //     o Cocoon of Evolution equipado (contagem do próprio Lua, ver
+            //     TestWeevil) — sem esta regra elas nunca eram invocadas mesmo
+            //     disponíveis, e o casulo inteiro não servia pra nada.
+            var mariposaSp = Monstros(q.spSummonable)
+                .Where(c => MARIPOSAS_CASULO.Contains(c.Act.code))
+                .OrderByDescending(c => c.St.AtkValue)
+                .FirstOrDefault();
+            if (mariposaSp.Ok)
+                return new Play("spsummon", mariposaSp.Act.index,
+                    $"casulo evoluiu: Invocacao Especial de {mariposaSp.Act.code} (ATK {mariposaSp.St.AtkValue})");
+
             // 6. Beatdown: monstros grandes (sacrificando os fracos) ou beater Nv4.
             //    O filtro `TributoCompensa` impede o NPC de tributar um corpo
             //    melhor do que o que vai entrar. Vale para as DUAS listas: o Set
@@ -382,11 +455,20 @@ namespace DuelServer
             //    invocação. Filtrar só a de invocação deixava o NPC tributar uma
             //    fusão de 3200 para SETAR um Red-Eyes — o mesmo erro pela porta
             //    de trás.
-            var invocaveis = Monstros(q.summonable);
+            // Cocoon of Evolution é um Monstro de Efeito (0/2000) por baixo do
+            // pano — DEF alta o suficiente pra essa lógica genérica de "seta o
+            // melhor DEF quando ameaçado" QUEIMAR ele como parede assim que
+            // aparece uma ameaça, antes da regra 5.2 (o equip de verdade) ter
+            // qualquer chance. Uma vez set/invocado como monstro comum ele sai
+            // da mão e o combo morre pra sempre com essa cópia. Fora das DUAS
+            // listas — só entra em campo pela regra 5.2, nunca por aqui.
+            var invocaveis = Monstros(q.summonable).Where(c => c.Act.code != COCOON_OF_EVOLUTION).ToList();
             // O Mago do Tempo NUNCA entra como parede: setá-lo o vira, e virado
             // ele perde a única coisa que vale nele (a moeda). Um 500/400 também
             // não segura nada. Fora da lista de setáveis, portanto.
-            var setaveis = Monstros(q.settable).Where(c => c.Act.code != TIME_WIZARD).ToList();
+            var setaveis = Monstros(q.settable)
+                .Where(c => c.Act.code != TIME_WIZARD && c.Act.code != COCOON_OF_EVOLUTION)
+                .ToList();
             var altasQueCompensam = invocaveis
                 .Where(c => c.St.Level >= 5 && TributoCompensa(me, c.St, setando: false))
                 .ToList();
@@ -443,6 +525,22 @@ namespace DuelServer
                     soma += Math.Max(1, (int)c.release);
                 }
                 return picks;
+            }
+
+            // Alvo do Cocoon of Evolution: o inseto mais FRACO, não o mais forte
+            // (o default logo abaixo é para remoção/reborn — o oposto do que o
+            // casulo quer). `release==0` de propósito, nunca colide com o
+            // tributo acima. Consome a flag numa tacada só, mesmo que a lista
+            // de opções esteja vazia por algum motivo — nunca fica "presa"
+            // esperando uma seleção que não vai vir.
+            if (_proximoAlvoEquipFraco)
+            {
+                _proximoAlvoEquipFraco = false;
+                if (q.choices.Count > 0)
+                {
+                    var maisFraco = q.choices.OrderBy(c => _cards.Stats(c.code).AtkValue).First();
+                    return new List<int> { maisFraco.index };
+                }
             }
 
             // Busca (ex.: Toon Table of Contents): se Toon World está entre as
@@ -634,6 +732,29 @@ namespace DuelServer
                  (ofensivo ? "ataque" : "defesa (DEF >= ATK)"));
             return ofensivo ? POS_ATAQUE : FACEUP_DEFESA;
         }
+
+        /// <summary>
+        /// Setado logo antes de mandar ativar o Cocoon of Evolution — a próxima
+        /// seleção (o alvo do equip) vem por aqui e não pela regra genérica de
+        /// "maior ATK" (que é certa para remoção/reborn, mas errada pro casulo:
+        /// ele quer o inseto mais FRACO, o melhor atacante não deve virar uma
+        /// parede de 0 ATK por 6 turnos). Consumido (voltando a false) assim que
+        /// `DecideSelect` usa.
+        /// </summary>
+        bool _proximoAlvoEquipFraco;
+
+        /// <summary>
+        /// Já equipei um Cocoon of Evolution nesta partida? O Lua dele
+        /// (`checkcon2`/`checkop2`) reseta a contagem de turnos quando o GRUPO
+        /// de alvos "muda de identidade" entre checagens — equipar uma SEGUNDA
+        /// cópia no MESMO Petit Moth (o motor deixa, `s.filter` não exclui
+        /// quem já está equipado) reinicia o contador sem nenhum aviso, e a
+        /// evolução nunca completa. Sem visibilidade de "quem já tem o quê"
+        /// equipado, a trava é uma via só: depois do primeiro equip bem
+        /// sucedido, nunca mais tenta de novo nesta partida — desperdiça
+        /// cópias extras em vez de arriscar quebrar a única em andamento.
+        /// </summary>
+        bool _casuloJaEquipado;
 
         /// <summary>
         /// Já pus uma carta NESTA cadeia? O motor abre uma janela por elo, e sem

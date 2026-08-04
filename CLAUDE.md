@@ -54,7 +54,14 @@ o equipamento de Inseto dá +700, e as três mariposas só ficam invocáveis no
 `--test-equip-classicos` (os dois ciclos completos de equipamento da Lista 1,
 +300 por Tipo e +400/−200 por Atributo: cada carta equipada no monstro certo,
 ATK conferido no motor — um equipamento sem alvo válido nunca é oferecido pelo
-core e ficaria morto na lista sem ninguém notar).
+core e ficaria morto na lista sem ninguém notar), `--test-weevil-npc`
+(o `NpcBrain` sozinho, sem script — invoca o Petit Moth em ATAQUE, não
+setado, porque o Lua do Cocoon de Evolução só aceita alvo com a face para
+cima; equipa o casulo no inseto certo sem desperdiçar uma segunda cópia no
+mesmo alvo, o que reseta a contagem de turnos; e chega a Invocar
+Especialmente uma mariposa de verdade — `--test-weevil` já provava que as
+cartas rodam certo quando ALGUÉM manda ativar, este prova que o NPC decide
+sozinho).
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +

@@ -113,6 +113,12 @@ export function defaultLayout(name = 'Padrão') {
     for (const id of ids) { zones[id] = { x, y, size: SIZE }; x += SIZE + GAP; }
   }
 
+  // Span da fileira de monstro (campo + 5 zonas + cemitério) — a barra de
+  // fases/LP usa a MESMA largura, alinhada com as colunas acima e abaixo
+  // dela, em vez de um valor solto.
+  const FIELD_W = 7 * SIZE + 6 * GAP;
+  const FIELD_X = (CANVAS.w - FIELD_W) / 2;
+
   for (const player of [0, 1]) {
     const p = `p${player}`;
     // jogador 0 (você) embaixo: monstro perto do centro, magia abaixo dele.
@@ -124,14 +130,16 @@ export function defaultLayout(name = 'Padrão') {
       : monstroY - SIZE * (86 / 59) - GAP;
     const handY = player === 0 ? CANVAS.h - 130 : 20;
 
-    row([`${p}:f`, `${p}:m0`, `${p}:m1`, `${p}:m2`, `${p}:m3`, `${p}:m4`, `${p}:gy`], monstroY);
-    row([`${p}:s0`, `${p}:s1`, `${p}:s2`, `${p}:s3`, `${p}:s4`, `${p}:deck`, `${p}:extra`], magiaY);
+    row([`${p}:f`, `${p}:m0`, `${p}:m1`, `${p}:m2`, `${p}:m3`, `${p}:m4`, `${p}:gy`], monstroY, FIELD_X);
+    row([`${p}:s0`, `${p}:s1`, `${p}:s2`, `${p}:s3`, `${p}:s4`, `${p}:deck`, `${p}:extra`], magiaY, FIELD_X);
     zones[`${p}:hand`] = { x: (CANVAS.w - 1000) / 2, y: handY, w: 1000, h: 110 };
   }
 
   // Fases/LP: na faixa estreita entre as duas fileiras de monstro (o "meio"
-  // de sempre no layout flexbox).
-  zones.mid = { x: (CANVAS.w - 600) / 2, y: CANVAS.h / 2 - 20, w: 600, h: 40 };
+  // de sempre no layout flexbox), mesma largura da fileira de monstro — mais
+  // estreito que isso e o rótulo mais longo do botão de fase ("▶ próxima
+  // fase", quando não há ação disponível) quebra linha e vaza da caixa.
+  zones.mid = { x: FIELD_X, y: CANVAS.h / 2 - 25, w: FIELD_W, h: 50 };
 
   return { name, canvas: { ...CANVAS }, background: null, fieldSpell: null, zones };
 }

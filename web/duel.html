@@ -517,7 +517,12 @@ function applyZonePosition(el, zoneid) {
   el.style.top = `${zv.y * boardScale}px`;
   if (ZONE_KIND.get(zoneid) === 'area') {
     el.style.width = `${zv.w * boardScale}px`;
-    el.style.height = `${zv.h * boardScale}px`;
+    // `mid` (fases/LP) pode precisar de mais altura que o desenhado no editor
+    // — o botão de fase quebra linha quando não há ação disponível (rótulo
+    // "▶ próxima fase", o mais longo). Altura FIXA cortaria essa segunda
+    // linha; min-height deixa crescer em vez de vazar por cima do campo.
+    if (zoneid === 'mid') el.style.minHeight = `${zv.h * boardScale}px`;
+    else el.style.height = `${zv.h * boardScale}px`;
   } else {
     // 'slot': só a largura — a CSS (.zone/.pilezone) já tem aspect-ratio
     // fixo, então a altura acompanha sozinha.

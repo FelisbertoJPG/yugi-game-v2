@@ -118,6 +118,9 @@ function applyBaseMeta() {
     const m = meta[npc.id] || {};
     npc.campaign = m.campaign || null;
     npc.board = m.board || null;
+    // Sem nível salvo, iniciante — os 3 fixos são a fase 1, e quem quiser um
+    // Kaiba que lê a sua mão marca isso no "editar configurações".
+    npc.level = m.level === 'avancado' ? 'avancado' : 'iniciante';
   }
 }
 
@@ -156,7 +159,28 @@ export async function hydrateCustomNpcs() {
  * 3 NPCs fixos ganham/trocam campanha via `updateNpc` (não têm construtor
  * próprio, então não passam por `createNpc`).
  */
-export function createNpc(name, theme, { campaign, board } = {}) {
+/**
+ * Níveis de adversário. A diferença é UMA só: o avançado **lê** a mão e as
+ * cartas baixadas do jogador, e por isso mede o impacto de cada carta (não cai
+ * em isca de negação, não ataca a parede virada, não se estende contra um
+ * Raigeki que ele viu). Os dois jogam com as mesmas regras — o iniciante só
+ * decide com o que está à vista, como um humano decidiria.
+ *
+ * Quem não tem nível definido é iniciante: é o padrão, e é o que todo NPC
+ * criado antes disto existir continua sendo.
+ */
+export const NPC_LEVELS = [
+  { id: 'iniciante', label: 'Iniciante', hint: 'joga só com o que está à vista' },
+  { id: 'avancado', label: 'Avançado', hint: 'lê sua mão e suas cartas baixadas' },
+];
+
+export const npcLevel = (npc) => (npc?.level === 'avancado' ? 'avancado' : 'iniciante');
+export const npcLevelLabel = (npc) =>
+  NPC_LEVELS.find((l) => l.id === npcLevel(npc))?.label ?? 'Iniciante';
+
+const normalizeLevel = (level) => (level === 'avancado' ? 'avancado' : 'iniciante');
+
+export function createNpc(name, theme, { campaign, board, level } = {}) {
   const finalName = (name ?? '').trim();
   if (!finalName) return { ok: false, error: 'dê um nome ao adversário' };
 
@@ -172,6 +196,7 @@ export function createNpc(name, theme, { campaign, board } = {}) {
     id, name: finalName, theme: (theme ?? '').trim(), signatureId: null, custom: true,
     campaign: (campaign ?? '').trim() || null,
     board: board || null,
+    level: normalizeLevel(level),
   };
   writeCustom([...readCustom(), npc]);
   NPCS.push(npc);
@@ -185,18 +210,20 @@ export function createNpc(name, theme, { campaign, board } = {}) {
  * os 3 NPCs FIXOS da fase 1, só campanha/tabuleiro mudam — nome/tema/deck
  * continuam com a identidade original (Kaiba é sempre Kaiba).
  */
-export function updateNpc(id, { name, theme, campaign, board } = {}) {
+export function updateNpc(id, { name, theme, campaign, board, level } = {}) {
   const npc = NPCS.find((n) => n.id === id);
   if (!npc) return { ok: false, error: 'adversário inexistente' };
 
   const finalCampaign = (campaign ?? '').trim() || null;
   const finalBoard = board || null;
+  const finalLevel = normalizeLevel(level);
 
   if (!npc.custom) {
     npc.campaign = finalCampaign;
     npc.board = finalBoard;
+    npc.level = finalLevel;
     const meta = readBaseMeta();
-    meta[id] = { campaign: finalCampaign, board: finalBoard };
+    meta[id] = { campaign: finalCampaign, board: finalBoard, level: finalLevel };
     writeBaseMeta(meta);
     return { ok: true, npc };
   }
@@ -208,6 +235,7 @@ export function updateNpc(id, { name, theme, campaign, board } = {}) {
   npc.theme = (theme ?? '').trim();
   npc.campaign = finalCampaign;
   npc.board = finalBoard;
+  npc.level = finalLevel;
 
   writeCustom(readCustom().map((n) => (n.id === id ? { ...n, ...npc } : n)));
   return { ok: true, npc };

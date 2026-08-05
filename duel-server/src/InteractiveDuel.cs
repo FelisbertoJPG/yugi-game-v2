@@ -65,6 +65,33 @@ namespace DuelServer
         /// <summary>Gancho de diagnóstico do SELECT_CHAIN cru (só o --probe-chain liga).</summary>
         public static Action<byte[], int, int> ChainProbe;
 
+        // ---- o que abriu a janela de corrente (ver Question.chainTrigger*) ----
+        // Só o CÓDIGO e o CONTROLADOR são lidos das mensagens de gatilho: os dois
+        // ficam nos primeiros 6 bytes (code(4) + controller(1) do loc_info), a
+        // parte do layout que não muda entre versões do core. O resto (posição,
+        // desc, tamanho da corrente) não interessa aqui, e ler menos é justamente
+        // o que evita o desalinhamento silencioso que o handoff descreve.
+        string _gatilhoKind = "";
+        uint _gatilhoCode;
+        int _gatilhoPlayer = -1;
+
+        void MarcaGatilho(string kind, byte[] d, int o)
+        {
+            _gatilhoKind = kind;
+            _gatilhoCode = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF;
+            _gatilhoPlayer = d[o + 5] <= 1 ? d[o + 5] : -1;
+        }
+
+        /// <summary>
+        /// A janela fechou (invocação concluída, corrente resolvida, turno novo):
+        /// esquece o gatilho. Um gatilho velho é pior que gatilho nenhum — faria
+        /// o NPC negar "a invocação do turno passado".
+        /// </summary>
+        void LimpaGatilho()
+        {
+            _gatilhoKind = ""; _gatilhoCode = 0; _gatilhoPlayer = -1;
+        }
+
         public sealed class Question
         {
             public string kind;                  // idle | place | battle | position | chain | unknown
@@ -91,6 +118,16 @@ namespace DuelServer
             public int sumNeeded;                // selectsum: quanto ainda falta somar
             public bool sumOverflow;             // selectsum: soma "OU MAIS" (ritual) vs exata
             public bool chainForced;             // chain: TEM de ativar algo (não pode recusar)
+            // O QUE abriu esta janela de corrente. O SELECT_CHAIN só lista as
+            // MINHAS cartas ativáveis — ele não diz a que elas estariam
+            // respondendo. Sem isto o NPC decidiria uma negação no escuro
+            // (pagar metade dos LP para negar um Pote da Ganância). Vem das
+            // mensagens que o motor manda ANTES da janela: MSG_SUMMONING /
+            // MSG_SPSUMMONING (invocação em andamento) e MSG_CHAINING (carta
+            // que acabou de ser ativada).
+            public string chainTriggerKind = "";  // "summon" | "activation" | ""
+            public uint chainTriggerCode;         // a carta invocada/ativada
+            public int chainTriggerPlayer = -1;   // de quem é (−1 = não sei)
             public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
             public byte posMask;                 // position: posições que o motor aceita
             public List<uint> options = new();   // selectoption: ids das opções de texto do motor
@@ -126,9 +163,18 @@ namespace DuelServer
             public bool ended;
         }
 
+        /// <param name="npcLeitura">
+        /// NPC **avançado**: enxerga a mão do jogador e as cartas baixadas dele.
+        /// É o único ponto onde a dificuldade existe — e é de encanamento, não de
+        /// regra: um NPC **iniciante** recebe a visão honesta (só o que está com a
+        /// face para cima) e, sem conhecer as cartas, todas as regras de leitura
+        /// do `NpcBrain` simplesmente não têm o que avaliar e não disparam. Os
+        /// dois sabem jogar igual; só um deles sabe o que você tem.
+        /// </param>
         public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed,
                                ulong flags = 0, bool npc = true, uint[] npcDeck = null,
-                               uint[] extra = null, uint[] npcExtra = null, uint? fieldSpell = null)
+                               uint[] extra = null, uint[] npcExtra = null, uint? fieldSpell = null,
+                               bool npcLeitura = false)
         {
             // Sem `npcDeck` o oponente joga com o SEU deck; o Extra segue a mesma
             // regra, senão ele duelaria com o seu main e o extra de outro deck.
@@ -136,7 +182,11 @@ namespace DuelServer
                                  extra, npcDeck != null ? npcExtra : (npcExtra ?? extra), fieldSpell);
             _npcEnabled = npc;
             _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
-                                HandOf, StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf);
+                                npcLeitura ? HandOf : HandHonesta,
+                                StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf, LpOf,
+                                npcLeitura ? AllMonstersPos : MonstrosHonestos,
+                                npcLeitura ? SetStOf : SetStHonesto);
+            Log.Info($"[npc] nivel: {(npcLeitura ? "AVANCADO (le a mao e as cartas baixadas)" : "iniciante (so' o que esta com a face para cima)")}");
             // `DuelSession` já colocou a carta no motor (antes de OCG_StartDuel),
             // mas isso não gera MSG_MOVE — o front só sabe de campo por evento.
             // Sem isto, o Bônus de Campo funciona (o motor aplica o efeito) mas
@@ -148,8 +198,37 @@ namespace DuelServer
         IReadOnlyList<uint> HandOf(int player) =>
             player >= 0 && player <= 1 ? _hand[player] : (IReadOnlyList<uint>)Array.Empty<uint>();
 
+        // ---- visão HONESTA (NPC iniciante) ----
+        //
+        // O recorte é sempre o mesmo: do lado do JOGADOR, só o que ele mesmo
+        // mostraria; do próprio lado, tudo — ninguém "esquece" as próprias
+        // cartas. Sem os códigos do outro lado, as regras de leitura do
+        // NpcBrain não têm o que avaliar e ficam quietas sozinhas.
+
+        /// <summary>Mão: a do jogador some, a do próprio NPC continua.</summary>
+        IReadOnlyList<uint> HandHonesta(int player) =>
+            player == HUMAN ? Array.Empty<uint>() : HandOf(player);
+
+        /// <summary>Campo: do lado do jogador, só os monstros com a face para cima.</summary>
+        IReadOnlyList<(uint code, int pos, int seq)> MonstrosHonestos(int player) =>
+            player != HUMAN
+                ? AllMonstersPos(player)
+                : AllMonstersPos(player).Where(m => (m.pos & POS_FACEUP) != 0).ToList();
+
+        /// <summary>Magias/armadilhas viradas: as do jogador somem (ele só sabe
+        /// que existe alguma coisa ali, o que `SetStCountOf` já conta).</summary>
+        IReadOnlyList<uint> SetStHonesto(int player) =>
+            player == HUMAN ? Array.Empty<uint>() : SetStOf(player);
+
         /// <summary>Zonas de magia/armadilha ocupadas de um jogador.</summary>
         int StCountOf(int player) => player >= 0 && player <= 1 ? _st[player] : 0;
+
+        /// <summary>
+        /// LP de um jogador. O NPC precisa disto para as armadilhas de contra que
+        /// se pagam em vida (Solemn Judgment cobra METADE, Seven Tools cobra 1000):
+        /// sem olhar o próprio LP ele negaria uma invocação qualquer e se mataria.
+        /// </summary>
+        int LpOf(int player) => player >= 0 && player <= 1 ? _lp[player] : 0;
 
         /// <summary>
         /// Monstros com a face para cima de um jogador. Só face para cima de
@@ -178,6 +257,41 @@ namespace DuelServer
             foreach (var kv in _board)
                 if (kv.Key.player == player && (kv.Value.pos & POS_FACEUP) != 0)
                     list.Add((kv.Value.code, kv.Value.pos));
+            return list;
+        }
+
+        /// <summary>
+        /// TODOS os monstros do jogador, inclusive os VIRADOS, com a posição.
+        ///
+        /// É informação que um humano não teria — e é de propósito. O NPC "lê" o
+        /// campo baixado do adversário para medir o risco de cada ataque em vez
+        /// de se jogar às cegas contra uma parede de 2000 de DEF. As regras que
+        /// medem AMEAÇA continuam usando só o que está com a face para cima
+        /// (`FaceUpMonsters`): um monstro deitado não ataca ninguém, então
+        /// contá-lo como ameaça só deixaria o NPC medroso à toa.
+        /// </summary>
+        /// A `sequence` vai junto porque é por ela que o motor identifica a zona
+        /// numa mudança de posição (`repositionable`): sem ela, com dois monstros
+        /// iguais em campo o NPC deitaria o errado.
+        IReadOnlyList<(uint code, int pos, int seq)> AllMonstersPos(int player)
+        {
+            var list = new List<(uint, int, int)>();
+            foreach (var kv in _board)
+                if (kv.Key.player == player) list.Add((kv.Value.code, kv.Value.pos, kv.Key.seq));
+            return list;
+        }
+
+        /// <summary>
+        /// As magias/armadilhas VIRADAS do jogador, com o código real — o
+        /// complemento de `FaceUpStOf`. É o que deixa o NPC saber que existe uma
+        /// Mirror Force esperando, em vez de só saber que "tem alguma coisa ali".
+        /// </summary>
+        IReadOnlyList<uint> SetStOf(int player)
+        {
+            var list = new List<uint>();
+            foreach (var kv in _stBoard)
+                if (kv.Key.player == player && (kv.Value.pos & 0xa) != 0 && kv.Value.code != 0)
+                    list.Add(kv.Value.code);
             return list;
         }
 
@@ -353,6 +467,10 @@ namespace DuelServer
                 "spsummon" => I32((play.Index << 16) | 1),   // Invocacao Especial (Sincro/Xyz/Toon)
                 "setmonster" => I32((play.Index << 16) | 3),
                 "setspell" => I32((play.Index << 16) | 4),   // seta magia/armadilha
+                // Mudar de posição (comando 2). Sem esta linha a jogada caía no
+                // `_ =>` lá embaixo e virava "encerra o turno" — o NPC decidia
+                // deitar um monstro e o motor recebia End Phase, sem erro nenhum.
+                "reposition" => I32((play.Index << 16) | 2),
                 "battle" => I32(6),   // vai para a Battle Phase
                 _ => I32(7),   // encerra o turno
             };
@@ -407,8 +525,9 @@ namespace DuelServer
             if (idx >= 0 && idx < q.choices.Count)
             {
                 var c = q.choices[idx];
-                _events?.Add(new { type = "npc", action = "chain", code = c.code, why = $"ativa {c.code} em resposta" });
-                Log.Info($"[npc] chain -> ativa {c.code} (idx {idx})");
+                string why = _npc.PorqueDaCadeia ?? $"ativa {c.code} em resposta";
+                _events?.Add(new { type = "npc", action = "chain", code = c.code, why });
+                Log.Info($"[npc] chain -> {why} (idx {idx})");
             }
             return I32(idx);
         }
@@ -610,10 +729,20 @@ namespace DuelServer
                     _winByte = d[o + 1];
                     break;
                 case 93: ParseEquip(d, o, mlen, ev); break; // MSG_EQUIP
-                case 40: ev.Add(new { type = "turn", player = d[o + 1] }); break;
+                case 40: ev.Add(new { type = "turn", player = d[o + 1] }); LimpaGatilho(); break;
                 case 41: ev.Add(new { type = "phase", phase = (int)BitConverter.ToInt16(d, o + 1) }); break;
-                case 60: ev.Add(new { type = "summoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF }); break;
-                case 62: ev.Add(new { type = "spsummoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF }); break; // MSG_SPSUMMONING (Sincro/Xyz)
+                case 60: ev.Add(new { type = "summoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF });
+                    MarcaGatilho("summon", d, o); break;
+                case 62: ev.Add(new { type = "spsummoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF });
+                    MarcaGatilho("summon", d, o); break; // MSG_SPSUMMONING (Sincro/Xyz)
+                // MSG_SUMMONED (61) / MSG_SPSUMMONED (63): a invocação passou —
+                // não há mais nada a negar. MSG_CHAINING (70): uma carta ACABOU
+                // de ser ativada e a corrente vai abrir; MSG_CHAIN_END (74): ela
+                // resolveu. Nenhuma delas gera evento para a tela: existem só para
+                // o NPC saber a QUE está respondendo (ver Question.chainTrigger*).
+                case 61: case 63: LimpaGatilho(); break;
+                case 70: MarcaGatilho("activation", d, o); break;
+                case 74: LimpaGatilho(); break;
                 case 50: // MOVE
                 {
                     int p = o + 1;
@@ -1070,6 +1199,12 @@ namespace DuelServer
                 kind = "chain",
                 player = d[o + 1],
                 chainForced = d[o + 3] != 0,
+                // A que esta janela está respondendo (ver MarcaGatilho). Fica no
+                // Question de propósito: assim o NpcBrain continua sendo uma
+                // função pura da pergunta, e os testes montam a situação na mão.
+                chainTriggerKind = _gatilhoKind,
+                chainTriggerCode = _gatilhoCode,
+                chainTriggerPlayer = _gatilhoPlayer,
             };
             const int header = 16;
             int count = mlen >= 16 ? BitConverter.ToInt32(d, o + 12) : 0;

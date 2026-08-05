@@ -458,7 +458,7 @@
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, listDecks, getActiveIndex, hydrateDecks } from '/web/js/storage.js';
-import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs } from '/web/js/npcs.js';
+import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
 import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
@@ -767,6 +767,10 @@ async function start() {
     if (extraIds.length) body.extra = extraIds;
     if (advNpc && advDeck && advDeck.length) body.npcDeck = npcIds;
     if (advNpc && advExtra && advExtra.length) body.npcExtra = advExtra;
+    // Nivel do adversario: so' o "avancado" LE a sua mao e as suas cartas
+    // baixadas (ver npcs.js). No Treino (sem adversario) nao vai nada, e o
+    // servidor assume iniciante.
+    if (advNpc) body.npcLevel = npcLevel(advNpc);
     // Bônus de Campo do tabuleiro ativo (editor de campo): a magia de campo
     // já nasce ativada, antes de qualquer jogada — ver `boards.js`.
     if (activeBoard?.fieldSpell) body.fieldSpell = activeBoard.fieldSpell;

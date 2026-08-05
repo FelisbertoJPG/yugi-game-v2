@@ -151,12 +151,23 @@ namespace DuelServer
                 ? (uint)fs.GetInt64()
                 : (uint?)null;
 
+            // Nível do adversário. "avancado" é o NPC que LÊ a mão e as cartas
+            // baixadas do jogador; qualquer outra coisa (inclusive campo ausente,
+            // que é o caso de todo NPC criado antes disto existir) é iniciante.
+            // Os dois jogam pelas mesmas regras — só um deles sabe o que você tem.
+            string nivel = body.TryGetProperty("npcLevel", out var nv) && nv.ValueKind == JsonValueKind.String
+                ? (nv.GetString() ?? "")
+                : "";
+            bool leitura = nivel.Equals("avancado", StringComparison.OrdinalIgnoreCase);
+
             Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
-                     $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")}");
+                     $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")} " +
+                     $"nivel={(leitura ? "avancado" : "iniciante")}");
             lock (_lock)
             {
                 _duel?.Dispose();
-                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell);
+                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
+                                            npcLeitura: leitura);
                 return _duel.Advance();
             }
         }

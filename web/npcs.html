@@ -101,6 +101,17 @@
     <input type="text" id="new-name" maxlength="40" placeholder="ex.: Mai Valentine">
     <label>Tema (opcional)</label>
     <input type="text" id="new-theme" maxlength="40" placeholder="ex.: Harpias">
+    <label>Nível</label>
+    <select id="new-level">
+      <option value="iniciante">Iniciante — joga só com o que está à vista</option>
+      <option value="avancado">Avançado — lê sua mão e suas cartas baixadas</option>
+    </select>
+    <div class="lead" style="margin:-4px 0 10px">
+      Os dois jogam pelas mesmas regras. O avançado <b>enxerga</b> sua mão e o que
+      você baixou, então mede o impacto de cada carta: não cai na isca de gastar a
+      negação na carta média, não ataca a parede virada e não se estende contra um
+      Raigeki que ele já viu.
+    </div>
     <label>Campanha (opcional)</label>
     <input type="text" id="new-campaign" maxlength="40" placeholder="ex.: Reino dos Duelistas">
     <label>Tabuleiro (opcional)</label>
@@ -119,7 +130,7 @@
 import {
   listNpcState, setNpcActiveIndex, deleteNpcDeck,
   loadNpcDecks, canPersistToProject, migrateLegacyToProject,
-  hydrateCustomNpcs, createNpc, updateNpc, deleteNpc,
+  hydrateCustomNpcs, createNpc, updateNpc, deleteNpc, npcLevel, npcLevelLabel,
 } from '/web/js/npcs.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
 
@@ -192,6 +203,8 @@ function render() {
     const rmBtn = npc.custom
       ? '<button data-rm class="rm btn-danger" title="excluir este adversário">×</button>' : '';
     // Campanha/tabuleiro existem pra qualquer NPC (fixo ou customizado).
+    const nivelInfo = `<div class="drop">nivel: <b>${npcLevelLabel(npc)}</b>${
+      npcLevel(npc) === 'avancado' ? ' — le sua mao e suas cartas baixadas' : ''}</div>`;
     const campoInfo = (npc.campaign || npc.board)
       ? `<div class="drop">campanha: <b>${npc.campaign ?? '-'}</b> &middot; tabuleiro: <b>${npc.board ? boardName(npc.board) : '-'}</b></div>`
       : '';
@@ -212,6 +225,7 @@ function render() {
       </div>
       <div class="body">
         <div class="drop">dropa: <b>${sig ?? '—'}</b></div>
+        ${nivelInfo}
         ${campoInfo}
         ${pickHtml}
         <div class="acts">
@@ -271,6 +285,7 @@ function abrirCriarAdversario() {
   $('new-theme').value = '';
   $('new-theme').disabled = false;
   $('new-campaign').value = '';
+  $('new-level').value = 'iniciante';
   fillBoardSelect('');
   $('new-err').textContent = '';
   $('new-back').classList.add('show');
@@ -282,14 +297,15 @@ function abrirEditarAdversario(npc) {
   // Os 3 NPCs fixos mantêm nome/tema/deck da identidade original — só
   // campanha/tabuleiro são deles pra mexer.
   $('new-lead').textContent = npc.custom
-    ? 'Nome, tema, campanha e tabuleiro deste adversário.'
-    : 'Adversário fixo da fase 1 — nome e tema não mudam, só campanha e tabuleiro.';
+    ? 'Nome, tema, nivel, campanha e tabuleiro deste adversário.'
+    : 'Adversário fixo da fase 1 — nome e tema não mudam; nível, campanha e tabuleiro sim.';
   $('new-save').textContent = 'salvar';
   $('new-name').value = npc.name;
   $('new-name').disabled = !npc.custom;
   $('new-theme').value = npc.theme || '';
   $('new-theme').disabled = !npc.custom;
   $('new-campaign').value = npc.campaign || '';
+  $('new-level').value = npcLevel(npc);
   fillBoardSelect(npc.board || '');
   $('new-err').textContent = '';
   $('new-back').classList.add('show');
@@ -303,6 +319,7 @@ $('new-save').onclick = () => {
   const fields = {
     campaign: $('new-campaign').value,
     board: $('new-board').value,
+    level: $('new-level').value,
   };
   const r = editingId
     ? updateNpc(editingId, { name: $('new-name').value, theme: $('new-theme').value, ...fields })

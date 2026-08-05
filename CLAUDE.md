@@ -35,6 +35,16 @@ em `duel-server/native/`). O app mobile (`mobile/`) requer o Flutter SDK.
 **Rodar um teste isolado do duelo:** cada suíte é uma flag do binário em
 `.\duel-server\bin\Debug\net8.0\win-x64\duel-server.exe`:
 `--test-npc` (regras do NPC), `--test-summons` (tributo/ritual), `--test-battle`,
+`--test-leitura` (a LEITURA do NPC — ele enxerga de propósito a mão do oponente
+e as cartas baixadas: batalha contra o monstro setado pela DEF real, a "isca"
+que impede o jogador de puxar a negação com uma carta média, remoção que mira na
+carta que atrapalha, e a regra de não pôr o 2º corpo em campo contra um Raigeki
+conhecido; o duelo real no fim prova que essa visão chega mesmo ao cérebro —
+sem ela as regras somem em silêncio),
+`--test-counter` (as armadilhas de CONTRA do NPC: o que vale negar, com qual
+carta e a que preço — e, nos dois duelos reais, que o contexto da janela de
+corrente chega mesmo, isto é, QUE invocação/magia abriu a janela; sem esse
+contexto o NPC não nega nada e nenhuma regra acusa),
 `--test-fusion` (Extra Deck + Polymerization + busca no deck), `--test-grave`
 (saída do cemitério), `--test-chain` (corrente de armadilhas), `--test-equip`,
 `--test-kaiba` e `--test-joey` (decks completos dos NPCs jogando sozinhos),
@@ -143,13 +153,27 @@ de verdade entra ativada antes do duelo começar
 sem simular efeito nenhum, é o Lua da própria carta.
 
 Todo NPC — os 3 fixos da fase 1 e os customizados (`web/npcs.html` →
-`web/js/npcs.js`) — pode ter `campaign` (nome livre) e `board` (path de um
+`web/js/npcs.js`) — pode ter `level` (**`iniciante`** ou `avancado`),
+`campaign` (nome livre) e `board` (path de um
 `boards/*.json`), editáveis a qualquer momento pelo botão "editar
 configurações" de cada card — base da campanha estilo Reino dos Duelistas.
-Os 3 fixos guardam esses dois campos num overlay à parte
+Os 3 fixos guardam esses campos num overlay à parte
 (`store/npc-base-meta.json`, já que `BASE_NPCS` é um array const no código)
 em vez de junto do registro deles; nome/tema desses 3 continuam fixos, só
-campanha/tabuleiro mudam. `web/adversario.html` (a página do jogador) é
+nível/campanha/tabuleiro mudam.
+
+O **nível** é a dificuldade do adversário, e a diferença entre os dois é uma
+só: o `avancado` **lê** a mão e as cartas baixadas do jogador (e por isso não
+cai em isca de negação, não ataca a parede virada e não se estende contra um
+Raigeki que viu); o `iniciante` decide só com o que está à vista. Os dois jogam
+pelas mesmas regras — ver "Leitura" no `DUEL-TRAINING-HANDOFF.md`. Viaja no
+`POST /start` como `npcLevel`; sem o campo, o servidor assume iniciante, que é
+o que todo NPC criado antes disto existir continua sendo. A dificuldade mora
+num ponto só (qual acesso é plugado no `NpcBrain`), nunca em `if` espalhado
+pelas regras. Na lista do jogador, só o avançado ganha etiqueta — ele precisa
+saber, antes de entrar, que aquele adversário lê a mão dele.
+
+`web/adversario.html` (a página do jogador) é
 organizada só por campanha — sem lista "todos" solta — com uma seção "Sem
 campanha" para quem ainda não tem uma definida. Em `duel.html`, o tabuleiro
 do NPC (`advNpc.board`) manda mais que o `ygo:activeBoard` global, então cada

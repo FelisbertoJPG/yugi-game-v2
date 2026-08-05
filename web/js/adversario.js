@@ -4,7 +4,7 @@
  * recompensa (+100 DP e a carta-assinatura) ao vencer.
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { NPCS, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, listCampaignNames } from '/web/js/npcs.js';
+import { NPCS, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, listCampaignNames, npcLevel } from '/web/js/npcs.js';
 import { getDP, hydrateWallet } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
 
@@ -36,6 +36,11 @@ function npcCard(npc) {
     `<div class="body">` +
       `<span class="name">${npc.name}</span>` +
       `<span class="theme">${npc.theme}</span>` +
+      // Nível: só aparece quando é AVANÇADO. O jogador precisa saber, antes de
+      // entrar, que este adversário lê a mão e as cartas baixadas dele — é a
+      // diferença entre "perdi" e "esse cara trapaceia".
+      (npcLevel(npc) === 'avancado'
+        ? `<span class="theme" style="color:var(--gold)">▲ avançado — lê sua mão</span>` : '') +
       `<span class="reward">recompensa: ${sig ? nameOf(sig) : '—'}</span>` +
       `<button class="go btn-primary" ${temDeck ? '' : 'disabled'}>` +
         (temDeck ? 'duelar' : 'sem deck (monte na Área de Teste)') +

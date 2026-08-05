@@ -41,8 +41,10 @@ Detalhes que importam:
 - **"Pôr em defesa" = Set.** Pelas regras oficiais a Invocação Normal é sempre em
   ataque com a face para cima; a única forma legal de pôr um monstro em defesa no
   próprio turno é setá-lo. Por isso as regras de defesa viram `setmonster`.
-- O NPC só enxerga monstros **com a face para cima** (`FaceUpMonsters`) — ele não
-  lê o ATK de uma carta setada, que não teria como conhecer.
+- **Ameaça** se mede só pelo que está **com a face para cima** (`FaceUpMonsters`):
+  um monstro deitado não ataca ninguém, então contá-lo como ameaça deixaria o NPC
+  medroso à toa. Isso **não** é mais o limite do que ele *sabe* — ver "Leitura",
+  abaixo.
 - Cada jogada vira um evento `{type:"npc", action, why}`, que o front mostra no
   log com o motivo. É assim que se confere se ele está seguindo as regras.
 - `POST /start {"npc": false}` volta ao oponente desligado (auto-passa), que é o
@@ -52,6 +54,111 @@ Teste: `npm run duel:test` (ou `duel-server.exe --test-npc`) — 15 checagens, s
 11 da decisão isolada (cada regra em situação controlada, incluindo o caso da
 parede que venceria atacando) e 4 de um duelo real onde o NPC usa os Potes,
 invoca por ATK, faz invocação com tributo e seta em defesa quando ameaçado.
+
+### Leitura (o NPC vê a mão e as cartas baixadas) — e o NÍVEL
+
+**Decisão de projeto, deliberada:** um NPC **avançado** enxerga o que um humano
+não veria — a **mão** do oponente (`HandOf`), os monstros **virados** com a DEF
+real (`AllMonstersPos`) e as magias/armadilhas **setadas** com o código real
+(`SetStOf`). Não é bug nem vazamento para a tela: é o que permite medir o impacto
+de cada carta em vez de jogar às cegas. O front continua sem receber nada disso
+(o `Oculta()` do `InteractiveDuel` segue mascarando o que vai para o cliente); só
+o cérebro enxerga.
+
+> **Iniciante × Avançado.** A dificuldade é escolhida por adversário (`level` em
+> `npcs.js`, `npcLevel` no `POST /start`) e existe num ponto só: **qual acesso é
+> plugado no `NpcBrain`**. O iniciante recebe a visão honesta (`HandHonesta`,
+> `MonstrosHonestos`, `SetStHonesto`: do lado do jogador só o que está com a face
+> para cima, do próprio lado tudo) e, sem conhecer as cartas, as quatro regras
+> abaixo não têm o que avaliar e ficam quietas sozinhas — sem um único `if` de
+> dificuldade espalhado pelas regras. Os dois jogam igual; só um sabe o que você
+> tem. **O padrão é iniciante**, inclusive para todo NPC criado antes disto
+> existir e para os 3 fixos.
+
+Tudo passa por uma escala única, `PESO_AMEACA` — quanto uma magia/armadilha
+atrapalha, **medido na unidade do ATK**. É o que torna comparável "a magia que ele
+acabou de ativar" com "o monstro que ainda está na mão dele". Quem não está na
+tabela pesa 0.
+
+Quatro regras usam isso:
+
+1. **Batalha.** O monstro setado entra na conta pela DEF real (antes era "risco
+   assumido" e o Battle Ox se jogava contra uma parede de 2000). Armadilha
+   conhecida muda a jogada: com uma que pune o atacante (Sakuretsu/Cylinder) ele
+   ataca com o **mais barato que ainda vence**; com uma que varre o campo
+   (Mirror Force) ele **não ataca com vários** — mas ataca com **um só**, para
+   puxá-la. Nunca atacar travaria o duelo até o deck acabar.
+2. **A isca.** O golpe clássico contra bot é queimar uma carta média para o NPC
+   gastar a negação nela. Agora ele compara o peso do gatilho com a maior ameaça
+   na mão do oponente e **segura**, com dois limites para não virar paralisia:
+   some o efeito se ele tiver 2+ negações baixadas, e acima de `PESO_INEGOCIAVEL`
+   (2500) ele nega de qualquer jeito — deixar um Raigeki resolver "porque pode vir
+   coisa pior" é perder hoje para se proteger de amanhã.
+3. **Remoção direcionada.** O Dust Tornado/MST só sai se existir alvo que pese
+   (antes bastava "ele tem alguma coisa setada"), e o `DecideSelect` **mira** na
+   carta escolhida — sem isso ele estourava a primeira zona da lista, já que
+   magia/armadilha tem ATK 0 no critério genérico.
+4. **Não se estender.** Com Raigeki/Dark Hole na mão dele, o NPC não põe o segundo
+   corpo em campo (os dois sairiam na mesma carta); com Heavy Storm/Harpie's, não
+   seta a segunda armadilha. Só segura quando já tem campo que dá conta — estando
+   atrás, precisa arriscar.
+5. **Formação de isca.** O complemento da regra 1: em vez de só recusar o ataque
+   contra uma Mirror Force baixada, ele **deita os outros e ataca com um só**
+   (`reposition`, comando 2 do SELECT_IDLECMD). Em defesa os grandes ficam fora
+   do alcance da varredora, e quem fica de pé é o mais barato que ainda GANHA a
+   batalha — precisa vencer, senão a `DecideBattle` não declara ataque nenhum e a
+   armadilha nunca sai. Casa a opção do motor pela **`sequence`**, não pelo
+   código: dois Battle Ox iguais não se distinguem de outro jeito.
+
+> Sem os acessos de leitura ligados, **todas simplesmente não fazem nada** e
+> nenhuma dá erro. Por isso `--test-leitura` termina em duelos reais: um onde o
+> NPC recusa o ataque **citando o código da carta virada** (prova positiva de que
+> o encanamento chegou), o MESMO duelo no nível iniciante — onde ele ataca a
+> parede às cegas, provando que a dificuldade é real — e um terceiro onde o motor
+> **aceita** a mudança de posição (errar o comando `2` não dá erro: vira
+> MSG_RETRY e a jogada some).
+
+Teste: `duel-server.exe --test-leitura` — 29 checagens.
+
+### Armadilhas de contra (negação)
+
+A Lista 1 tem quatro: **Solemn Judgment** (metade dos LP, nega invocação *ou*
+magia/armadilha), **Magic Jammer** (descarta 1, nega Magia), **Seven Tools of the
+Bandit** (1000 LP, nega Armadilha) e **Horn of Heaven** (tributa 1 monstro, nega
+invocação). O motor abre a janela delas sozinho na hora certa, então o problema
+não é *quando pode* — é **se compensa**: ativar por ativar joga a carta (e, no
+caso do Solemn, metade da vida) fora.
+
+`NpcBrain.EscolheNegacao` decide em três perguntas, nesta ordem:
+
+1. **O que abriu a janela?** Vem de `Question.chainTrigger*` (ver §4). Sem essa
+   informação, ou se o gatilho for do PRÓPRIO NPC, ele **não nega** — no escuro,
+   guardar é sempre melhor que chutar.
+2. **Aquilo vale?** Invocação se mede sozinha: nega só o que tem **ATK ≥ 1800**
+   *e* que o campo dele não supera (se ele já tem algo maior, a batalha resolve de
+   graça). Magia e armadilha não dá para medir — o efeito mora no Lua —, então vão
+   por lista fechada (`MAGIA_PERIGOSA` / `ARMADILHA_PERIGOSA`): só o que varre o
+   campo, rouba, revive ou nega. O silêncio da lista significa "não vale", que é
+   o erro barato.
+3. **Dá para pagar?** Nenhum custo pode levar abaixo de **1000 LP**; o Horn só
+   sai se o monstro que ele tributaria (o mais fraco, que é o que o `DecideSelect`
+   sacrifica) valer menos que o que está sendo negado. Entre as que servem, escolhe
+   a **mais barata** (`Contra.Ordem`) — Magic Jammer antes de Solemn Judgment
+   contra uma magia, e o Solemn fica para o que só ele resolve.
+
+Duas notas de manutenção:
+- A tabela `CONTRA` vai **por ID, não pelo bit TYPE_COUNTER**. O Negate Attack
+  também é Armadilha de Contra, mas o gatilho dele é uma *declaração de ataque* —
+  pela regra genérica ele já é ativado na hora certa; se entrasse pelo tipo, a
+  avaliação acima não acharia gatilho e o NPC pararia de usá-lo.
+- A negação é a única que pode **furar a regra de "uma carta por cadeia"**: se o
+  oponente encadeou algo por cima da carta que o NPC acabou de ativar, negar é
+  exatamente o caso em que somar uma segunda carta não é desperdício.
+
+Teste: `duel-server.exe --test-counter` — 17 checagens de decisão isolada e 8 de
+dois duelos reais (negar uma invocação e negar um Raigeki). Os duelos reais estão
+lá por um motivo específico: se o contexto da janela parar de chegar, nenhuma
+regra acusa nada — o sintoma seria só "ele nunca mais usou Solemn Judgment".
 
 > **Compile com o servidor parado.** O `.exe` fica travado enquanto roda e o
 > `dotnet build` falha — mas o teste seguinte roda o binário ANTIGO e parece que
@@ -197,6 +304,17 @@ Traz ATK/DEF dos dois e quem morreu — o motor já resolveu tudo, isto é só r
 Dano, destruição e ida ao cemitério vêm de graça (MSG_DAMAGE + MSG_MOVE).
 
 **SELECT_CHAIN (16):** resposta `int32 -1` (não encadear).
+⚠️ A janela lista **só as suas cartas ativáveis** — ela NÃO diz a que elas
+responderiam. Quem sabe disso são as mensagens que vêm ANTES, no mesmo buffer:
+**MSG_SUMMONING (60)** / **MSG_SPSUMMONING (62)** (invocação em andamento) e
+**MSG_CHAINING (70)** (carta que acabou de ser ativada). As três começam igual —
+`code(4)` + `loc_info`, cuja **primeira posição é o controlador** —, então
+`code = int32 @ +1` e `controller = byte @ +5` valem para todas, sem depender do
+resto do layout (que muda entre mensagens: veja o `seq` de 1 byte do MSG_POS_CHANGE).
+`InteractiveDuel` guarda esse gatilho e o entrega em `Question.chainTrigger{Kind,Code,Player}`;
+ele é limpo em MSG_SUMMONED (61), MSG_SPSUMMONED (63), MSG_CHAIN_END (74) e a cada
+turno novo — gatilho velho é pior que gatilho nenhum, faria o NPC "negar a
+invocação do turno passado".
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).
 **MSG_MOVE (50):** `code(4)` + prev`{ctrl(1)loc(1)seq(4)pos(4)}` + curr`{...}` + reason(4)`.
 **MSG_POS_CHANGE (53):** `code(4) ctrl(1) loc(1) seq(1) posAnterior(1) posAtual(1)`.

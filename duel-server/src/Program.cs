@@ -167,6 +167,18 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-chain") >= 0)
                 return TestChain.Run(streamingAssets);
 
+            // Teste das armadilhas de CONTRA (negacao) do NPC: o que vale negar,
+            // com qual carta e a que preco — e, no duelo real, que o contexto da
+            // janela de corrente (o que foi invocado/ativado) chega mesmo ao NPC.
+            if (Array.IndexOf(args, "--test-counter") >= 0)
+                return TestCounter.Run(streamingAssets);
+
+            // Teste da LEITURA do NPC (mao do oponente + cartas baixadas): a
+            // batalha contra o setado, a isca da negacao, a remocao direcionada e
+            // a regra de nao se estender contra varredura conhecida.
+            if (Array.IndexOf(args, "--test-leitura") >= 0)
+                return TestLeitura.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-equip") >= 0)
                 return TestEquip.Run(streamingAssets);
 

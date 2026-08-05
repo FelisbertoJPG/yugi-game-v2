@@ -22,8 +22,13 @@ Arquivos (criados no primeiro save com o servidor no ar):
 - `wallet.json` — `{ dp, collection, pity }` do jogador (DP, cartas possuídas,
   contador da SR garantida por booster).
 - `npcs.json` — os adversários CRIADOS na Área de Teste (além dos 3 fixos do
-  código): `[{ id, name, theme, signatureId, custom: true }]`. Os decks deles
-  continuam em `decks/npc/<id>/`, como os NPCs fixos.
+  código): `[{ id, name, theme, signatureId, custom: true, level, campaign,
+  board }]`. Os decks deles continuam em `decks/npc/<id>/`, como os NPCs fixos.
+  `level` é a dificuldade (`iniciante` — o padrão, e o que vale para quem não
+  tem o campo — ou `avancado`, que LÊ a mão e as cartas baixadas do jogador).
+- `npc-base-meta.json` — o mesmo `{ level, campaign, board }` dos **3 NPCs
+  fixos**, que não têm registro próprio (são um array const no código). Só
+  isso: nome/tema/deck deles continuam de onde sempre vieram.
 
 Depois de mexer nesses (montar booster, comprar, ganhar duelo, criar adversário), é só
 `git add store/ && git commit` para levar para outra máquina.

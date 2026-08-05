@@ -83,6 +83,7 @@ function render() {
   wrap.replaceChildren(frag);
 }
 
+$('btn-mundo').onclick = () => (location.href = '/web/mundo.html');
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 
 // ---------------------------------------------------------------- boot

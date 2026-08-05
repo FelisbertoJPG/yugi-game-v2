@@ -155,6 +155,44 @@ campanha" para quem ainda não tem uma definida. Em `duel.html`, o tabuleiro
 do NPC (`advNpc.board`) manda mais que o `ygo:activeBoard` global, então cada
 adversário duela sobre o próprio campo sem o jogador precisar ativar nada.
 
+### Mundo andável (mapa mundi + cenários)
+
+A porta de entrada do jogador para os adversários é o **mapa mundi**
+(`web/mundo.html`), não mais a grade de cards: nós de cenário ligados por uma
+estrada, cada um levando a um **cenário andável** (`web/cidade.html`) no estilo
+Tag Force — você caminha (WASD/setas) até um duelista e aperta espaço pra abrir
+o duelo. `adversario.html` continua existindo como "modo lista" (atalho, e
+salva-vidas se algo no mundo quebrar); o duelo em si é o mesmo
+`duel.html?npc=<id>` de sempre.
+
+- `web/js/world.js` — registro de cenários. Um cenário RESERVA nomes de
+  campanha (`claims`): todo NPC com uma dessas campanhas mora nele, e quem não
+  casa com nenhuma (inclusive quem não tem campanha) cai na `cidade`. Foi de
+  propósito que isso não exigiu migrar dado nenhum — dar à campanha o nome do
+  `claims` já muda o NPC de cenário. **O desbloqueio ainda é fixo (`locked`)**:
+  não existe sistema de missão/progresso, então `isUnlocked()` é o único ponto
+  a trocar quando existir.
+- `web/js/citymap.js` — os mapas. O chão NÃO é escrito tile a tile: é um fundo
+  mais uma lista de "pinceladas" (retângulos/elipses) aplicadas em ordem, mais
+  os objetos e as vagas (`spots`) onde os NPCs ficam de pé.
+- `web/js/tileset.js` e `web/js/actors.js` — **a arte é pixel art gerada em
+  código**, sem nenhum arquivo de imagem (o front tem zero dependências). Cada
+  tile/prédio/boneco é pintado uma vez num canvas fora da tela no boot; o loop
+  só copia. Os bonecos são grades de TEXTO (1 caractere = 1 pixel), montadas em
+  cabeça + tronco + pernas pra não precisar manter 16 desenhos em sincronia.
+
+O mundo roda num canvas de resolução **lógica** (320x180) ampliado por CSS com
+`image-rendering: pixelated` — todas as contas de `cidade.js` são em pixel
+lógico. Só as etiquetas de nome são DOM por cima do canvas, pra o texto não
+escalar junto e virar borrão. A ordem de desenho é pela linha do "pé" de cada
+coisa, que é o que faz o jogador passar atrás da casa e na frente dela sem
+nenhuma lógica de camada.
+
+> Ao mexer nos mapas, confira que nenhum objeto ficou com o pé na água/fora do
+> mapa e que todo `spot` continua livre e alcançável a pé a partir do `spawn` —
+> um NPC preso dentro de uma parede não dá erro nenhum, só é impossível de
+> alcançar. `buildMap()` já descarta `spot` em cima de sólido, mas não avisa.
+
 **`duel-server/`** — .NET 8 que hospeda o `ocgcore` (edo9300) via P/Invoke e o
 expõe como **RPC HTTP** em 8770: `POST /start {deck,npcDeck?,seed?,flags?,npc?}`
 e `POST /respond {action,arg,args?}` → `{events:[…], question:{…}|null, ended}`.

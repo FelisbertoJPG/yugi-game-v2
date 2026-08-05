@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cidade — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; }
+  .wrap { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 16px; }
+
+  /* O mundo é um canvas em resolução LÓGICA (320x180) ampliado por CSS.
+     `pixelated` é o que mantém a pixel art nítida em vez de borrada. */
+  .scene {
+    position: relative; width: min(1000px, 96vw); aspect-ratio: 320 / 180;
+    border: 3px solid var(--line); background: #0c0f16; overflow: hidden;
+    box-shadow: 0 0 0 1px #000, 0 8px 30px #0008;
+    touch-action: none;
+  }
+  .scene canvas {
+    display: block; width: 100%; height: 100%;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+
+  /* Etiquetas ficam em DOM (e não no canvas) pra o texto não escalar junto
+     com os pixels e virar um borrão. */
+  .labels { position: absolute; inset: 0; pointer-events: none; }
+  .plabel { position: absolute; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; }
+  .plabel .nm {
+    display: inline-block; background: #0b0e15e0; border: 1px solid var(--line);
+    color: var(--gold); font-size: 11px; padding: 1px 7px; pointer-events: auto; cursor: pointer;
+  }
+  .plabel.near .nm { border-color: var(--gold); background: #12182ae8; }
+  .plabel .key {
+    display: block; font-size: 9px; color: var(--ink); margin-bottom: 3px;
+    opacity: 0; transition: opacity .12s; text-shadow: 0 1px 0 #000;
+  }
+  .plabel.near .key { opacity: 1; }
+  .plabel .semdeck { color: var(--dim); }
+
+  .hint { font-size: 11px; color: var(--dim); padding: 8px 14px; background: var(--bg2); text-align: center; }
+  .hint b { color: var(--gold); }
+
+  .overlay {
+    display: none; position: fixed; inset: 0; background: #000b; z-index: 30;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .panel {
+    width: min(560px, 100%); max-height: 86vh; overflow: auto;
+    background: var(--panel); border: 2px solid var(--gold); padding: 16px;
+  }
+  .panel .head { display: flex; align-items: flex-start; gap: 12px; }
+  .panel h2 { margin: 0; color: var(--gold); font-size: 16px; overflow-wrap: anywhere; }
+  .panel .sub { font-size: 11px; color: var(--blue); }
+
+  .duelo { display: flex; gap: 14px; margin-top: 14px; }
+  .duelo .art {
+    width: 116px; flex: none; aspect-ratio: 59 / 86;
+    background: var(--bg2) center/contain no-repeat; border: 1px solid var(--line);
+  }
+  .duelo .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .duelo .linha { font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
+  .duelo .linha b { color: var(--ink); }
+  .duelo .go { margin-top: auto; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1 id="title">▚ CIDADE</h1>
+  <span class="spacer"></span>
+  <span class="dp" id="dp" style="color:var(--gold); border:1px solid var(--gold); padding:3px 10px; font-weight:bold">— DP</span>
+  <button id="btn-mundo">← mapa</button>
+  <button id="btn-lista">modo lista</button>
+  <button id="btn-home">home</button>
+</div>
+
+<div class="hint">
+  Ande com <b>WASD</b> ou as <b>setas</b>. Chegue perto de um duelista e aperte
+  <b>espaço</b> (ou clique no nome dele) para falar.
+</div>
+
+<div class="wrap">
+  <div class="scene" id="scene">
+    <canvas id="cv" width="320" height="180"></canvas>
+    <div class="labels" id="labels"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="panel">
+    <div class="head">
+      <div style="flex:1; min-width:0">
+        <h2 id="panel-title"></h2>
+        <span class="sub" id="panel-sub"></span>
+      </div>
+      <button id="btn-close">fechar ✕</button>
+    </div>
+    <div class="duelo">
+      <div class="art" id="panel-art"></div>
+      <div class="info">
+        <span class="linha" id="panel-campanha"></span>
+        <span class="linha" id="panel-deck"></span>
+        <span class="linha" id="panel-reward"></span>
+        <button class="go btn-primary" id="btn-duelar">duelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/web/js/cidade.js"></script>
+</body>
+</html>

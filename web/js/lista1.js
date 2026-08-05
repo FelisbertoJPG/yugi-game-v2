@@ -35,6 +35,52 @@ export const LISTA1_SPELLTRAP = [
   56120475, // Sakuretsu Armor
   97077563, // Call of the Haunted — revive 1 monstro do cemitério (Armadilha Contínua)
 
+  // --- as duas primeiras coleções do TCG ---
+  // Legend of Blue Eyes White Dragon (LOB, 1x2002) e Metal Raiders (MRD,
+  // 6x2002): as magias/armadilhas dessas duas coleções que ainda faltavam.
+  // A lista de cada coleção veio do ygoprodeck (o mesmo banco de onde saem as
+  // artes) e cada id abaixo foi conferido no `ygo-data` — todas têm script Lua
+  // no ocgcore, então o efeito roda de verdade, nada é decorativo.
+  // O que NÃO está aqui já estava na Lista 1 (os dois ciclos de equipamento,
+  // os campos, o burn, Raigeki/Dark Hole/Pot of Greed/Mirror Force...).
+
+  // LOB
+  50045299, // Dragon Capture Jar — todo Dragão do campo vira Defesa e trava lá
+  63102017, // Stop Defense — passa 1 monstro do oponente para Ataque
+  83887306, // Two-Pronged Attack — destrói 2 monstros SEUS e 1 do oponente
+  51482758, // Remove Trap — destrói 1 armadilha com a face para cima
+  82542267, // Gravedigger Ghoul — bane até 2 monstros do cemitério do oponente
+  38199696, // Red Medicine — +500 LP
+  11868825, // Goblin's Secret Remedy — +600 LP
+
+  // MRD — controle e destruição
+  4031928,  // Change of Heart — toma 1 monstro do oponente até a End Phase
+  19613556, // Heavy Storm — destrói TODA magia/armadilha do campo (os dois lados)
+  56830749, // Share the Pain — você tributa 1 monstro, o oponente também
+  25880422, // Block Attack — passa 1 monstro do oponente para Defesa
+  52097679, // Shield & Sword — troca ATK e DEF originais de todos até o fim do turno
+  5758500,  // Soul Release — bane até 5 cartas de qualquer cemitério
+  41142615, // The Cheerful Coffin — descarta até 3 monstros da mão (alimenta
+            // Monster Reborn / Call of the Haunted / Premature Burial)
+  90219263, // Elegant Egotist — com 1 "Harpie Lady" em campo, Invoca Especialmente
+            // 1 Harpie Lady/Harpie Lady Sisters da mão OU DO DECK (as duas são
+            // Normais, já entram pela regra do `inLista1`)
+
+  // MRD — armadilhas de contra (a primeira negação da Lista 1)
+  41420027, // Solemn Judgment — paga metade dos LP e nega invocação OU magia/armadilha
+  77414722, // Magic Jammer — descarta 1 carta e nega 1 Magia
+  3819470,  // Seven Tools of the Bandit — paga 1000 LP e nega 1 Armadilha
+  98069388, // Horn of Heaven — tributa 1 monstro e nega 1 invocação
+  3027001,  // Fake Trap — se armadilhas suas seriam destruídas, morre no lugar delas
+  88279736, // Robbin' Goblin — dano de batalha faz o oponente descartar 1 carta
+
+  // MRD — equipamentos (inclusive os que se equipam no monstro do OPONENTE)
+  83225447, // Stim-Pack — +700 ATK, mas −200 a cada Standby sua
+  98495314, // Sword of Deep-Seated — +500 ATK/DEF e volta pro topo do deck ao ir pro cemitério
+  20436034, // Ring of Magnetism — −500 ATK/DEF no equipado, e o oponente só pode atacar ele
+  50152549, // Paralyzing Potion — o equipado (não-Máquina) não pode atacar
+  24668830, // Germ Infection — o equipado (não-Máquina) perde 300 ATK a cada Standby dele
+
   // --- equipamentos clássicos: +300 ATK/DEF por TIPO ---
   // O ciclo inteiro da era clássica, um equipamento por Tipo de monstro.
   // Pouco ATK, bem básicos, e todos com Lua pronto no ocgcore.

@@ -323,6 +323,9 @@ nenhuma conta nova herda esses dados automaticamente.
   entrada por mensagem, formato de resposta de cada seleção, os bugs que cada um
   causa), as regras do `NpcBrain` e a lista do que falta. Um tamanho errado de
   entrada desalinha o parse **sem erro nenhum** — o sintoma aparece turnos depois.
+- **`TAGFORCE-BATALHA.md`** — o que a batalha do Tag Force 1 é por dentro (ela é 2D,
+  sem modelo 3D nenhum) e o timing exato de cada animação, lido do ISO. Os
+  formatos byte a byte estão em `tools/tagforce/README.md`.
 - `decks/README.md`, `store/README.md`, `boards/README.md`, `ygo-data/README.md`
   — formato e contrato de cada pasta.
 - `continue.md` é local (gitignored) e **parcialmente desatualizado**: a seção

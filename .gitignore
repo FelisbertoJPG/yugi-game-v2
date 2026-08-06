@@ -76,3 +76,9 @@ Thumbs.db
 .vs/
 .idea/
 *.swp
+
+# Assets extraidos do ISO do Tag Force (tools/tagforce) — sao da Konami e
+# nao tem por que ir pro git. O tudo.mjs ja exige destino explicito fora do
+# repo; esta linha e cinto e suspensorio.
+tagforce-extraido/
+tf-extraido/

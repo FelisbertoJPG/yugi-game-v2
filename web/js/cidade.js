@@ -1,7 +1,10 @@
 /**
  * Cidade — o cenário andável. O jogador caminha até um duelista e fala com ele
  * pra abrir o duelo; o duelo em si continua sendo `duel.html?npc=<id>`, esta
- * tela só troca a GRADE de cards da antiga `adversario.html` por um mundo.
+ * tela só troca a GRADE de cards de `adversario.html` por um mundo.
+ *
+ * EM STANDBY: o fluxo do jogador hoje é `adversario.html`; o mundo fica na
+ * Área de Teste (`teste.html`) até voltar a ser a porta de entrada.
  *
  * Divisão de trabalho: `citymap.js` diz o que existe e onde, `tileset.js` e
  * `actors.js` sabem desenhar, e este arquivo cuida do que muda a cada quadro —

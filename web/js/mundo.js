@@ -69,7 +69,7 @@ function render() {
   $('nodes').replaceChildren(frag);
 }
 
-$('btn-home').onclick = () => (location.href = '/web/index.html');
+$('btn-home').onclick = () => (location.href = '/web/teste.html');
 
 // ---------------------------------------------------------------- boot
 const username = await requireLogin();

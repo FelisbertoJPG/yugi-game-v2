@@ -173,21 +173,23 @@ num ponto só (qual acesso é plugado no `NpcBrain`), nunca em `if` espalhado
 pelas regras. Na lista do jogador, só o avançado ganha etiqueta — ele precisa
 saber, antes de entrar, que aquele adversário lê a mão dele.
 
-`web/adversario.html` (a página do jogador) é
-organizada só por campanha — sem lista "todos" solta — com uma seção "Sem
+`web/adversario.html` (a página do jogador, e a **porta de entrada** dos
+adversários a partir da home) é organizada só por campanha — sem lista "todos" solta — com uma seção "Sem
 campanha" para quem ainda não tem uma definida. Em `duel.html`, o tabuleiro
 do NPC (`advNpc.board`) manda mais que o `ygo:activeBoard` global, então cada
 adversário duela sobre o próprio campo sem o jogador precisar ativar nada.
 
-### Mundo andável (mapa mundi + cenários)
+### Mundo andável (mapa mundi + cenários) — **em standby**
 
-A porta de entrada do jogador para os adversários é o **mapa mundi**
-(`web/mundo.html`), não mais a grade de cards: nós de cenário ligados por uma
-estrada, cada um levando a um **cenário andável** (`web/cidade.html`) no estilo
-Tag Force — você caminha (WASD/setas) até um duelista e aperta espaço pra abrir
-o duelo. `adversario.html` continua existindo como "modo lista" (atalho, e
-salva-vidas se algo no mundo quebrar); o duelo em si é o mesmo
-`duel.html?npc=<id>` de sempre.
+O **mapa mundi** (`web/mundo.html`) são nós de cenário ligados por uma estrada,
+cada um levando a um **cenário andável** (`web/cidade.html`) no estilo Tag
+Force — você caminha (WASD/setas) até um duelista e aperta espaço pra abrir o
+duelo. Ele chegou a ser a porta de entrada dos adversários, mas **hoje está em
+standby na Área de Teste** (`teste.html` → "Mundo andável"): o fluxo do jogador
+voltou a ser a grade de cards de `adversario.html`, que é para onde a home
+aponta. O código continua inteiro e funcionando — pra devolvê-lo ao jogador
+basta apontar o `btn-adv` de `index.html` de volta para `/web/mundo.html`. O
+duelo em si é o mesmo `duel.html?npc=<id>` nos dois caminhos.
 
 - `web/js/world.js` — registro de cenários. Um cenário RESERVA nomes de
   campanha (`claims`): todo NPC com uma dessas campanhas mora nele, e quem não
@@ -307,6 +309,13 @@ nenhuma conta nova herda esses dados automaticamente.
 - **Caminhos são absolutos** (`/web/js/...`) e o dev-server redireciona `/` com
   302 de verdade. Servir o HTML direto em `/` faz os módulos darem 404 e a página
   morre em silêncio. Não troque por relativos.
+- **Marca da Web (erro 1223).** Arquivo que veio de fora da máquina carrega o
+  fluxo `Zone.Identifier`; o `Spawn` do launcher usa ShellExecute com janela
+  oculta, então o Windows cancela sem perguntar nada e o sintoma é
+  `nao consegui iniciar o duel-server: … A operação foi cancelada pelo usuário`.
+  O launcher detecta esse erro, explica e **pede autorização** antes de remover
+  a marca (`OfferUnblock` em `launcher/Program.cs`). Na mão:
+  `Get-ChildItem duel-server\bin -Recurse -File | Unblock-File`.
 - **`store/*.json` nascem sozinhos enquanto se joga e são fáceis de esquecer
   como untracked.** Depois de mexer na Loja/Booster Builder, confira `git status`.
 - **`.gitignore`:** não adicione `*.csproj`/`*.sln` — `duel-server` e `launcher`

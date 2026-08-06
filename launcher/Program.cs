@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 // duel-academy — atalho para subir o ambiente sem linha de comando.
@@ -185,7 +187,95 @@ internal static class Program
         var quando = File.GetLastWriteTime(exe);
         string cfg = exe.Contains("Release", StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
         Info($"iniciando: duel-server.exe --serve  [{cfg}, compilado {quando:dd/MM HH:mm}]");
-        return Spawn(exe, "--serve", Path.GetDirectoryName(exe));
+        string dir = Path.GetDirectoryName(exe);
+        try { return Spawn(exe, "--serve", dir); }
+        catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)
+        {
+            // Marca da Web (ver OfferUnblock). Com a permissao do usuario, tiramos
+            // a marca e tentamos de novo — uma vez so'.
+            if (!OfferUnblock(dir))
+                throw new Exception(
+                    "o Windows bloqueou o duel-server.exe (Marca da Web) e a correcao nao foi aplicada. " +
+                    "Para desbloquear na mao: clique direito no exe > Propriedades > Desbloquear.");
+            return Spawn(exe, "--serve", dir);
+        }
+    }
+
+    // ------------------------------------------------------- Marca da Web (MOTW)
+
+    /// <summary>Win32 ERROR_CANCELLED — "A operacao foi cancelada pelo usuario".</summary>
+    const int ErrorCancelled = 1223;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool DeleteFileW(string lpFileName);
+
+    /// <summary>
+    /// Arquivo que veio de fora da maquina (zip baixado, pendrive, pasta de rede)
+    /// carrega o fluxo alternativo `Zone.Identifier`, a "Marca da Web". O
+    /// ShellExecute entao pede confirmacao ao usuario — mas o launcher sobe os
+    /// servidores com a janela OCULTA, entao nao ha' onde clicar e o Windows
+    /// devolve na hora o erro 1223, "cancelada pelo usuario", sem nunca ter
+    /// perguntado nada. Tirar o fluxo e' exatamente o que o botao "Desbloquear"
+    /// das Propriedades do arquivo faz — nao mexe no conteudo de nada.
+    ///
+    /// Como isso apaga um pedaco de metadado do disco, perguntamos antes.
+    /// </summary>
+    static bool OfferUnblock(string dir)
+    {
+        Console.WriteLine();
+        Warn("o Windows bloqueou este executavel: e' a Marca da Web.");
+        Console.WriteLine("  Os arquivos vieram de fora desta maquina (zip baixado, pendrive, rede),");
+        Console.WriteLine("  entao o Windows pede confirmacao para roda-los. Como o launcher sobe os");
+        Console.WriteLine("  servidores em janela oculta, ninguem tem onde clicar e ele ja' cancela.");
+        Console.WriteLine();
+        Console.WriteLine($"  Solucao: remover a marca dos arquivos de {dir}");
+        Console.WriteLine("  (o mesmo que Propriedades > Desbloquear; o conteudo nao muda).");
+        Console.WriteLine();
+
+        if (!AskYesNo("  Aplicar a solucao agora?")) { Info("nada foi alterado."); return false; }
+
+        int n = 0;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                if (DeleteFileW(f + ":Zone.Identifier")) n++;
+        }
+        catch (Exception e) { Fail($"nao consegui desbloquear tudo: {e.Message}"); }
+
+        if (n == 0)
+        {
+            Warn("nenhuma marca encontrada — o bloqueio pode ser do antivirus, nao da Marca da Web.");
+            return false;
+        }
+        Ok($"{n} arquivo(s) desbloqueado(s) — tentando subir de novo");
+        return true;
+    }
+
+    /// <summary>
+    /// Pergunta S/N. Sem console interativo (saida redirecionada, duplo clique
+    /// perdendo o stdin) a resposta e' NAO: melhor falhar com a explicacao na
+    /// tela do que mexer nos arquivos do usuario sem ele ter dito nada.
+    /// </summary>
+    static bool AskYesNo(string question)
+    {
+        Console.Write($"{question} [S/N] ");
+        try
+        {
+            while (true)
+            {
+                var k = Console.ReadKey(true).KeyChar;
+                if (k is 's' or 'S' or 'y' or 'Y') { Console.WriteLine("S"); return true; }
+                if (k is 'n' or 'N' or (char)27) { Console.WriteLine("N"); return false; }
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            var line = Console.ReadLine();
+            bool sim = line != null && (line.StartsWith("s", StringComparison.OrdinalIgnoreCase) ||
+                                        line.StartsWith("y", StringComparison.OrdinalIgnoreCase));
+            if (line == null) Console.WriteLine("N (sem console interativo)");
+            return sim;
+        }
     }
 
     /// <summary>

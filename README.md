@@ -16,6 +16,16 @@ Se ainda não existirem, gere com `npm run launcher:build` (precisa do SDK .NET)
 O launcher compila o `duel-server` sozinho na primeira vez, é idempotente (não
 sobe servidor duplicado) e deixa os servidores rodando ocultos depois de sair.
 
+> **Se der `ERRO nao consegui iniciar o duel-server: … A operação foi cancelada
+> pelo usuário`** — é a **Marca da Web**: os arquivos vieram de fora da máquina
+> (zip baixado, pendrive, pasta de rede) e o Windows pede confirmação para
+> executá-los; como o launcher sobe os servidores em janela oculta, ninguém tem
+> onde clicar e ele já cancela (erro 1223). O próprio launcher explica isso na
+> hora e **pergunta se pode aplicar a solução** — responda `S` e ele remove a
+> marca (o mesmo que Propriedades → Desbloquear, sem tocar no conteúdo) e sobe
+> o servidor. Na mão, o equivalente é
+> `Get-ChildItem duel-server\bin -Recurse -File | Unblock-File`.
+
 Na mão:
 
 ```bash

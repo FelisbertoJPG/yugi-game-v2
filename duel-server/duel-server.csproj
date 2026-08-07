@@ -23,6 +23,14 @@
     <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" />
   </ItemGroup>
 
+  <!-- Token de distribuicao (PAT fine-grained, Contents: Read-only) do repositorio
+       privado de Releases. Mesma condicional do payload: se o token.txt existe ele
+       entra como recurso; se nao existe - o dia a dia - o build sai igual ao de
+       sempre e o updater roda sem autenticacao. O arquivo NAO vai para o git. -->
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\token.txt')">
+    <EmbeddedResource Include="token.txt" LogicalName="token.txt" />
+  </ItemGroup>
+
   <!-- Copia as bibliotecas nativas para junto do executavel, para o
        DllImport("ocgcore") / DllImport("sqlite3") encontra-las. -->
   <ItemGroup>

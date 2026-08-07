@@ -22,6 +22,18 @@ npm run stop                 # encerra front e duel-server de forma limpa
 
 npm run launcher:build       # gera duel-academy.exe / duel-academy-stop.exe (SDK .NET 8)
 npm run pack                 # gera dist/DuelAcademy.exe (jogo inteiro num arquivo)
+                             # EXIGE um `npm run release:build` antes — o payload embutido
+                             # é feito dos MESMOS game.zip/cards.zip do Release, senão a
+                             # instalação nova oferece uma atualização do que ela já tem
+
+npm run update:test          # 79 asserções do instalador/auto-updater (sem rede):
+                             # --test-update + --test-offline + --test-selfupdate
+                             #   + --test-update-duelo
+npm run release:build        # DRY-RUN: gera dist/release/ (game.zip, cards.zip, manifest.json)
+npm run release:test         # instala esses artefatos numa raiz descartável e confere
+npm run release:publish      # sobe o Release para o repo privado de distribuição
+                             # -- -PodarReleases 5 apaga as tags antigas (opt-in)
+                             # --test-remote (na mão) baixa o Release publicado e instala
 
 cd duel-server && dotnet run -- --app --lan   # o mesmo --app, mas alcançável de outro
                                                 # aparelho na rede (app mobile) — ver mobile/README.md
@@ -240,6 +252,28 @@ O `duel-server` também sabe servir o front sozinho (`StaticServer.cs`,
 modo `--app`), que é como o `dist/DuelAcademy.exe` roda tudo num processo só,
 com o payload embutido instalado em `%LOCALAPPDATA%\DuelAcademy\game`.
 
+**`duel-server/src/update/`** — o instalador/auto-updater. Um manifesto no
+GitHub descreve o estado desejado; o cliente compara com o disco e baixa só a
+diferença. O conteúdo é dividido **por volatilidade**: `game.zip` (front +
+índices, 0,8 MB, muda todo dia) e `cards.zip` (`cards.json` + `cards.cdb` +
+20.949 scripts Lua, 24,9 MB, quase nunca muda), cada um versionado por um
+marcador de conteúdo — assim publicar um ajuste de front custa 0,8 MB ao
+jogador em vez dos 64 MB do exe inteiro. `store/`/`decks/` são **intocáveis
+por código** (guardam conta de gente), mesmo que um manifesto peça. A limpeza
+é por **inventário** (`.duelacademy/<id>.files`), não varrendo as `roots`:
+`game` e `cards` dividem a pasta `ygo-data/data`, e varrer fazia o segundo
+apagar em silêncio o que o primeiro instalou.
+
+No boot do `--app` (só com payload embutido — em desenvolvimento `appRoot` é o
+repositório, e atualizar ali sobrescreveria seu código-fonte; `--sem-update`
+pula) o `UpdateService` checa com timeout de 8s e falha silenciosa: offline
+nunca trava o jogo. Havendo novidade, o navegador abre em
+`web/atualizando.html`, que consulta `/__update/status` e dispara
+`/__update/aplicar` (só localhost, mesmo com `--lan`). O `SelfUpdater` troca o
+próprio exe por um `.bat` que espera o PID morrer — e **apaga o
+`Zone.Identifier` do exe baixado**, senão cai no erro 1223 já conhecido do
+launcher. Ver **`INSTALADOR.md`**.
+
 **`mobile/`** — app Flutter, **cliente fino** do MESMO `duel-server` (fala o
 mesmo RPC `/start`/`/respond` que `web/duel.html`, nenhuma regra reimplementada
 — o `ocgcore` só existe como DLL Windows, então o motor continua no PC). Por
@@ -332,6 +366,18 @@ nenhuma conta nova herda esses dados automaticamente.
   entrada por mensagem, formato de resposta de cada seleção, os bugs que cada um
   causa), as regras do `NpcBrain` e a lista do que falta. Um tamanho errado de
   entrada desalinha o parse **sem erro nenhum** — o sintoma aparece turnos depois.
+- **`INSTALADOR.md`** — obrigatório antes de mexer em `duel-server/src/update/` ou
+  em `tools/publish-release.ps1`. Traz o schema do manifesto, a divisão por
+  volatilidade, as travas de dado de conta e o porquê da limpeza por inventário.
+  **`INSTALADOR-PENDENCIAS.md`** é o par dele: o que ficou faltando, por impacto
+  no jogador. A atualização fantasma, a trava do update durante duelo, a poda dos
+  backups, o caminho de volta e os testes offline/selfupdate já foram fechados —
+  o que sobra é publicar um Release com `-ComExe` (a única parte da troca do exe
+  que não dá para testar localmente) e decidir se `decks/npc/*.ydk` passam a
+  viajar no Release. **Não rode `git init` aqui** — esta pasta é cópia de
+  trabalho; o repositório fica na pasta original (§13 do documento).
+  `MECANISMO-INSTALADOR.md` é o documento genérico de origem (instalador do
+  Souls Craft), útil como referência do mecanismo em abstrato.
 - **`TAGFORCE-BATALHA.md`** — o que a batalha do Tag Force 1 é por dentro (ela é 2D,
   sem modelo 3D nenhum) e o timing exato de cada animação, lido do ISO. Os
   formatos byte a byte estão em `tools/tagforce/README.md`.

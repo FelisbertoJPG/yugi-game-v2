@@ -1,0 +1,80 @@
+using System;
+using System.IO;
+using System.Reflection;
+
+namespace DuelServer.Update
+{
+    /// <summary>
+    /// Coordenadas de distribuição, fixas no build.
+    ///
+    /// O TOKEN não mora aqui. Ele entra como recurso embutido a partir de
+    /// `duel-server/token.txt` — mesmo padrão condicional que o `payload.zip` já
+    /// usa no .csproj: se o arquivo existe, vira recurso; se não existe (o dia a
+    /// dia do desenvolvimento), a condição não bate e o build sai igual ao de
+    /// sempre. Assim o segredo nunca passa por um arquivo .cs que alguém commita
+    /// por distração.
+    /// </summary>
+    public static class BuildConfig
+    {
+        /// <summary>Repositório PRIVADO só de distribuição — não tem código, só Releases.</summary>
+        public const string Owner = "FelisbertoJPG";
+        public const string Repo = "yugi-server-";
+
+        /// <summary>Vazio = pega o Release mais recente (`/releases/latest`).</summary>
+        public const string Tag = "";
+
+        /// <summary>
+        /// Versão DESTE executável. É o que o auto-update compara com
+        /// `manifest.installer.version`. Suba a cada Release que troque o exe.
+        /// </summary>
+        public const string InstallerVersion = "0.1.0";
+
+        public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
+
+        const string RecursoToken = "token.txt";
+
+        static string _token;
+        static bool _tokenLido;
+
+        /// <summary>
+        /// PAT fine-grained, `Contents: Read-only`, escopado SÓ no repo de
+        /// distribuição. Null quando não foi embutido — aí o updater tenta sem
+        /// autenticação (funciona se o repo for público) e diz isso no log, em vez
+        /// de morrer com um 404 que parece "release não existe".
+        ///
+        /// Ordem: recurso embutido → variável de ambiente (para depurar sem
+        /// recompilar) → null.
+        ///
+        /// O token É EXTRAÍVEL de dentro do exe por qualquer um. Isso é aceito e o
+        /// dano é limitado pelo escopo: o pior caso é alguém baixar o que já ia ser
+        /// distribuído. NUNCA embuta um token amplo — o `gho_…` do `gh` CLI tem
+        /// escopo `repo`+`workflow` e daria poder de ESCRITA no repositório.
+        /// </summary>
+        public static string Token
+        {
+            get
+            {
+                if (_tokenLido) return _token;
+                _tokenLido = true;
+
+                try
+                {
+                    var asm = typeof(BuildConfig).Assembly;
+                    using var s = asm.GetManifestResourceStream(RecursoToken);
+                    if (s != null)
+                    {
+                        using var r = new StreamReader(s);
+                        _token = r.ReadToEnd().Trim();
+                    }
+                }
+                catch { }
+
+                if (string.IsNullOrEmpty(_token))
+                    _token = Environment.GetEnvironmentVariable("DUELACADEMY_TOKEN");
+
+                if (string.IsNullOrWhiteSpace(_token)) _token = null;
+                return _token;
+            }
+        }
+    }
+}

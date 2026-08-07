@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
@@ -18,10 +19,32 @@ namespace DuelServer
     ///
     /// Em desenvolvimento nao existe payload embutido: `Exists` da' false e o
     /// Program cai de volta na pasta do repositorio, como sempre foi.
+    ///
+    /// ------------------------------------------------------------------------
+    /// FORMATO (mudou para matar a "atualizacao fantasma" — INSTALADOR-PENDENCIAS §1)
+    ///
+    ///   payload.zip
+    ///   ├── game.zip          copia BYTE A BYTE do dist\release\game.zip publicado
+    ///   ├── cards.zip         idem, do dist\release\cards.zip
+    ///   ├── payload.markers   "game=game-abc123def456" + "cards=cards-…", lidos do
+    ///   │                     dist\release\manifest.json
+    ///   └── seed\…            o que os dois pacotes NAO trazem (store/, decks/,
+    ///                         package.json) — o estado inicial do jogo
+    ///
+    /// O motivo de embutir os zips PUBLICADOS em vez de montar a propria arvore:
+    /// o diff dos pacotes e' por MARCADOR, e o marcador e' derivado do sha256 do
+    /// zip. Dois `CreateFromDirectory` sobre o mesmo conteudo nao produzem bytes
+    /// iguais (o zip guarda o timestamp de cada entrada), entao um payload montado
+    /// aqui nunca casaria com o Release — e o primeiro boot de toda instalacao
+    /// nova oferecia ~26 MB de atualizacao do conteudo que ele mesmo acabara de
+    /// instalar. Consumindo os mesmos arquivos, os marcadores batem e a instalacao
+    /// nova ja' nasce em dia.
     /// </summary>
     public static class Payload
     {
         const string ResourceName = "payload.zip";
+        const string Marcadores = "payload.markers";
+        const string Semente = "seed/";
 
         /// <summary>Pastas cujo conteudo e' do JOGADOR: nunca sobrescrever numa
         /// atualizacao, senao a carteira e os decks dele somem.</summary>
@@ -76,28 +99,145 @@ namespace DuelServer
             // meio, a proxima execucao refaz tudo em vez de rodar pela metade.
             try { if (File.Exists(marca)) File.Delete(marca); } catch { }
 
-            int escritos = 0, preservados = 0;
-            using (var zip = new ZipArchive(Open(), ZipArchiveMode.Read))
+            using (var s = Open())
             {
-                foreach (var entry in zip.Entries)
-                {
-                    if (entry.FullName.EndsWith("/")) continue;               // diretorio
-                    string destino = Path.GetFullPath(Path.Combine(root, entry.FullName));
-                    if (!destino.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                        continue;                                            // zip slip
-
-                    if (File.Exists(destino) && EhDoJogador(entry.FullName)) { preservados++; continue; }
-
-                    Directory.CreateDirectory(Path.GetDirectoryName(destino));
-                    entry.ExtractToFile(destino, overwrite: true);
-                    escritos++;
-                }
+                var (escritos, preservados) = Instalar(s, root);
+                Log.Info($"{escritos} arquivos instalados" +
+                         (preservados > 0 ? $", {preservados} preservados (seus decks/carteira)" : ""));
             }
 
             File.WriteAllText(marca, carimbo);
-            Log.Info($"{escritos} arquivos instalados" +
-                     (preservados > 0 ? $", {preservados} preservados (seus decks/carteira)" : ""));
             return root;
+        }
+
+        /// <summary>
+        /// A extração em si, separada do recurso embutido para o `--test-payload`
+        /// poder rodá-la com um payload de mentira. É o mesmo código que o
+        /// executável distribuído roda no primeiro boot.
+        /// </summary>
+        internal static (int escritos, int preservados) Instalar(Stream payloadZip, string root)
+        {
+            int escritos = 0, preservados = 0;
+            var versoes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var pacotes = new List<(string id, ZipArchiveEntry entrada)>();
+
+            using var zip = new ZipArchive(payloadZip, ZipArchiveMode.Read);
+
+            // 1a passada: o mapa id -> versao, e a semente (store/, decks/,
+            // package.json). Os pacotes ficam para depois porque so' com as
+            // versoes em maos da' para registrar o marcador de cada um.
+            foreach (var entry in zip.Entries)
+            {
+                if (entry.FullName.EndsWith("/")) continue;               // diretorio
+                string nome = entry.FullName.Replace('\\', '/');
+
+                if (nome.Equals(Marcadores, StringComparison.OrdinalIgnoreCase))
+                { LerMarcadores(entry, versoes); continue; }
+
+                if (nome.Equals("game.zip", StringComparison.OrdinalIgnoreCase) ||
+                    nome.Equals("cards.zip", StringComparison.OrdinalIgnoreCase))
+                { pacotes.Add((Path.GetFileNameWithoutExtension(nome), entry)); continue; }
+
+                // `seed/x` vai para `x`. Qualquer outra coisa e' o formato
+                // antigo (arvore crua na raiz do payload) e continua servindo.
+                string destinoRel = nome.StartsWith(Semente, StringComparison.OrdinalIgnoreCase)
+                    ? nome.Substring(Semente.Length)
+                    : nome;
+                if (destinoRel.Length == 0) continue;
+
+                if (!Update.SafePath.TryCombine(root, destinoRel, out string destino)) continue;
+                if (File.Exists(destino) && EhDoJogador(destinoRel)) { preservados++; continue; }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(destino));
+                entry.ExtractToFile(destino, overwrite: true);
+                escritos++;
+            }
+
+            // 2a passada: os pacotes, do jeito que o auto-updater os instalaria.
+            foreach (var (id, entrada) in pacotes)
+                escritos += ExtrairPacote(root, id, entrada, versoes);
+
+            return (escritos, preservados);
+        }
+
+        /// <summary>
+        /// Extrai um `game.zip`/`cards.zip` embutido e registra marcador +
+        /// inventario, exatamente como o <see cref="Update.UpdateEngine"/> faria.
+        ///
+        /// Sem a versao (payload sem `payload.markers`, ou marcador ausente para
+        /// este id) o conteudo AINDA e' instalado — o jogo abre —, mas o marcador
+        /// nao e' escrito e a checagem seguinte vai oferecer o pacote. E' o
+        /// comportamento antigo, e e' o certo: mentir um marcador que nao veio do
+        /// Release deixaria o jogador preso numa versao velha para sempre.
+        /// </summary>
+        static int ExtrairPacote(string root, string id, ZipArchiveEntry entrada,
+                                 Dictionary<string, string> versoes)
+        {
+            var instalados = new List<string>();
+
+            // O zip aninhado precisa passar por um arquivo temporario: o stream de
+            // uma entrada de zip nao e' navegavel, e o ZipArchive em modo leitura
+            // exige navegar (ele le' o diretorio central, que fica no FIM). Sem
+            // isto o `cards.zip` embutido nem abre.
+            string tmp = Path.Combine(Path.GetTempPath(), $"duelacademy-payload-{id}-{Guid.NewGuid():N}.zip");
+            try
+            {
+                using (var origem = entrada.Open())
+                using (var saida = File.Create(tmp))
+                    origem.CopyTo(saida);
+
+                using var interno = ZipFile.OpenRead(tmp);
+                foreach (var e in interno.Entries)
+                {
+                    if (string.IsNullOrEmpty(e.Name)) continue;               // diretorio
+                    string rel = e.FullName.Replace('\\', '/');
+                    if (!Update.SafePath.TryCombine(root, rel, out string destino)) continue;
+                    if (File.Exists(destino) && EhDoJogador(rel)) continue;
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(destino));
+                    e.ExtractToFile(destino, overwrite: true);
+                    instalados.Add(Update.SafePath.Rel(root, destino) ?? rel);
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Err($"nao consegui extrair o pacote '{id}' embutido: {e.Message}");
+                return instalados.Count;
+            }
+            finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+
+            if (versoes.TryGetValue(id, out string versao) && !string.IsNullOrEmpty(versao))
+            {
+                try
+                {
+                    Update.UpdateEngine.RegistrarPacoteInstalado(root, id, versao, instalados);
+                    Log.Info($"pacote '{id}' embutido: {instalados.Count} arquivos — {versao}");
+                }
+                catch (Exception e) { Log.Warn($"nao consegui marcar o pacote '{id}': {e.Message}"); }
+            }
+            else
+            {
+                Log.Warn($"pacote '{id}' embutido sem versao no {Marcadores} — " +
+                         "a primeira checagem vai oferece-lo de novo");
+            }
+            return instalados.Count;
+        }
+
+        /// <summary>Formato do `payload.markers`: uma linha `id=versao` por pacote.</summary>
+        static void LerMarcadores(ZipArchiveEntry entry, Dictionary<string, string> destino)
+        {
+            try
+            {
+                using var r = new StreamReader(entry.Open());
+                string linha;
+                while ((linha = r.ReadLine()) != null)
+                {
+                    int i = linha.IndexOf('=');
+                    if (i <= 0) continue;
+                    destino[linha.Substring(0, i).Trim()] = linha.Substring(i + 1).Trim();
+                }
+            }
+            catch (Exception e) { Log.Warn($"{Marcadores} ilegivel: {e.Message}"); }
         }
 
         static bool EhDoJogador(string entrada)

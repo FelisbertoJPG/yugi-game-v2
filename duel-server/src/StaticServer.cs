@@ -63,6 +63,7 @@ namespace DuelServer
             if (path.StartsWith("/__store/")) return Store(ctx, root, path.Substring("/__store/".Length));
             if (path.StartsWith("/__boards/")) return Boards(ctx, root, path.Substring("/__boards/".Length));
             if (path.StartsWith("/__auth/")) return Auth(ctx, root, path.Substring("/__auth/".Length));
+            if (path.StartsWith("/__update/")) return UpdateApi(ctx, path.Substring("/__update/".Length));
 
             // Redireciona de verdade em vez de servir o index na raiz: um documento
             // servido em '/' faz os caminhos relativos dele resolverem contra '/',
@@ -632,6 +633,65 @@ namespace DuelServer
         {
             using var sr = new StreamReader(req.InputStream, req.ContentEncoding ?? Encoding.UTF8);
             return sr.ReadToEnd();
+        }
+
+        // ------------------------------------------------------------ update/
+        //
+        // O progresso vai por POLLING (o front pergunta a cada meio segundo), nao
+        // por SSE. Uma atualizacao dura segundos e tem UM estado global — abrir um
+        // canal persistente para isso sao mais partes moveis do que a tarefa pede.
+        //
+        // Nao ha rota que devolva o token nem a URL assinada: quem fala com o
+        // GitHub e' o processo, nunca o navegador.
+        static bool UpdateApi(HttpListenerContext ctx, string resto)
+        {
+            var req = ctx.Request;
+            var res = ctx.Response;
+
+            // Instalar troca arquivos do jogo — isso e' comando local, nunca da LAN,
+            // mesmo com --lan ligado. (A trava geral de /__ so' cobre nao-GET.)
+            if (resto == "aplicar")
+            {
+                if (!req.IsLocal) { Status(res, 403, "403"); return true; }
+                if (req.HttpMethod != "POST") { Status(res, 405, "405"); return true; }
+
+                // Com duelo em andamento, a extracao trocaria os ~21 mil .lua e o
+                // cards.cdb debaixo do motor — e o cards.cdb esta ABERTO pelo
+                // SQLite desde que o duelo comecou, entao a extracao morreria pela
+                // metade, com o jogo instalado entre duas versoes. Recusar aqui e'
+                // mais barato que consertar isso depois na maquina do jogador.
+                // (Um duelo ja' encerrado nao impede nada: a chamada abaixo o
+                // libera e fecha o arquivo.)
+                if (!DuelServer.WebServer.LiberarDueloEncerrado())
+                {
+                    Json(res, new { erro = "termine o duelo para atualizar" }, 409);
+                    return true;
+                }
+                DuelServer.Update.UpdateService.Aplicar();
+                Json(res, DuelServer.Update.UpdateService.Snapshot());
+                return true;
+            }
+
+            // Voltar para a versao anterior. Mesmas travas do `aplicar`: e' o
+            // mesmo tipo de operacao (trocar os arquivos do jogo em massa), so'
+            // que na outra direcao.
+            if (resto == "restaurar")
+            {
+                if (!req.IsLocal) { Status(res, 403, "403"); return true; }
+                if (req.HttpMethod != "POST") { Status(res, 405, "405"); return true; }
+                if (!DuelServer.WebServer.LiberarDueloEncerrado())
+                {
+                    Json(res, new { erro = "termine o duelo para restaurar" }, 409);
+                    return true;
+                }
+                Json(res, DuelServer.Update.UpdateService.Restaurar());
+                return true;
+            }
+
+            if (resto == "status") { Json(res, DuelServer.Update.UpdateService.Snapshot()); return true; }
+
+            Status(res, 404, "404");
+            return true;
         }
 
         static string Str(JsonElement o, string prop) =>

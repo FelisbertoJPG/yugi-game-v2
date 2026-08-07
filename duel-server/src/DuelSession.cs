@@ -213,6 +213,10 @@ namespace DuelServer
                 YgoCoreAPI.OCG_DestroyDuel(_duel);
                 _duel = IntPtr.Zero;
             }
+            // Fecha o cards.cdb junto. Sem isto o SQLite segura o arquivo ate' o
+            // GC rodar, e o auto-updater nao consegue trocar o pacote 'cards'
+            // depois que QUALQUER duelo tiver comecado neste processo.
+            _db?.Dispose();
         }
     }
 }

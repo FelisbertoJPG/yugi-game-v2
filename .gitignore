@@ -58,6 +58,13 @@ launcher/obj/
 launcher/stop/bin/
 launcher/stop/obj/
 
+# duel-server/bin: regeneravel COMO OS OUTROS, mas aqui tem um motivo a mais.
+# Desde que o token.txt existe, o build embute o PAT de distribuicao como recurso
+# do duel-server.dll — o token fica LITERALMENTE dentro do binario compilado.
+# Sem esta linha, um `git add -A` de rotina publica o segredo no repositorio, e
+# nada acusa: o arquivo e' binario e o diff nao mostra nada legivel.
+duel-server/bin/
+
 # Launcher publicado na raiz: artefato de build, refeito com `npm run launcher:build`
 duel-academy.exe
 duel-academy.pdb
@@ -69,6 +76,14 @@ duel-academy-stop.pdb
 # meio e deixe o arquivo para tras.
 dist/
 duel-server/payload.zip
+
+# TOKEN DE DISTRIBUICAO — PAT fine-grained (Contents: Read-only) do repositorio
+# privado de Releases. Entra no exe como recurso embutido pela condicional do
+# .csproj, do mesmo jeito que o payload.zip. E' segredo: fora do git, sempre.
+# Ele E' extraivel de dentro do exe publicado — por isso tem que ser READ-ONLY e
+# escopado so' no repo de distribuicao. Nunca embuta um token amplo (o `gho_...`
+# do gh CLI tem escopo repo+workflow, ou seja, poder de ESCRITA).
+duel-server/token.txt
 
 # SO / editor
 .DS_Store
@@ -82,3 +97,12 @@ Thumbs.db
 # repo; esta linha e cinto e suspensorio.
 tagforce-extraido/
 tf-extraido/
+
+# Supabase. A chave PUBLISHABLE (`sb_publishable_...`) pode ir pro git — ela e'
+# publica por desenho, quem protege e' a RLS. A SECRET (service_role) ignora a
+# RLS inteira: e' o banco todo, e nao pode existir dentro deste repositorio.
+# Mesmo raciocinio do duel-server/token.txt, algumas linhas acima.
+supabase/.env
+supabase/.env.*
+supabase/.temp/
+.supabase/

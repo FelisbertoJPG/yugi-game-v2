@@ -1,0 +1,444 @@
+# Instalador / Auto-Updater do Duel Academy — plano de implementação
+
+Adaptação do mecanismo descrito em [`MECANISMO-INSTALADOR.md`](./MECANISMO-INSTALADOR.md)
+(origem: instalador do Souls Craft) para **este** projeto. Aquele documento é o "neurônio"
+genérico; este é a versão presa aos nossos arquivos, com as decisões já tomadas e a ordem
+exata dos passos.
+
+> **Decisões travadas:** hospedagem em **repositório GitHub privado** com PAT fine-grained
+> `Contents: Read-only` embutido no exe (§4 do documento de origem). Motivo: o `cards.cdb` e
+> os ~21 mil scripts Lua vêm do ocgcore/EDOPro e não vamos redistribuí-los num repo público.
+
+---
+
+## 1. O ponto de partida: metade já existe
+
+`duel-server/src/Payload.cs` já implementa, sem saber, quatro dos cinco conceitos do §2 —
+só que **contra um zip embutido no exe**, não contra um servidor.
+
+| Conceito (doc de origem) | Onde já vive aqui | Estado |
+|---|---|---|
+| Payload .zip versionado por marcador (§5) | `Payload.Carimbo()` = `sha256(payload.zip)[:16]`, gravado em `<raiz>/.versao` | pronto |
+| Raiz da instância (§9.1) | `%LOCALAPPDATA%\DuelAcademy\game` | pronto |
+| `removeMode: "keep"` (§2.4) | `Payload.Preservadas = { "store/", "decks/" }` | pronto, mas incompleto (ver §3) |
+| Zip-slip (§2.5) | o teste `destino.StartsWith(root + separador)` em `EnsureExtracted` | pronto, vira `SafeCombine` |
+| Fallback offline (§7) | o payload embutido no exe | **melhor** que o original: o plano B é permanente |
+| Gerador do pacote (§8, passos 1–2) | `tools/pack.ps1` | pronto |
+| Manifesto, diff, download, backup | `duel-server/src/update/` | **feito** (ver §5) |
+| Gerador do manifesto + publish | `tools/publish-release.ps1` | **feito** |
+| Self-tests | `--test-update`, `--test-release` | **feito**, 30/30 e 8/8 |
+| Auto-update do próprio exe (§6) | — | **pendente** |
+| UI de progresso | — | **pendente** |
+
+**O problema concreto que isto resolve:** hoje, atualizar o jogo é o jogador baixar
+`DuelAcademy.exe` (64 MB) na mão, e o `EnsureExtracted` reescrever os ~21 mil arquivos de
+uma vez. Um ajuste de 1 KB em `web/js/duel.js` custa 64 MB de download.
+
+---
+
+## 2. Divisão por volatilidade (a lição não-resolvida do §5)
+
+O documento de origem avisa: no Souls Craft, `resourcepacks` + `config` foram no MESMO zip,
+então um ajuste de 1 KB obrigava a re-baixar 123 MB. Aqui a divisão certa é evidente, porque
+os nossos conteúdos têm ritmos de mudança muito diferentes:
+
+| Pacote | Conteúdo | Tamanho **real** | Muda quando |
+|---|---|---|---|
+| `DuelAcademy.exe` | motor .NET + `ocgcore.dll` + `sqlite3.dll` | ~14 MB | mexe em `duel-server/src/` |
+| `game.zip` | `web/`, `ygo-data/src/`, e de `ygo-data/data/`: `cards.index.json`, `archetypes.json`, `scripts.index.json`, `meta.json`, `constants.json` | **0,8 MB** (53 arquivos) | **quase todo dia** |
+| `cards.zip` | `ygo-data/data/cards.json` (14 MB), `.../YGODemo/cards.cdb` e os 20.949 `script/*.lua` | **24,9 MB** (20.951 arquivos) | só quando roda `npm run data:build` |
+| `files[]` | `store/banlist.json`, `store/boosters.json`, `store/npcs.json` | KB | conteúdo global do jogo, sob demanda |
+
+Os tamanhos acima são medidos, não estimados (`npm run release:build`). Publicar um
+ajuste de front custa **0,8 MB** ao jogador, contra os 64 MB do `DuelAcademy.exe` de hoje.
+
+Os três `store/*.json` acima são **conteúdo do jogo** versionado de propósito (banlist,
+boosters, NPCs customizados), não progresso de ninguém — por isso entram em `files[]` e
+podem ser atualizados individualmente. Todo o resto de `store/` e `decks/` é do jogador.
+
+### Raízes sobrepostas — e por que a limpeza é por inventário
+
+`game.zip` e `cards.zip` **dividem a pasta `ygo-data/data`**: os 5 índices pequenos são
+voláteis e o `cards.json` de 14 MB é estável. O molde original limpa os restos varrendo as
+`roots` do payload — e com raízes sobrepostas isso faz o **segundo pacote apagar em silêncio
+o que o primeiro acabou de instalar**. Aconteceu de verdade aqui: o `--test-release` contra
+os artefatos reais mostrou a instalação "com sucesso" e sem `cards.index.json`.
+
+A correção não foi separar as pastas (o front espera os arquivos onde estão), foi trocar o
+critério: cada pacote grava um **inventário** do que escreveu
+(`.duelacademy/<id>.files`) e só governa esses arquivos. Na atualização seguinte, remove o
+que estava no inventário antigo e não está no zip novo. Raízes podem se sobrepor à vontade.
+
+De brinde, isso deixa a varredura de órfãos ser mais precisa que a do original: ele **pula**
+as raízes de payload inteiras (senão os 12.734 arquivos do `ygo-data` apareceriam todos como
+órfãos); aqui não é preciso pular nada, porque sabemos exatamente quais arquivos cada pacote
+pôs ali. Um arquivo largado à mão dentro de `web/js/` é detectado; os legítimos, não.
+
+---
+
+## 3. `managedRoots` — e a armadilha das contas
+
+```jsonc
+"managedRoots": [
+  { "path": "web",                                   "removeMode": "keep" },
+  { "path": "ygo-data",                              "removeMode": "keep" },
+  { "path": "duel_academy/Assets/StreamingAssets",   "removeMode": "keep" }
+]
+```
+
+Começa tudo em `"keep"` (§9.9); só vira `"backup"` quando o diff estiver provado pelo
+self-test. `store/` e `decks/` **nunca** entram em `managedRoots`.
+
+**Atenção redobrada:** `Payload.Preservadas` foi escrito quando `store/` e `decks/` eram só
+carteira e decks. Hoje eles guardam **contas de verdade** — `store/accounts/`,
+`store/users/<usuário>/wallet.json`, `store/sessions.json`, `decks/users/<usuário>/player/*.ydk`
+(ver a seção "Conta" do `CLAUDE.md`). Um `removeMode: "backup"` mal escopado ali não perde um
+save: **desloga todo mundo e some com a coleção**. A varredura de órfãos tem que pular essas
+pastas explicitamente, como o §5 manda pular os `roots` do payload.
+
+Backups em `%LOCALAPPDATA%\DuelAcademy\backups\<AAAA-MM-DD-HHmmss>\`, fora da raiz da
+instância (senão viram órfãos de si mesmos na próxima varredura).
+
+---
+
+## 4. Schema do manifesto
+
+```jsonc
+{
+  "gameVersion": "duel-academy-20260807",   // rótulo humano
+  "displayName": "Duel Academy",
+
+  "installer": {                            // o PRÓPRIO exe (auto-update, §6 do original)
+    "version": "0.2.0",
+    "asset":   "DuelAcademy.exe",
+    "sha256":  "…",
+    "size":    14000000
+  },
+
+  "managedRoots": [ /* ver §3 */ ],
+
+  "files": [
+    { "path": "store/banlist.json",  "asset": "banlist.json",  "sha256": "…", "size": 4096, "policy": "required" },
+    { "path": "store/boosters.json", "asset": "boosters.json", "sha256": "…", "size": 8192, "policy": "required" },
+    { "path": "store/npcs.json",     "asset": "npcs.json",     "sha256": "…", "size": 2048, "policy": "required" }
+  ],
+
+  "payloads": [                             // PLURAL — é a nossa mudança sobre o original
+    {
+      "id":      "game",
+      "version": "game-<sha256[:12]>",
+      "asset":   "game.zip",
+      "sha256":  "…",
+      "size":    3000000,
+      "roots":   ["web", "ygo-data/src", "ygo-data/data"]
+    },
+    {
+      "id":      "cards",
+      "version": "cards-<sha256[:12]>",
+      "asset":   "cards.zip",
+      "sha256":  "…",
+      "size":    47000000,
+      "roots":   ["duel_academy/Assets/StreamingAssets/YGODemo"]
+    }
+  ]
+}
+```
+
+Cada payload tem seu próprio marcador no disco: `<raiz>/.duelacademy/<id>.version`. O
+`.versao` de hoje (marcador único do `Payload.cs`) continua existindo como marcador do
+**payload embutido**, para o caminho offline não mudar de comportamento.
+
+Grave o JSON **sem BOM** (`UTF8Encoding($false)` no PowerShell) e faça o parser dar
+`TrimStart` no BOM mesmo assim (§7 do original).
+
+---
+
+## 5. Arquivos novos
+
+Tudo em `duel-server/src/update/`, reusando o `Log` que já existe
+(`logs/duel-server.log`, ao lado do exe).
+
+| Arquivo | Papel | Estado |
+|---|---|---|
+| `SafePath.cs` | `Combine`/`Rel`/`DentroDe` — o teste de zip-slip extraído do `Payload.cs` | **feito** |
+| `Manifest.cs` | modelo do manifesto (§4) + `Parse` tolerante a BOM | **feito** |
+| `HashCache.cs` | cache `(path\|size\|mtime) → sha256`, TSV | **feito** |
+| `FonteDeAssets.cs` | de onde vêm manifesto e assets; `FonteLocal` (pasta/`file://`) | **feito** |
+| `UpdateEngine.cs` | `CarregarManifestoAsync` → `Montar` → `AplicarAsync`; progresso por `Action<Progresso>` | **feito** |
+| `GitHubReleases.cs` | `FonteGitHub`: resolve `asset → apiUrl` via API + token; `NomeSeguro` | **feito** |
+| `BuildConfig.cs` | `Owner`/`Repo`/`Tag`/`InstallerVersion`; o token vem de fora | **feito** |
+| `SelfUpdater.cs` | `.new` + `.bat` de troca (ver §7 — tem armadilha nossa) | pendente |
+
+`Payload.cs` continua sendo o plano B permanente: o `UpdateEngine` pergunta ao remoto,
+depois ao cache do último manifesto bom, e quem chama cai no payload embutido se as duas
+falharem.
+
+O `HashCache` só se justifica de verdade por causa de `files[]` — para os payloads em zip o
+marcador de versão já evita hashear qualquer coisa. Vale ter mesmo assim: é agnóstico, e no
+dia em que quisermos listar `web/` arquivo-a-arquivo ele já está lá.
+
+---
+
+## 6. A UI: sem WinForms, sem WebView2
+
+O original usa WinForms + WebView2 porque não tinha servidor. **Nós temos** — o
+`StaticServer.cs` já serve o front inteiro no modo `--app`. Então:
+
+- rota nova `/__update/*` no `StaticServer` (o padrão `/__` já existe: `/__decks/`,
+  `/__store/`, `/__boards/`, `/__auth/`, e a linha 59 já barra POST não-local);
+- `GET /__update/check` → o `InstallPlan` serializado (o que falta baixar, quantos MB);
+- `POST /__update/apply` → dispara o `ApplyAsync`, com o progresso saindo por SSE;
+- `web/atualizando.html` mostra a barra e chama a home quando termina.
+
+No boot do `--app`, antes de abrir o navegador, o `Program` faz o check **com timeout curto**:
+offline nunca trava (§7 do original). Se houver atualização, abre o navegador em
+`/web/atualizando.html`; senão, na home de sempre.
+
+O `Action<Progress>` do original vira o mesmo desacoplamento aqui: o núcleo não sabe se quem
+escuta é o SSE, o console ou o self-test.
+
+---
+
+## 7. Duas armadilhas que são só nossas
+
+**Marca da Web (erro 1223).** Já documentada no `CLAUDE.md` e tratada em
+`launcher/Program.cs` (`OfferUnblock`, linha ~223: apaga o fluxo `Zone.Identifier` via
+`DeleteFileW(f + ":Zone.Identifier")`). O exe **baixado pelo auto-updater** vai carregar esse
+fluxo. Como o `.bat` de troca do §6 dá `start "" DuelAcademy.exe` com janela oculta, o
+Windows cancela sem perguntar nada e o jogador vê o jogo simplesmente não abrir. **O
+`SelfUpdater` tem que apagar o ADS do `.new` antes de mover** — reusando a mesma
+`DeleteFileW` do launcher. Isto não é hipótese: é o mesmo bug que já custou tempo aqui.
+
+**O exe travado durante a extração.** O `CLAUDE.md` avisa: "compile sempre com o servidor
+parado". A mesma regra vale para o update — se o `duel-server` estiver rodando
+(`duel-academy.exe` do launcher, ou uma segunda janela do jogo), o `ApplyAsync` pode falhar
+ao substituir arquivo em uso. O update roda no boot, **antes** de o `HttpListener` subir, e
+o `SelfUpdater` só age depois de o processo atual pedir para encerrar.
+
+---
+
+## 8. Publicar uma versão
+
+`tools/publish-release.ps1` (feito), reusando os passos 1–2 do `pack.ps1`:
+
+1. monta as três árvores (`game`, `cards`, e os `files[]` avulsos);
+2. zipa `game.zip` e `cards.zip`; calcula `sha256` de cada um → `version = "<id>-" + sha256[:12]`
+   — a identidade vem do **conteúdo**, então não dá para esquecer de incrementar;
+3. calcula `sha256`+`size` dos `files[]`;
+4. sanitiza o campo `asset` (`[^A-Za-z0-9._-]` → `.`) mantendo o `path` real — o GitHub
+   renomeia assets e isso quebra o match manifesto→asset (§7 do original);
+5. escreve `manifest.json` **sem BOM**;
+6. **dry-run por padrão**; com `-Publish`, cria o Release via `gh` CLI e sobe os assets.
+   Com `-ComExe`, inclui o `DuelAcademy.exe` e lê a `InstallerVersion` do `BuildConfig.cs`.
+
+```bash
+npm run release:build      # dry-run: gera dist/release/ e lista os tamanhos
+npm run release:test       # instala esses artefatos numa raiz descartavel (§9)
+npm run release:publish    # sobe o Release
+```
+
+### Repositório e token
+
+Repo de distribuição: **`FelisbertoJPG/yugi-server-`** (privado, só Releases, sem código) —
+já é o que está fixo no `BuildConfig.cs`. Com `Tag = ""`, o cliente busca `/releases/latest`.
+
+O token **não** mora num `.cs`. Ele entra como recurso embutido a partir de
+`duel-server/token.txt`, pela mesma condicional do `.csproj` que o `payload.zip` já usa: se o
+arquivo existe vira recurso, se não existe o build sai igual ao de sempre. `token.txt` está no
+`.gitignore`, na mesma linhagem de `store/accounts/` e `store/sessions.json`. Para depurar sem
+recompilar, a variável de ambiente `DUELACADEMY_TOKEN` também é lida.
+
+Exigências do token — **PAT fine-grained, `Contents: Read-only`, escopado só neste repo**:
+
+- ele **é extraível** de dentro do exe por qualquer um. O dano é limitado pelo escopo: o pior
+  caso é alguém baixar o que já ia ser distribuído;
+- teste a escuridão: `PUT /contents` tem que dar **403**. O campo `permissions.admin` do
+  `GET /repos` **engana** — reflete o papel do dono, não o poder do token;
+- **nunca embuta o token do `gh` CLI**. O desta máquina é `gho_…` com escopos
+  `gist, read:org, repo, workflow` — isso é poder de **escrita** no repositório;
+- PAT fine-grained expira. Use validade longa e lembre de rotacionar.
+
+---
+
+## 9. Self-tests headless
+
+Seis flags no `duel-server`, no mesmo molde das ~20 suítes que já existem. Elas pegam falhas
+**diferentes**: a engine, os arquivos que você vai publicar, o transporte, a rede fora do ar,
+a troca do próprio exe, e a trava do duelo.
+
+`npm run update:test` roda as quatro que não precisam de rede
+(`--test-update`, `--test-offline`, `--test-selfupdate`, `--test-update-duelo`).
+
+### `--test-update` — a engine (35 asserções, sem rede)
+
+Monta um "Release falso" no `%TEMP%` e roda `Carregar` → `Montar` → `Aplicar` → re-scan pelo
+mesmo caminho de código do GitHub. Os casos:
+
+| Caso | O que prova |
+|---|---|
+| instalação limpa + re-scan | instala tudo, e rodar de novo não acha nada (idempotência) |
+| marcador igual / diferente | marcador igual não re-baixa; mexer no marcador de `cards` pede **só** ele |
+| sha256 errado | aborta, devolve falha, o arquivo bom antigo fica intacto, o `.part` é apagado |
+| `../` no zip | não escreve fora da raiz, e o resto do pacote instala normal |
+| dado de conta | `store/users/…/wallet.json` e `decks/users/…` intactos mesmo vindo no zip |
+| órfão | detectado dentro de uma raiz de payload, vai pro backup, é recuperável |
+| manifesto com BOM | parseia mesmo assim |
+| volatilidade | ajuste no front pede só `game`, e o pacote de cartas não é tocado |
+| raízes sobrepostas | regressão do bug do §2 — os dois pacotes convivem em `ygo-data/data` |
+| payload embutido | instalação nova nasce **em dia** (§11); e sem o `payload.markers` o fantasma reaparece |
+
+### `--test-offline` — a rede FORA do ar (16 asserções)
+
+O contrário do `--test-remote`, e o caso que acontece de verdade com o jogador. Prova a
+regra mais importante do instalador inteiro — **offline nunca trava o jogo**: fonte
+inexistente, manifesto corrompido (o HTML de um 500), cache do manifesto ilegível e asset
+que some no meio do download. Todos viram "sem atualização" ou "falhou sem estragar nada" —
+nenhum vira exceção subindo até o boot.
+
+O caso do meio é o que mais paga: depois de UMA checagem boa, o manifesto fica em cache e
+ficar offline nem é "sem atualização" — o cliente sabe que está em dia e abre direto.
+
+### `--test-selfupdate` — a troca do próprio exe (15 asserções)
+
+A coreografia inteira com um exe de mentira no `%TEMP%`: baixar o `.new`, conferir o sha256,
+apagar o `Zone.Identifier`, escrever o `.bat`, esperar um PID morrer, copiar por cima, apagar
+o `.new` e o `.bat` se autodeletar. O `.bat` roda **de verdade** — o PID esperado é o de um
+processo que já morreu, então a espera termina na hora sem encerrar quem está testando.
+
+O que ele **não** cobre, e continua exigindo uma publicação real: baixar o exe pelo navegador
+para ele vir com a Marca da Web de verdade. O caso 3 põe a marca à mão e confere que ela sai,
+mas quem a produz é o navegador.
+
+### `--test-update-duelo` — a trava do duelo (13 asserções)
+
+Precisa do `cards.cdb` de verdade. Mede no arquivo, em vez de deduzir: com um duelo vivo o
+`cards.cdb` **não** pode ser aberto em exclusiva (é o que a extração do zip precisaria fazer);
+depois do `Dispose`, pode. E o estado que a rota consulta responde certo nas três situações —
+sem duelo, com duelo vivo, e com duelo já encerrado (que precisa **soltar** o arquivo, não só
+responder "não tem duelo").
+
+### `--test-remote` — o transporte (rede de verdade)
+
+Instala o Release **publicado**, pela rede, com o token embutido. É o único teste que
+exercita as três armadilhas do repo privado (§4 do documento de origem) ao mesmo tempo: o
+endpoint da API do asset em vez do `browser_download_url`, o `Accept: application/octet-stream`,
+e o redirect para o CDN em que o `HttpClient` tira o `Authorization`.
+
+Um `Accept` esquecido passa liso por todos os outros testes — o download "funciona", só que
+o que chega é o JSON de metadados do asset, e o sintoma é um "sha256 não confere" sem
+explicação nenhuma.
+
+### `--test-release <pasta>` — os artefatos de verdade (11 asserções)
+
+Instala o que o `publish-release.ps1` acabou de gerar numa raiz descartável do `%TEMP%` e
+confere que o jogo ficou completo (`web/index.html`, `web/duel.html`, `cards.index.json`,
+`cards.cdb`, > 20.000 `.lua`) e que o re-scan fica vazio.
+
+Depois faz o mesmo pelo OUTRO caminho: monta o `payload.zip` como o `tools/pack.ps1` monta,
+instala pelo `Payload` e exige que o diff contra ESTE Release não peça pacote nenhum. É o
+único ponto em que o formato do payload e o formato do manifesto se encontram sobre os
+arquivos reais — um `pack.ps1` que volte a montar a própria árvore falha aqui, mesmo
+continuando a produzir um exe que abre e joga.
+
+**Não é redundante com o primeiro** — foi ele que achou o bug das raízes sobrepostas. Um
+`roots` errado ou um asset esquecido no manifesto passa liso pelo teste da engine (que usa
+zips de brinquedo) e só apareceria na máquina do jogador. Rode sempre antes de `-Publish`.
+
+---
+
+## 10. Ordem de implementação
+
+1. [x] Extrair o teste de zip-slip do `Payload.cs` para `SafePath.cs` — sem mudar comportamento.
+2. [x] `Manifest.cs` + `HashCache.cs` (agnósticos).
+3. [x] `UpdateEngine.cs` com fonte de assets **abstrata** (`FonteLocal` primeiro).
+4. [x] `--test-update` (§9) — verde antes de tocar em rede. **30/30**.
+5. [x] `tools/publish-release.ps1` gerando `game.zip` / `cards.zip` / `files[]`, dry-run por padrão.
+6. [x] `--test-release` contra os artefatos reais. **8/8**.
+7. [x] `GitHubReleases.cs` + `BuildConfig.cs` apontando para `FelisbertoJPG/yugi-server-`.
+8. [x] PAT fine-grained criado e embutido via `duel-server/token.txt`.
+       Verificado: `GET /repos` 200, `PUT /contents` **403**.
+9. [x] Primeiro Release publicado (`release-20260807-0157`, 6 assets).
+10. [x] `--test-remote` — instalação pela rede, ponta a ponta. **10/10**.
+11. [x] `/__update/status` e `/__update/aplicar` no `StaticServer` + `web/atualizando.html`
+        + check no boot do `--app` (timeout de 8s, falha silenciosa).
+12. [x] `SelfUpdater.cs` — **com** o tratamento da Marca da Web (§7).
+13. [x] Resolver a atualização fantasma da instalação nova (ver abaixo).
+14. [x] Virar `managedRoots` de `"keep"` para `"backup"`, um de cada vez. **`web/` virou**;
+        `ygo-data` e `StreamingAssets` seguem em `keep` (são compartilhadas entre os dois
+        pacotes e têm arquivos que o `data:build` gera localmente).
+15. [x] Recusar `/__update/aplicar` com duelo ativo (409) — e **soltar** o `cards.cdb` do
+        duelo já encerrado, senão atualizar depois de jogar uma vez exigiria fechar o jogo.
+16. [x] Poda dos backups (mantém os 3 mais recentes) e caminho de volta
+        (`/__update/restaurar` + botão na tela de atualização).
+17. [x] `--test-offline` e `--test-selfupdate`.
+
+A cadeia inteira funciona: o `--app` checa no boot, abre `atualizando.html` se houver
+novidade, o jogador clica, a barra anda e o jogo entra sozinho.
+
+### Detalhes que custaram um ciclo de teste
+
+- **A barra precisa andar durante o download E a extração.** Na primeira versão o progresso
+  só avançava por pacote: ficava em 3% por ~15 segundos e pulava para 100%. O peso de cada
+  pacote é dividido 70% download / 30% extração, com aviso a cada 256 KB baixados e a cada
+  250 arquivos extraídos. Uma barra que mente é pior que barra nenhuma — quem acha que travou
+  mata o processo no meio da instalação.
+- **O check só roda com payload embutido** (`Payload.Exists`). Em desenvolvimento, `appRoot`
+  é a pasta do repositório: atualizar ali sobrescreveria o código-fonte de quem está
+  programando com os arquivos do último Release. `--sem-update` pula a checagem.
+- **`/__update/aplicar` exige localhost** mesmo com `--lan` ligado. A trava geral de `/__` só
+  cobre não-GET, e instalar é comando de máquina, não de rede.
+- **O `.bat` de troca usa `ping` como sleep.** O `timeout` do Windows exige console
+  interativo e aborta com "Input redirection is not supported" quando roda sem janela —
+  exatamente o nosso caso.
+
+> As pendências completas — com o porquê de cada uma e onde mexer — estão em
+> **[`INSTALADOR-PENDENCIAS.md`](./INSTALADOR-PENDENCIAS.md)**. O que segue abaixo é só a
+> maior delas.
+
+---
+
+## 11. A atualização fantasma — resolvida, e por que assim
+
+Uma instalação recém-baixada oferecia uma atualização de **25,7 MB que ela já tinha por
+dentro**. O `DuelAcademy.exe` embute `payload.zip`, mas quem registrava os marcadores
+(`.duelacademy/<id>.version`) era só o `UpdateEngine` — o `Payload` não escrevia nenhum. Sem
+marcador, o diff concluía (corretamente, pelo que sabia) que faltava tudo.
+
+**Não dava para calcular os marcadores por fora.** Dois `CreateFromDirectory` sobre o mesmo
+conteúdo não produzem bytes idênticos (o zip guarda o timestamp de cada entrada), e o marcador
+é derivado do sha256 do zip. Um `payload.zip` montado pelo `pack.ps1` nunca casaria com o
+Release — sempre sobraria a oferta fantasma.
+
+A saída foi o `pack.ps1` **consumir os mesmos arquivos** que o `publish-release.ps1` gerou. O
+payload embutido virou:
+
+```
+payload.zip
+├── game.zip          copia BYTE A BYTE do dist\release\game.zip publicado
+├── cards.zip         idem
+├── payload.markers   "game=game-abc123def456" + "cards=cards-…", lidos do manifest.json
+└── seed/…            o que os dois pacotes NÃO trazem (store/, decks/, package.json)
+```
+
+O `Payload` extrai os dois zips como o updater faria e chama
+`UpdateEngine.RegistrarPacoteInstalado` — marcador **e** inventário, no mesmo formato. A
+instalação nova nasce em dia.
+
+**Isso mudou um comando que você usa:** `npm run pack` deixou de ser autossuficiente.
+`npm run release:build` é pré-requisito, e o `pack.ps1` recusa com mensagem clara em três
+casos — `dist\release\` ausente, sha256 dos zips não batendo com o `manifest.json` (alguém
+mexeu na pasta depois de gerada, e os marcadores embutidos seriam mentira), e `game.zip`
+mais velho que o arquivo mais novo de `web/`/`ygo-data/src` (release velho é pior que release
+ausente: o exe sairia com um front antigo e nada acusaria).
+
+Sem os marcadores o bug volta, e é isso que a última linha da tabela do §9 prende: o
+`--test-update` monta o payload nos dois jeitos e exige que **com** marcadores a instalação
+nova não peça nada, e que **sem** eles ela volte a pedir os dois pacotes.
+
+> Ordem de trabalho, agora: `npm run release:build` → `npm run release:test` → `npm run pack`
+> → (se for trocar o exe) `npm run release:build` de novo e `-Publish -ComExe`.
+
+> **Um build de desenvolvimento contém o token.** Com o `token.txt` no lugar, o PAT vira
+> recurso do `duel-server.dll` — está literalmente dentro do binário compilado. Por isso
+> `duel-server/bin/` entrou no `.gitignore`: um `git add -A` de rotina publicaria o segredo,
+> e nada acusaria, porque o arquivo é binário e o diff não mostra nada legível.

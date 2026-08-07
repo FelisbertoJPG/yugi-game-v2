@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duel Academy — Atualizando</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 0%, #1b2438 0%, var(--bg) 60%);
+  }
+  .home { width: min(520px, 94vw); }
+
+  .title { text-align: center; margin-bottom: 22px; border-bottom: 2px solid var(--line); padding-bottom: 16px; }
+  .title h1 { margin: 0; font-size: 30px; letter-spacing: 5px; color: var(--gold); text-shadow: 0 2px 0 #0008; }
+  .title p { margin: 6px 0 0; color: var(--dim); font-size: 11px; letter-spacing: 2px; }
+
+  .slot { background: var(--panel); border: 2px solid var(--line); padding: 20px; }
+
+  .etapa { font-size: 13px; letter-spacing: 1px; color: var(--gold); margin-bottom: 4px; }
+  .detalhe { font-size: 11px; color: var(--dim); min-height: 15px; word-break: break-all; }
+
+  .barra { height: 14px; background: var(--panel2); border: 1px solid var(--line); margin: 14px 0 6px; }
+  .barra > i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .25s linear; }
+  .pct { font-size: 10px; color: var(--dim); text-align: right; }
+
+  .acoes { display: flex; gap: 8px; margin-top: 16px; }
+  .acoes button { flex: 1; padding: 10px; }
+  .secundario { background: var(--panel2); color: var(--dim); }
+
+  .erro { color: var(--red); font-size: 11px; margin-top: 10px; min-height: 14px; }
+  .nota { color: var(--dim); font-size: 10px; margin-top: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="home">
+  <div class="title">
+    <h1>DUEL ACADEMY</h1>
+    <p id="versao">PROCURANDO ATUALIZACAO</p>
+  </div>
+
+  <div class="slot">
+    <div class="etapa" id="etapa">checando…</div>
+    <div class="detalhe" id="detalhe"></div>
+
+    <div class="barra"><i id="barra"></i></div>
+    <div class="pct" id="pct">0%</div>
+
+    <div class="acoes">
+      <button id="btn-atualizar" hidden>atualizar agora</button>
+      <button id="btn-jogar" class="secundario">jogar sem atualizar</button>
+    </div>
+
+    <!-- Caminho de volta. Fica discreto e so' aparece quando existe backup: e'
+         para o dia em que uma atualizacao instalar uma versao quebrada, nao para
+         ser clicado por curiosidade. -->
+    <div class="acoes" id="linha-voltar" hidden>
+      <button id="btn-voltar" class="secundario">voltar para a versao anterior</button>
+    </div>
+
+    <div class="erro" id="erro"></div>
+
+    <!-- Preservar isto na tela importa: a primeira reacao de quem ve' uma barra
+         de progresso num jogo e' achar que vai perder o save. -->
+    <p class="nota">
+      Seus decks, sua carteira e sua conta nao sao tocados pela atualizacao.
+      O que for substituido vai para a pasta de backup, nunca e' apagado.
+    </p>
+  </div>
+</div>
+
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  const HOME = '/web/index.html';
+
+  let terminouUmaVez = false;
+
+  // Recusa vinda do clique (ex.: 409 "termine o duelo"). Sem guardar isto o
+  // proximo tick, meio segundo depois, apagaria a mensagem antes de alguem ler.
+  let recusa = '';
+
+  function pinta(s) {
+    $('etapa').textContent = s.etapa || '';
+    $('detalhe').textContent = s.detalhe || '';
+    $('erro').textContent = recusa || s.erro || '';
+
+    const pct = Math.round((s.fracao || 0) * 100);
+    $('barra').style.width = pct + '%';
+    $('pct').textContent = pct + '%';
+
+    if (s.versao) $('versao').textContent = s.versao.toUpperCase();
+
+    // O botao de voltar so' existe se ha' backup, e some enquanto algo esta'
+    // sendo instalado — restaurar no meio de uma troca de arquivos seria a
+    // unica forma de piorar a situacao de quem ja' esta' com problema.
+    $('linha-voltar').hidden = !s.backup || s.estado === 'instalando' || s.estado === 'reiniciando';
+
+    const disponivel = s.estado === 'disponivel';
+    $('btn-atualizar').hidden = !disponivel;
+    if (disponivel) {
+      $('etapa').textContent = 'atualizacao disponivel';
+      $('detalhe').textContent = s.resumo || '';
+    }
+
+    // Fim de linha: some com os botoes e vai para a home sozinho. Uma tela de
+    // update que exige um clique no fim so' serve para o jogador ficar preso
+    // olhando "100%" sem saber que acabou.
+    if (s.estado === 'concluido' && !terminouUmaVez) {
+      terminouUmaVez = true;
+      $('etapa').textContent = 'pronto';
+      $('btn-atualizar').hidden = true;
+      $('btn-jogar').textContent = 'entrar';
+      setTimeout(() => location.href = HOME, 900);
+    }
+
+    // Troca do proprio executavel: o servidor vai morrer em instantes e o .bat
+    // reabre o jogo. Avisa, senao a pagina simplesmente congela e parece travada.
+    if (s.estado === 'reiniciando') {
+      $('btn-atualizar').hidden = true;
+      $('btn-jogar').hidden = true;
+      $('etapa').textContent = 'reiniciando o Duel Academy';
+      $('detalhe').textContent = 'esta janela pode ser fechada; o jogo abre sozinho';
+      return;
+    }
+
+    // Sem rede, nao adianta ficar segurando o jogador aqui.
+    if (s.estado === 'indisponivel' && !terminouUmaVez) {
+      terminouUmaVez = true;
+      $('btn-jogar').textContent = 'entrar';
+      setTimeout(() => location.href = HOME, 1400);
+    }
+  }
+
+  async function tick() {
+    try {
+      const r = await fetch('/__update/status', { cache: 'no-store' });
+      if (r.ok) pinta(await r.json());
+    } catch { /* o servidor caiu; o proximo tick tenta de novo */ }
+  }
+
+  $('btn-atualizar').addEventListener('click', async () => {
+    $('btn-atualizar').disabled = true;
+    recusa = '';
+    try {
+      const r = await fetch('/__update/aplicar', { method: 'POST' });
+      // 409 = duelo em andamento. O servidor recusa de proposito: trocar os
+      // arquivos de carta debaixo do motor deixaria o jogo instalado pela
+      // metade. Nao e' erro do jogador, entao a mensagem tem que dizer o que
+      // fazer, e o botao volta a funcionar quando o duelo acabar.
+      if (r.status === 409) {
+        const j = await r.json().catch(() => ({}));
+        recusa = j.erro || 'termine o duelo para atualizar';
+        $('erro').textContent = recusa;
+        $('btn-atualizar').disabled = false;
+        return;
+      }
+      if (!r.ok) {
+        recusa = 'o servidor recusou a atualizacao (' + r.status + ')';
+        $('erro').textContent = recusa;
+        $('btn-atualizar').disabled = false;
+      }
+    }
+    catch (e) { $('erro').textContent = String(e); $('btn-atualizar').disabled = false; }
+  });
+
+  $('btn-voltar').addEventListener('click', async () => {
+    if (!confirm('Voltar para a versao anterior do jogo?\n\n'
+               + 'Seus decks, sua carteira e sua conta nao sao tocados.')) return;
+    $('btn-voltar').disabled = true;
+    recusa = '';
+    try {
+      const r = await fetch('/__update/restaurar', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        recusa = j.erro || 'nao consegui restaurar (' + r.status + ')';
+        $('erro').textContent = recusa;
+        $('btn-voltar').disabled = false;
+        return;
+      }
+      // Voltou: a instalacao agora e' a de antes, e a checagem vai oferecer a
+      // atualizacao de novo — corretamente, porque a versao velha e' mesmo velha.
+      // Quem voltou por causa de uma versao quebrada usa "jogar sem atualizar".
+      $('etapa').textContent = 'versao anterior restaurada';
+      $('detalhe').textContent = j.arquivos + ' arquivo(s) voltaram';
+      $('btn-voltar').disabled = false;
+    }
+    catch (e) { $('erro').textContent = String(e); $('btn-voltar').disabled = false; }
+  });
+
+  $('btn-jogar').addEventListener('click', () => location.href = HOME);
+
+  tick();
+  setInterval(tick, 500);
+</script>
+</body>
+</html>

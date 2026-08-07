@@ -25,6 +25,40 @@ namespace DuelServer
         private static int Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+            // Suite do instalador/auto-updater. Vem ANTES de tudo de proposito:
+            // nao toca no ocgcore nem precisa dos StreamingAssets, entao roda numa
+            // maquina que nem tem o cards.cdb. Monta um Release falso no %TEMP%.
+            if (Array.IndexOf(args, "--test-update") >= 0)
+                return TestUpdate.Run();
+
+            // Instala o Release REAL (dist\release\, recem-gerado pelo
+            // publish-release.ps1) numa raiz descartavel e confere o re-scan.
+            // Ultimo passo antes de -Publish.
+            // Instala o Release publicado DE VERDADE, pela rede, com o token
+            // embutido. Prova o transporte (API do asset + Accept: octet-stream +
+            // redirect para o CDN), que nenhum outro teste alcanca.
+            if (Array.IndexOf(args, "--test-remote") >= 0)
+                return TestUpdate.RunRemote();
+
+            // O contrario do --test-remote: a rede FORA do ar. Fonte inexistente,
+            // manifesto corrompido, asset que some no meio — nada disso pode
+            // travar o boot nem instalar meia atualizacao.
+            if (Array.IndexOf(args, "--test-offline") >= 0)
+                return TestOffline.Run();
+
+            // A coreografia da troca do proprio exe, com um exe de mentira no
+            // %TEMP%: o .bat roda de verdade, espera um PID morrer e copia por
+            // cima. Nao encosta no binario que esta rodando o teste.
+            if (Array.IndexOf(args, "--test-selfupdate") >= 0)
+                return TestSelfUpdate.Run();
+
+            int iRel = Array.IndexOf(args, "--test-release");
+            if (iRel >= 0)
+                return TestUpdate.RunRelease(iRel + 1 < args.Length
+                    ? args[iRel + 1]
+                    : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "dist", "release"));
+
             bool serve = Array.IndexOf(args, "--serve") >= 0;
 
             // --app: o jogo inteiro num processo so' (duelo + front + navegador),
@@ -106,6 +140,22 @@ namespace DuelServer
                 string bindHost = lan ? "+" : "localhost";
                 string duelBindUrl = $"http://{bindHost}:8770/";
                 string frontBindUrl = $"http://{bindHost}:8080/";
+
+                // Checagem de atualizacao, ANTES de abrir o navegador. Timeout
+                // curto e falha silenciosa: estar offline ou com o GitHub fora do
+                // ar nao pode impedir ninguem de jogar o que ja tem instalado.
+                // `--sem-update` pula (util pra depurar o front sem rede nenhuma).
+                bool temUpdate = false;
+                if (Payload.Exists && Array.IndexOf(args, "--sem-update") < 0)
+                {
+                    temUpdate = Update.UpdateService.Checar(appRoot, TimeSpan.FromSeconds(8));
+
+                    // Se o proprio executavel esta velho, trocar os arquivos do
+                    // jogo sem trocar o exe deixa os dois fora de sincronia.
+                    if (Update.UpdateService.InstaladorDesatualizado)
+                        Log.Info("ha' uma versao nova do proprio Duel Academy.exe");
+                }
+
                 WebServer.Run(streamingAssets,
                     url: duelBindUrl,
                     webRoot: appRoot,
@@ -114,7 +164,7 @@ namespace DuelServer
                     {
                         if (lan) ImprimeEnderecosLan();
                         if (Array.IndexOf(args, "--no-browser") >= 0) return;
-                        AbrirNavegador(FrontUrl + "web/index.html");
+                        AbrirNavegador(FrontUrl + (temUpdate ? "web/atualizando.html" : "web/index.html"));
                     });
                 return 0;
             }
@@ -143,6 +193,13 @@ namespace DuelServer
                 ProbeTribute.Run(streamingAssets, brute: true);
                 return 0;
             }
+
+            // Trava de atualizacao durante o duelo: o cards.cdb fica aberto pelo
+            // SQLite enquanto se joga, e trocar os arquivos debaixo do motor
+            // deixaria o jogo instalado pela metade. Precisa do cards.cdb de
+            // verdade, por isso vem depois do ResolveStreamingAssets.
+            if (Array.IndexOf(args, "--test-update-duelo") >= 0)
+                return TestUpdateDuelo.Run(streamingAssets);
 
             // Teste de aceitacao das invocacoes especiais.
             if (Array.IndexOf(args, "--test-summons") >= 0)

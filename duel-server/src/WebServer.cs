@@ -20,6 +20,7 @@ namespace DuelServer
         static readonly JsonSerializerOptions Json = new() { IncludeFields = true };
         static readonly object _lock = new();
         static InteractiveDuel _duel;
+        static bool _duelEncerrado = true;
         static string _sa;
         static string _webRoot;
         static volatile bool _shutdown;
@@ -116,7 +117,14 @@ namespace DuelServer
             res.StatusCode = 404; WriteText(res, "not found");
         }
 
-        static object StartDuel(JsonElement body)
+        /// <summary>
+        /// Só para os testes: aponta os StreamingAssets sem subir o HttpListener,
+        /// para o `--test-update-duelo` exercitar o MESMO `StartDuel`/`RespondDuel`
+        /// que as rotas usam (a trava do update vive nesse estado, não na rota).
+        /// </summary>
+        internal static void ConfigurarParaTeste(string streamingAssets) => _sa = streamingAssets;
+
+        internal static object StartDuel(JsonElement body)
         {
             uint[] deck = ReadDeck(body);
             if (deck.Length == 0) return new { error = "deck vazio" };
@@ -168,11 +176,48 @@ namespace DuelServer
                 _duel?.Dispose();
                 _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
                                             npcLeitura: leitura);
-                return _duel.Advance();
+                var r = _duel.Advance();
+                _duelEncerrado = r.ended;
+                return r;
             }
         }
 
-        static object RespondDuel(JsonElement body)
+        /// <summary>
+        /// Ha' um duelo EM ANDAMENTO neste momento? (Um duelo que ja' acabou nao
+        /// conta — o objeto continua vivo ate' o proximo /start, mas ninguem mais
+        /// joga nele.)
+        /// </summary>
+        public static bool DueloEmAndamento
+        {
+            get { lock (_lock) return _duel != null && !_duelEncerrado; }
+        }
+
+        /// <summary>
+        /// Libera o duelo JA' ENCERRADO, se houver — e devolve `false`, sem
+        /// liberar nada, quando ha' um duelo em andamento.
+        ///
+        /// Quem chama e' o `/__update/aplicar`: trocar os ~21 mil `.lua` e o
+        /// `cards.cdb` debaixo de um duelo vivo faz a extracao morrer pela metade
+        /// (o SQLite mantem o `cards.cdb` aberto desde `DuelSession`). E como o
+        /// duelo encerrado continua segurando o arquivo ate' o proximo /start,
+        /// nao basta perguntar: e' preciso soltar.
+        /// </summary>
+        public static bool LiberarDueloEncerrado()
+        {
+            lock (_lock)
+            {
+                if (_duel != null && !_duelEncerrado) return false;
+                if (_duel != null)
+                {
+                    _duel.Dispose();
+                    _duel = null;
+                    Log.Info("duelo encerrado liberado (o cards.cdb foi fechado).");
+                }
+                return true;
+            }
+        }
+
+        internal static object RespondDuel(JsonElement body)
         {
             string action = body.TryGetProperty("action", out var a) ? a.GetString() : null;
             int arg = body.TryGetProperty("arg", out var g) && g.ValueKind == JsonValueKind.Number ? g.GetInt32() : 0;
@@ -191,7 +236,9 @@ namespace DuelServer
             lock (_lock)
             {
                 if (_duel == null) return new { error = "nenhum duelo ativo — dê /start" };
-                return _duel.Respond(action ?? "endturn", arg, args);
+                var r = _duel.Respond(action ?? "endturn", arg, args);
+                _duelEncerrado = r.ended;
+                return r;
             }
         }
 

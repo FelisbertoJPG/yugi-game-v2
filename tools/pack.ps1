@@ -1,10 +1,21 @@
 # Gera dist\DuelAcademy.exe - o jogo inteiro num arquivo so'.
 #
 # O executavel sai self-contained (o .NET vai dentro dele) e com um payload.zip
-# embutido contendo web/, ygo-data/, o cards.cdb e os scripts lua. Quem recebe
-# nao precisa de .NET, nem de Node, nem do repositorio: dois cliques e joga.
+# embutido contendo o jogo. Quem recebe nao precisa de .NET, nem de Node, nem do
+# repositorio: dois cliques e joga.
 #
+#   npm run release:build     <-- PRE-REQUISITO (gera dist\release\)
 #   npm run pack
+#
+# POR QUE O PRE-REQUISITO. O payload embutido nao monta mais a propria arvore de
+# arquivos: ele embute os MESMOS game.zip / cards.zip que o publish-release.ps1
+# acabou de gerar, mais um payload.markers com as versoes deles (lidas do
+# manifest.json). O diff do auto-updater e' por MARCADOR, e o marcador vem do
+# sha256 do zip - e dois `CreateFromDirectory` sobre o mesmo conteudo NAO produzem
+# bytes iguais (o zip guarda o timestamp de cada entrada). Montando aqui, o
+# marcador nunca casaria com o Release, e o primeiro boot de toda instalacao nova
+# oferecia ~26 MB de atualizacao do conteudo que o proprio exe acabara de
+# instalar. Consumindo os mesmos arquivos, a instalacao nova ja' nasce em dia.
 #
 # Requisitos AQUI (na maquina que empacota, nao na que joga): SDK do .NET 8.
 
@@ -15,77 +26,132 @@ $root = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $env:TEMP 'duel-academy-pack'
 $payload = Join-Path $root 'duel-server\payload.zip'
 $dist = Join-Path $root 'dist'
+$release = Join-Path $dist 'release'
 $saidaTmp = Join-Path $stage 'publish'
 
 function Passo($n, $texto) { Write-Host "`n[$n] $texto" -ForegroundColor Cyan }
 function Ok($texto) { Write-Host "  OK   $texto" -ForegroundColor Green }
+function Aviso($texto) { Write-Host "  !    $texto" -ForegroundColor Yellow }
 function Falhar($texto) { Write-Host "  ERRO $texto" -ForegroundColor Red; exit 1 }
 
 Write-Host "`n  ####  DUEL ACADEMY - EMPACOTAR  ####" -ForegroundColor Yellow
 
-# ---------------------------------------------------------------- 1. conteudo
-Passo 1 'juntando os arquivos do jogo'
+# --------------------------------------------------------- 0. conferir o release
+Passo 0 'conferindo dist\release\ (gerado pelo npm run release:build)'
+
+$zipGame = Join-Path $release 'game.zip'
+$zipCards = Join-Path $release 'cards.zip'
+$manifesto = Join-Path $release 'manifest.json'
+
+foreach ($f in @($manifesto, $zipGame, $zipCards)) {
+  if (-not (Test-Path $f)) {
+    Write-Host "  ERRO nao achei $f" -ForegroundColor Red
+    Write-Host "       rode primeiro:  npm run release:build" -ForegroundColor Red
+    exit 1
+  }
+}
+
+$m = Get-Content $manifesto -Raw | ConvertFrom-Json
+$versoes = @{}
+foreach ($p in $m.payloads) { $versoes[$p.id] = $p.version }
+foreach ($id in @('game', 'cards')) {
+  if (-not $versoes.ContainsKey($id)) { Falhar "o manifest.json nao tem o pacote '$id'" }
+}
+
+# O manifesto tem o sha256 de cada zip. Se nao bater, o dist\release\ foi mexido
+# depois de gerado e os marcadores que vamos embutir seriam mentira - que e'
+# exatamente o defeito que este script existe para nao cometer.
+foreach ($par in @(@{ id = 'game'; zip = $zipGame }, @{ id = 'cards'; zip = $zipCards })) {
+  $esperado = ($m.payloads | Where-Object { $_.id -eq $par.id }).sha256
+  $atual = (Get-FileHash -Algorithm SHA256 -Path $par.zip).Hash.ToLowerInvariant()
+  if ($atual -ne $esperado) {
+    Falhar "$($par.id).zip nao confere com o manifest.json - rode npm run release:build de novo"
+  }
+}
+
+# Release velho e' pior que release ausente: o exe sairia com um front antigo e
+# nada acusaria. Compara o que ENTRA no game.zip com a data do proprio zip.
+$dataZip = (Get-Item $zipGame).LastWriteTimeUtc
+$maisNovo = Get-ChildItem (Join-Path $root 'web'), (Join-Path $root 'ygo-data\src') -Recurse -File |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+if ($maisNovo -and $maisNovo.LastWriteTimeUtc -gt $dataZip) {
+  Write-Host "  ERRO dist\release\game.zip esta' velho." -ForegroundColor Red
+  Write-Host "       $($maisNovo.FullName.Substring($root.Length + 1)) mudou depois dele." -ForegroundColor Red
+  Write-Host "       rode:  npm run release:build" -ForegroundColor Red
+  exit 1
+}
+
+Ok "game  $($versoes['game'])   $([math]::Round((Get-Item $zipGame).Length / 1MB, 1)) MB"
+Ok "cards $($versoes['cards'])  $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB"
+
+# ------------------------------------------------------------------ 1. semente
+# O que os dois pacotes NAO trazem: o estado inicial de store/ e decks/ e o
+# package.json (marcador da raiz). Numa instalacao que ja' existe, o Payload
+# preserva esses arquivos em vez de sobrescrever - sao a carteira e os decks.
+Passo 1 'juntando a semente (store/, decks/, package.json)'
 
 $conteudo = Join-Path $stage 'payload'
+$semente = Join-Path $conteudo 'seed'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-New-Item -ItemType Directory -Path $conteudo -Force | Out-Null
+New-Item -ItemType Directory -Path $semente -Force | Out-Null
 
-# Pastas inteiras. `package.json` vai junto so' como marcador da raiz.
-$pastas = @(
-  @{ de = 'web';    para = 'web' },
-  @{ de = 'decks';  para = 'decks' },
-  @{ de = 'store';  para = 'store' },
-  @{ de = 'ygo-data\src'; para = 'ygo-data\src' }
-)
-foreach ($p in $pastas) {
-  $origem = Join-Path $root $p.de
-  if (-not (Test-Path $origem)) { Falhar "nao achei $($p.de)" }
-  $destino = Join-Path $conteudo $p.para
-  New-Item -ItemType Directory -Path (Split-Path -Parent $destino) -Force | Out-Null
-  Copy-Item $origem $destino -Recurse -Force
+foreach ($p in @('decks', 'store')) {
+  $origem = Join-Path $root $p
+  if (-not (Test-Path $origem)) { Falhar "nao achei $p" }
+  Copy-Item $origem (Join-Path $semente $p) -Recurse -Force
 }
-Copy-Item (Join-Path $root 'package.json') (Join-Path $conteudo 'package.json') -Force
+Copy-Item (Join-Path $root 'package.json') (Join-Path $semente 'package.json') -Force
 
-# Do ygo-data\data so' o que o front le. O cards.json (14 MB) entra porque e' a
-# janela de detalhes da carta; os scripts lua de la' NAO, porque sao os mesmos
-# que ja vao em StreamingAssets - carregar duas copias so' engorda o arquivo.
-$dataDestino = Join-Path $conteudo 'ygo-data\data'
-New-Item -ItemType Directory -Path $dataDestino -Force | Out-Null
-foreach ($f in @('cards.json', 'cards.index.json', 'archetypes.json',
-                 'scripts.index.json', 'meta.json', 'constants.json')) {
-  $origem = Join-Path $root "ygo-data\data\$f"
-  if (-not (Test-Path $origem)) { Falhar "nao achei ygo-data\data\$f (rode npm run data:build)" }
-  Copy-Item $origem (Join-Path $dataDestino $f) -Force
+# Dado de CONTA nunca viaja num executavel que vai para a maquina de outra
+# pessoa. O cliente ja' recusa por codigo, mas nao ha' motivo para chegar la'.
+foreach ($conta in @('store\accounts', 'store\users', 'store\sessions.json', 'decks\users')) {
+  $alvo = Join-Path $semente $conta
+  if (Test-Path $alvo) { Remove-Item $alvo -Recurse -Force; Aviso "removido do payload: $conta" }
 }
 
-# StreamingAssets: cards.cdb + os scripts .lua. Os .meta sao lixo da Unity e
-# dobrariam a contagem de arquivos sem servir para nada aqui.
-$saOrigem = Join-Path $root 'duel_academy\Assets\StreamingAssets\YGODemo'
-$saDestino = Join-Path $conteudo 'duel_academy\Assets\StreamingAssets\YGODemo'
-if (-not (Test-Path (Join-Path $saOrigem 'cards.cdb'))) { Falhar 'nao achei o cards.cdb dos StreamingAssets' }
-New-Item -ItemType Directory -Path $saDestino -Force | Out-Null
-Copy-Item (Join-Path $saOrigem 'cards.cdb') (Join-Path $saDestino 'cards.cdb') -Force
+$arquivosSemente = (Get-ChildItem $semente -Recurse -File)
+Ok "$($arquivosSemente.Count) arquivos de semente"
 
-$scriptOrigem = Join-Path $saOrigem 'script'
-$luas = Get-ChildItem $scriptOrigem -Recurse -Filter '*.lua' -File
-foreach ($lua in $luas) {
-  $rel = $lua.FullName.Substring($scriptOrigem.Length).TrimStart('\')
-  $alvo = Join-Path (Join-Path $saDestino 'script') $rel
-  $pastaAlvo = Split-Path -Parent $alvo
-  if (-not (Test-Path $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }
-  Copy-Item $lua.FullName $alvo -Force
-}
+# ------------------------------------------------------------------- 2. payload
+Passo 2 'montando o payload.zip'
 
-$arquivos = (Get-ChildItem $conteudo -Recurse -File)
-$mb = [math]::Round(($arquivos | Measure-Object Length -Sum).Sum / 1MB, 1)
-Ok "$($arquivos.Count) arquivos, $mb MB ($($luas.Count) scripts lua)"
+Copy-Item $zipGame (Join-Path $conteudo 'game.zip') -Force
+Copy-Item $zipCards (Join-Path $conteudo 'cards.zip') -Force
 
-# ------------------------------------------------------------------- 2. zip
-Passo 2 'compactando o payload'
+# As versoes viajam junto porque o Payload nao tem como recalcula-las: elas sao o
+# sha256 do zip PUBLICADO, e recomprimir aqui daria outro numero.
+$linhas = @("game=$($versoes['game'])", "cards=$($versoes['cards'])")
+[System.IO.File]::WriteAllLines((Join-Path $conteudo 'payload.markers'), $linhas,
+                                (New-Object System.Text.UTF8Encoding($false)))
+
 if (Test-Path $payload) { Remove-Item $payload -Force }
+# As duas: `ZipFile`/`ZipFileExtensions` vem da FileSystem, mas `ZipArchive` e
+# `ZipArchiveMode` moram na System.IO.Compression. Carregar so' a primeira da'
+# "Nao e' possivel localizar o tipo [System.IO.Compression.ZipArchiveMode]".
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory(
-  $conteudo, $payload, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+
+# Sem compressao nos dois zips (ja' estao comprimidos - recomprimir so' gastaria
+# minutos de CPU para ganhar nada) e Optimal na semente, que e' texto.
+$fs = [System.IO.File]::Create($payload)
+$zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+  foreach ($nome in @('game.zip', 'cards.zip')) {
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+      $zip, (Join-Path $conteudo $nome), $nome, [System.IO.Compression.CompressionLevel]::NoCompression) | Out-Null
+  }
+  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+    $zip, (Join-Path $conteudo 'payload.markers'), 'payload.markers',
+    [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+
+  foreach ($arq in $arquivosSemente) {
+    $rel = 'seed/' + $arq.FullName.Substring($semente.Length).TrimStart('\').Replace('\', '/')
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+      $zip, $arq.FullName, $rel, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+  }
+}
+finally { $zip.Dispose(); $fs.Dispose() }
+
 Ok "payload.zip: $([math]::Round((Get-Item $payload).Length / 1MB, 1)) MB"
 
 # --------------------------------------------------------------- 3. publish

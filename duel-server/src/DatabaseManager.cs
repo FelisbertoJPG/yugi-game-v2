@@ -7,7 +7,7 @@ using YGO;
 // Mudancas para console app .NET 8:
 //   - UnityEngine.Debug   -> Log
 //   - Application.streamingAssetsPath -> caminho injetado no construtor
-public class DatabaseManager
+public class DatabaseManager : IDisposable
 {
     private IntPtr db;
 
@@ -134,6 +134,25 @@ public class DatabaseManager
         }
 
         Marshal.StructureToPtr(cardData, dataPtr, false);
+    }
+
+    /// <summary>
+    /// Fecha o cards.cdb AGORA, sem esperar o coletor de lixo.
+    ///
+    /// O finalizador sozinho nao bastava: enquanto o SQLite mantem o arquivo
+    /// aberto, o auto-updater nao consegue sobrescrever o cards.cdb — e a
+    /// extracao do pacote 'cards' falharia pela metade, com o jogo instalado
+    /// entre duas versoes. Como ninguem sabe quando o GC roda, o duelo que
+    /// abriu o banco e' quem tem de fecha-lo ao ser descartado.
+    /// </summary>
+    public void Dispose()
+    {
+        if (db != IntPtr.Zero)
+        {
+            sqlite3_close(db);
+            db = IntPtr.Zero;
+        }
+        GC.SuppressFinalize(this);
     }
 
     ~DatabaseManager()

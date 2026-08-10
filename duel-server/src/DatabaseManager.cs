@@ -11,6 +11,35 @@ public class DatabaseManager : IDisposable
 {
     private IntPtr db;
 
+    /// <summary>
+    /// Ensina o .NET a achar a SQLite no Linux.
+    ///
+    /// `DllImport("sqlite3")` procura por `libsqlite3.so` — o nome do pacote de
+    /// DESENVOLVIMENTO. Uma distribuicao so' com o runtime instalado tem apenas
+    /// `libsqlite3.so.0`, e o carregamento falha. O sintoma nao apontava para
+    /// nada disso: o banco de cartas ficava vazio, o NPC nao enxergava carta
+    /// nenhuma e so' passava o turno — 24 testes vermelhos, todos parecendo bug
+    /// de regra.
+    ///
+    /// Resolver por codigo (em vez de exigir libsqlite3-dev na imagem) mantem o
+    /// servidor auto-suficiente: roda em qualquer host sem pacote extra.
+    /// No Windows nada muda — o resolvedor devolve zero e o .NET segue com a
+    /// busca normal, achando a sqlite3.dll ao lado do executavel.
+    /// </summary>
+    static DatabaseManager()
+    {
+        NativeLibrary.SetDllImportResolver(typeof(DatabaseManager).Assembly, (nome, asm, caminho) =>
+        {
+            if (nome != "sqlite3" || !RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                return IntPtr.Zero;
+
+            foreach (var tentativa in new[] { "libsqlite3.so.0", "libsqlite3.so" })
+                if (NativeLibrary.TryLoad(tentativa, out var h)) return h;
+
+            return IntPtr.Zero;
+        });
+    }
+
     // ----- P/Invoke Direto para a SQLite3.dll Nativa -----
     [DllImport("sqlite3", EntryPoint = "sqlite3_open", CallingConvention = CallingConvention.Cdecl)]
     private static extern int sqlite3_open(string filename, out IntPtr ppDb);

@@ -8,10 +8,16 @@
     <AssemblyName>duel-server</AssemblyName>
     <RootNamespace>DuelServer</RootNamespace>
 
-    <!-- A ocgcore.dll e a sqlite3.dll sao Windows x64.
-         O processo PRECISA ser 64-bit, senao o DllImport falha com BadImageFormat. -->
+    <!-- O processo PRECISA ser 64-bit: as bibliotecas nativas sao x64 e o
+         DllImport falharia com BadImageFormat num processo 32-bit. -->
     <PlatformTarget>x64</PlatformTarget>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- win-x64 continua sendo o PADRAO: e' o jogo de mesa, o `npm run pack` e
+         todos os scripts do package.json, que esperam a saida em
+         bin/<conf>/net8.0/win-x64/. Passar `-r linux-x64` sobrescreve, e e'
+         assim que o servidor de duelo online (arena) e' compilado — mesmo
+         codigo, outra plataforma. -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
@@ -31,9 +37,14 @@
     <EmbeddedResource Include="token.txt" LogicalName="token.txt" />
   </ItemGroup>
 
-  <!-- Copia as bibliotecas nativas para junto do executavel, para o
-       DllImport("ocgcore") / DllImport("sqlite3") encontra-las. -->
-  <ItemGroup>
+  <!-- Bibliotecas nativas do WINDOWS, copiadas para junto do executavel para o
+       DllImport("ocgcore") / DllImport("sqlite3") encontra-las.
+
+       Condicionado ao RID: num build linux-x64 estes .dll nao servem para nada
+       e, pior, seriam copiados para a imagem do servidor sem que ninguem
+       percebesse. No Linux o par e' `libocgcore.so` (compilado da fonte do
+       ygopro-core) e a `libsqlite3` do sistema — ver o Dockerfile da arena. -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
     <None Include="native\ocgcore.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>ocgcore.dll</Link>
@@ -41,6 +52,15 @@
     <None Include="native\sqlite3.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>sqlite3.dll</Link>
+    </None>
+  </ItemGroup>
+
+  <!-- No Linux, `libocgcore.so` e' gerado no build da imagem e entra por aqui
+       quando existir (assim o build local sem o .so nao quebra). -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux')) And Exists('$(MSBuildProjectDirectory)/native/libocgcore.so')">
+    <None Include="native/libocgcore.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>libocgcore.so</Link>
     </None>
   </ItemGroup>
 

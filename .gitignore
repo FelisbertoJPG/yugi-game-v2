@@ -106,3 +106,9 @@ supabase/.env
 supabase/.env.*
 supabase/.temp/
 .supabase/
+
+# libocgcore.so: compilado da fonte do ygopro-core para o servidor de duelo
+# rodar em Linux. E' artefato de build (2,3 MB) e se refaz com o Dockerfile da
+# arena — as .dll do Windows continuam versionadas porque nao temos como
+# recompila-las aqui. Ver "oq-faltou" / INSTALADOR.md.
+duel-server/native/libocgcore.so

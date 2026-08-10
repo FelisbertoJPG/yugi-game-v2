@@ -139,7 +139,13 @@
 import { getActiveDeck, listDecks, hydrateDecks } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
 import { getDP, totalCards, hydrateWallet } from '/web/js/wallet.js';
-import { requireLogin, logout } from '/web/js/auth.js';
+import { requireLogin, logout, desviarParaRecuperacao } from '/web/js/auth.js';
+
+// A Site URL do projeto aponta para a raiz, entao um link de recuperacao que o
+// Supabase nao redirecionou para recuperar.html cai AQUI. Precisa vir antes do
+// requireLogin: o redirect dele para o login descartaria o fragmento da URL, e
+// com ele o token do link.
+if (desviarParaRecuperacao()) throw new Error('indo para a recuperacao');
 
 // Sem sessão, redireciona pro login e para aqui — wallet/decks são dados de
 // CONTA, não dá pra hidratar antes de saber de quem é a sessão.

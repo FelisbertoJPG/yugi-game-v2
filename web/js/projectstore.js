@@ -14,6 +14,8 @@
  * boosters.js. Gravar antes de ler é como um estado vazio sobrescreve dados bons.
  */
 
+import { cabecalhoAuth, req } from '/web/js/supabase.js';
+
 /**
  * Lê `store/<name>.json` distinguindo os dois "vazios":
  *   { alcancou: true,  data: {...} }  arquivo existe
@@ -24,8 +26,27 @@
  * ter dados que não conseguimos ler). Com servidor e sem arquivo, criar é o certo.
  */
 export async function pullFileEx(name) {
+  // 1. Supabase primeiro. É o que faz publicar uma banlist ou um booster novo
+  //    chegar ao jogador SEM Release nenhum — antes esses arquivos só viajavam
+  //    dentro do `.exe`, então reequilibrar o deck do Kaiba obrigava todo mundo
+  //    a atualizar o jogo inteiro.
+  //
+  //    A leitura é aberta (a policy `conteudo_ler_todos` usa `true`), então
+  //    funciona até sem login — a tela inicial não pode depender de sessão.
+  const remoto = await req(`conteudo?select=dados&chave=eq.${encodeURIComponent(name)}`);
+  if (remoto.ok && Array.isArray(remoto.dados)) {
+    if (remoto.dados.length > 0) return { alcancou: true, data: remoto.dados[0].dados };
+    // Respondeu e não tem a chave: para o conteúdo global isso não é "vazio
+    // confirmado", é "ainda não publiquei". Cai no disco em vez de devolver
+    // null, senão o primeiro boot sobrescreveria o arquivo local com nada.
+  }
+
+  // 2. Disco (dev-server ou o `.exe`). Continua sendo o caminho offline.
   try {
-    const r = await fetch(`/__store/${name}.json`, { cache: 'no-store' });
+    const r = await fetch(`/__store/${name}.json`, {
+      cache: 'no-store',
+      headers: await cabecalhoAuth(),
+    });
     if (r.status === 404) return { alcancou: true, data: null };
     if (!r.ok) return { alcancou: false, data: null };
     return { alcancou: true, data: await r.json() };
@@ -53,10 +74,28 @@ export async function pullFile(name) {
 const emVoo = new Map();     // name -> Promise
 const pendente = new Map();  // name -> último payload aguardando
 
-function enviar(name, data) {
+/**
+ * Grava nos DOIS lugares: no banco (para os outros jogadores receberem) e no
+ * disco (para o arquivo continuar versionado no git).
+ *
+ * A gravação no banco só passa para admin — a RLS de `conteudo` exige
+ * `eh_admin()`. Para o jogador comum ela leva 403 e é ignorada, que é o
+ * comportamento certo: quem edita banlist/boosters é quem administra o jogo.
+ */
+async function enviar(name, data) {
+  const cabecalho = await cabecalhoAuth();
+
+  if (cabecalho.authorization) {
+    req('conteudo?on_conflict=chave', {
+      method: 'POST',
+      body: { chave: name, dados: data },
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    }).catch(() => {});
+  }
+
   return fetch(`/__store/${name}.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...cabecalho },
     body: JSON.stringify(data),
   }).catch(() => {});
 }

@@ -459,7 +459,7 @@
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, listDecks, getActiveIndex, hydrateDecks } from '/web/js/storage.js';
 import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
-import { addDP, addCards, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
+import { premiarVitoria, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/boards.js';
@@ -481,7 +481,8 @@ let advDeck = null;        // deck do NPC (main ids), carregado no boot
 let advExtra = null;       // extra do NPC (fusões etc.), idem
 let advSignature = null;
 let advReward = WIN_REWARD; // DP que este deck do NPC dá ao ser vencido
-let rewardGiven = false;   // trava para não premiar duas vezes no mesmo duelo
+let rewardGiven = false;   // trava LOCAL; a de verdade é o `premiado_em` no banco
+let dueloId = null;        // id do duelo registrado no servidor; sem ele, sem premio
 
 const SRV = 'http://localhost:8770';
 const $ = (id) => document.getElementById(id);
@@ -776,6 +777,12 @@ async function start() {
     if (activeBoard?.fieldSpell) body.fieldSpell = activeBoard.fieldSpell;
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
+
+    // Registra o duelo no servidor. E' este id que destrava o premio depois —
+    // sem ele, `premiar_vitoria` recusa. Só vale contra adversário: o Treino
+    // (duel.html sem ?npc=) nao paga nada.
+    dueloId = advNpc ? await iniciarDuelo(advNpc.id) : null;
+    rewardGiven = false;
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
     log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)${vs}`, true);
     apply(j);
@@ -1156,7 +1163,7 @@ async function apply(j) {
     $('warn').hidden = true;
     for (const ev of j.events || []) {
       await animateEvent(ev);   // move o fantasma (origem ainda visível)
-      handle(ev);               // muta o estado
+      await handle(ev);         // muta o estado (o premio de vitoria vai ao servidor)
       render();                 // a carta "assenta" no lugar
       // magia/armadilha ATIVADA (face-up na zona S/campo): brilho + meio segundo
       // até resolver — é o que dá o fluxo "vivo" (Pote fica no campo, depois compra).
@@ -1213,7 +1220,7 @@ async function apply(j) {
   }
 }
 
-function handle(ev) {
+async function handle(ev) {
   switch (ev.type) {
     // O NPC anuncia a jogada e o motivo — é como dá para conferir se ele está
     // seguindo as regras sem abrir o log do servidor.
@@ -1362,7 +1369,7 @@ function handle(ev) {
       const empate = w === 2 || w < 0;
       const venci = w === 0;
       log(`=== ${empate ? 'duelo encerrado' : venci ? 'você venceu!' : 'oponente venceu'} ===`, true);
-      const premio = concederRecompensa(venci);
+      const premio = await concederRecompensa(venci);
       mostrarFimDuelo(venci, empate, premio);
       break;
     }
@@ -2127,12 +2134,19 @@ window.addEventListener('unhandledrejection', (e) => warn('ERRO async: ' + ((e.r
  * Recompensa do modo Adversário: só se for adversário (tem `advNpc`), se venceu,
  * e uma vez por duelo. Dá +100 DP e a carta-assinatura do NPC na Coleção.
  */
-function concederRecompensa(venci) {
-  if (!advNpc || !venci || rewardGiven) return null;
+async function concederRecompensa(venci) {
+  if (!advNpc || !venci || rewardGiven || !dueloId) return null;
   rewardGiven = true;
-  if (advReward > 0) addDP(advReward);
-  if (advSignature) addCards([advSignature]);
-  return { dp: advReward, cardId: advSignature };
+
+  // O QUANTO e QUAL carta saem do servidor, a partir do registro do NPC —
+  // `advReward`/`advSignature` continuam existindo só para a tela poder
+  // antecipar o texto. Enquanto o crédito era feito aqui, o valor vinha do
+  // objeto carregado no navegador: o jogador escolhia o próprio prêmio.
+  //
+  // O `dueloId` é o que autoriza: cada duelo registrado paga uma vez só.
+  const r = await premiarVitoria(dueloId);
+  if (!r.ok) return null;
+  return { dp: r.premio, cardId: r.carta };
 }
 
 /** Popup de fim de duelo: quem venceu + recompensa + botão para voltar à home. */

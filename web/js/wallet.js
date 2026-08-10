@@ -1,281 +1,206 @@
 /**
  * Carteira do jogador: DP (moeda) e Coleção (cartas que ele possui).
  *
- * Tudo em localStorage, como o resto — quando houver backend, só esta camada
- * muda. O DP começa em 2000; vencer um Adversário dá +100; abrir um booster na
- * Loja custa 100. A Coleção guarda quantas cópias de cada carta o jogador tem
- * (pacotes dão duplicatas); o Deck Builder "real" só oferece o que está aqui.
+ * O DADO MORA NO SUPABASE, não em disco. Antes isto era um `store/wallet.json`
+ * no PC do jogador — abrir num editor e trocar `"dp": 2000` por `"dp": 999999`
+ * era todo o trabalho. Agora a carteira é uma linha em `carteiras`, o dono só
+ * tem permissão de LER, e toda mudança passa por uma função no banco que aplica
+ * a regra do jogo (migration `0004_economia_no_servidor.sql`).
+ *
+ * Consequência para quem usa este módulo: os LEITORES continuam síncronos
+ * (`getDP()`, `ownsCard()`, …), servidos por um cache em memória que
+ * `hydrateWallet()` preenche no boot — as dezenas de pontos que só exibem
+ * saldo não mudaram. Já as MUTAÇÕES viraram async e passaram a ser pedidos:
+ * o cliente diz "abrir pacote", e é o servidor que decide o que sai e o quanto
+ * custa. Não existe mais `addDP`/`spendDP`/`addCards` — se existissem, a trava
+ * no banco seria decoração.
  */
 
-import { pushFile, pullFileEx } from '/web/js/projectstore.js';
-// Só a constante: `boosters.js` não importa daqui, então não há ciclo.
-import { UR_PITY_DP } from '/web/js/boosters.js';
+import { req, sessao } from '/web/js/supabase.js';
 
-const KEY_DP = 'ygo:dp';
-const KEY_COL = 'ygo:collection';
-const KEY_PITY = 'ygo:pity';
-const KEY_URSPEND = 'ygo:urSpend';   // DP gasto em pacotes desde a última UR garantida
+const KEY_CACHE = 'ygo:wallet-cache';
 
 export const START_DP = 2000;
 export const BOOSTER_PRICE = 100;
 export const WIN_REWARD = 100;
 
-/**
- * Quanto vale VENDER uma cópia, por raridade (Inventário → Cards).
- *
- * Uma carta que não está em nenhum booster não tem raridade. Ela vale como
- * Normal — mesmo critério que o Deck Builder já usa ao tratá-la como carta
- * farta, então o jogador não descobre duas regras diferentes para o mesmo caso.
- */
+/** Espelha `eco_const()` no banco — mas quem MANDA é o banco. Aqui é só exibição. */
 export const SELL_PRICE = { N: 5, R: 10, SR: 20, UR: 100 };
-
 export const sellPriceOf = (rarity) => SELL_PRICE[rarity] ?? SELL_PRICE.N;
 
-function read(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw === null ? fallback : JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-/**
- * O disco só pode ser sobrescrito DEPOIS de a gente ter lido o disco.
- *
- * Sem esta trava, abrir uma página com o localStorage vazio antes de a leitura
- * terminar (ou quando ela falha) faz o `getDP()` semear 2000 DP e espelhar o
- * padrão por cima de uma carteira real. É perda de dado silenciosa, e o arquivo
- * é a única cópia que viaja entre máquinas.
- */
-let leuODisco = false;
+/** Última carteira conhecida. Null até `hydrateWallet()`. */
+let cache = null;
 
-function write(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    mirrorWallet();   // espelha DP + coleção + pity em store/wallet.json (git)
-    return true;
-  } catch (e) { console.error('[wallet] falha ao gravar', key, e); return false; }
+function guardarCache(w) {
+  cache = w;
+  // Só para a tela não piscar em branco no boot seguinte enquanto a rede
+  // responde. NÃO é fonte da verdade: editar isto não dá DP a ninguém, porque
+  // toda operação é conferida no servidor contra a linha de lá.
+  try { localStorage.setItem(KEY_CACHE, JSON.stringify(w)); } catch { /* quota */ }
+  return w;
 }
 
-/** Junta os 3 pedaços da carteira num arquivo só e devolve ao disco. */
-function mirrorWallet() {
-  if (!leuODisco) {
-    console.warn('[wallet] gravação ignorada: o disco ainda não foi lido '
-               + '(chame hydrateWallet() no boot antes de mexer na carteira)');
-    return;
-  }
-  pushFile('wallet', {
-    dp: read(KEY_DP, START_DP),
-    collection: read(KEY_COL, {}),
-    pity: read(KEY_PITY, {}),
-    urSpend: read(KEY_URSPEND, 0),
-  });
+function lerCache() {
+  if (cache) return cache;
+  try {
+    const cru = localStorage.getItem(KEY_CACHE);
+    if (cru) cache = JSON.parse(cru);
+  } catch { /* ignora */ }
+  return cache;
 }
+
+const vazia = () => ({ dp: 0, collection: {}, pity: {}, urSpend: 0 });
 
 /**
- * Traz store/wallet.json (disco) para o localStorage. Chame no boot.
- *
- * Libera o espelhamento mesmo quando o arquivo ainda não existe — aí criá-lo é
- * justamente o certo. Só continua travado se a leitura falhar de vez (sem
- * servidor), caso em que gravar por cima seria arriscado.
+ * Traz a carteira do banco. Chame no boot, ANTES de ler qualquer coisa.
+ * Sem sessão devolve false e o resto responde zerado — nenhuma tela deve
+ * inventar saldo por conta própria.
  */
 export async function hydrateWallet() {
-  const { alcancou, data } = await pullFileEx('wallet');
-  leuODisco = alcancou;          // só libera o espelho se o disco respondeu
-  if (!alcancou) {
-    console.warn('[wallet] sem servidor: usando só o localStorage, sem gravar no disco');
+  if (!sessao()) { cache = null; return false; }
+  const r = await req('rpc/carteira_minha', { method: 'POST', body: {} });
+  if (!r.ok || !r.dados || typeof r.dados !== 'object') {
+    lerCache();                     // offline: mostra o último saldo conhecido
     return false;
   }
-  if (!data || typeof data !== 'object') return false;
-  if ('dp' in data) localStorage.setItem(KEY_DP, JSON.stringify(data.dp));
-  if ('collection' in data) localStorage.setItem(KEY_COL, JSON.stringify(data.collection));
-  if ('pity' in data) localStorage.setItem(KEY_PITY, JSON.stringify(data.pity));
-  // Carteira gravada antes da UR garantida não tem o campo: começa do zero, que
-  // é o certo — ninguém deve herdar progresso de um contador que não existia.
-  if ('urSpend' in data) localStorage.setItem(KEY_URSPEND, JSON.stringify(data.urSpend));
+  guardarCache(r.dados);
   return true;
 }
 
-// ------------------------------------------------------------------ DP
+// ------------------------------------------------------------------ leitura
 
-/** Saldo de DP. Na primeira vez, semeia com START_DP. */
 export function getDP() {
-  const raw = localStorage.getItem(KEY_DP);
-  if (raw === null) { write(KEY_DP, START_DP); return START_DP; }
-  const n = Number(JSON.parse(raw));
-  return Number.isFinite(n) ? n : START_DP;
+  return Number(lerCache()?.dp ?? 0);
 }
 
-export function addDP(n) {
-  const v = Math.max(0, getDP() + Math.round(n));
-  write(KEY_DP, v);
-  return v;
-}
-
-/** Tenta gastar `n` DP. Devolve true se tinha saldo. */
-export function spendDP(n) {
-  const cur = getDP();
-  if (cur < n) return false;
-  write(KEY_DP, cur - n);
-  return true;
-}
-
-// ------------------------------------------------------------------ Coleção
-
-/** Coleção como objeto { [id]: quantidade }. */
 export function getCollection() {
-  const c = read(KEY_COL, {});
+  const c = lerCache()?.collection;
   return c && typeof c === 'object' ? c : {};
 }
 
-/** Quantas cópias o jogador tem desta carta. */
-export function ownedCount(id) {
-  return getCollection()[Number(id)] ?? 0;
-}
+export const ownedCount = (id) => getCollection()[Number(id)] ?? 0;
+export const ownsCard = (id) => ownedCount(id) > 0;
 
-export function ownsCard(id) {
-  return ownedCount(id) > 0;
-}
-
-/** Ids que o jogador possui (ao menos 1 cópia). */
 export function ownedIds() {
   return Object.entries(getCollection())
     .filter(([, n]) => n > 0)
     .map(([id]) => Number(id));
 }
 
-/** Adiciona cartas à coleção (aceita duplicatas). Devolve a coleção nova. */
-export function addCards(ids) {
-  const col = getCollection();
-  for (const raw of ids) {
-    const id = Number(raw);
-    if (!id) continue;
-    col[id] = (col[id] ?? 0) + 1;
-  }
-  write(KEY_COL, col);
-  return col;
-}
-
 export function totalCards() {
   return Object.values(getCollection()).reduce((s, n) => s + n, 0);
 }
 
-/** Quantas cartas DIFERENTES o jogador possui. */
 export function distinctCards() {
   return Object.values(getCollection()).filter((n) => n > 0).length;
 }
 
-/**
- * Vende cópias da coleção por DP.
- *
- * `lotes`: `[{ id, qty, rarity }]`. Cada lote é limitado ao que o jogador
- * realmente tem — a tela pode estar desatualizada (outra aba, outro booster
- * aberto), e é aqui, onde a coleção é lida, que dá para garantir que ninguém
- * venda uma carta que não possui.
- *
- * Coleção e DP mudam juntos ou não mudam: se nada for vendável, nem grava.
- *
- * @returns {{ok: boolean, total: number, vendidas: number, dp: number}}
- */
-export function sellCards(lotes) {
-  const col = getCollection();
-  let total = 0;
-  let vendidas = 0;
+/** Quantos pacotes deste booster já foram abertos (contador da SR garantida). */
+export const getPity = (key) => lerCache()?.pity?.[key] ?? 0;
 
-  for (const { id, qty, rarity } of lotes ?? []) {
-    const key = Number(id);
-    const tem = col[key] ?? 0;
-    const n = Math.min(Math.max(0, Math.round(Number(qty) || 0)), tem);
-    if (!n) continue;
-    col[key] = tem - n;
-    if (col[key] <= 0) delete col[key];
-    total += n * sellPriceOf(rarity);
-    vendidas += n;
-  }
+/** DP gasto em pacotes desde a última UR garantida. */
+export const getUrSpend = () => Number(lerCache()?.urSpend ?? 0);
 
-  if (!vendidas) return { ok: false, total: 0, vendidas: 0, dp: getDP() };
-  write(KEY_COL, col);
-  return { ok: true, total, vendidas, dp: addDP(total) };
+// ----------------------------------------------------------------- mutações
+
+/** Traduz o erro do PostgREST para algo que cabe num toast. */
+function motivo(r, padrao) {
+  const m = r?.error ?? '';
+  if (/DP insuficiente/i.test(m)) return 'DP insuficiente';
+  if (/nao autenticado/i.test(m)) return 'sessão expirada — entre de novo';
+  if (/sem conexao/i.test(m)) return 'sem conexão';
+  return m || padrao;
 }
 
 /**
- * Remove cartas da Coleção SEM pagar DP.
+ * Abre um pacote. O SERVIDOR cobra, sorteia e credita — o cliente manda só o
+ * nome do booster.
  *
- * É o oposto de vender: aqui a carta não vale nada porque não existe mais no
- * jogo — sobrou de um booster que foi apagado ou reescrito durante o
- * balanceamento. Pagar por ela injetaria DP a partir de registro morto, que é
- * justamente o que se está limpando.
+ * As garantias (SR a cada N pacotes, UR por DP acumulado) também são de lá:
+ * eram quatro chamadas separadas no cliente (`spendDP`, `addUrSpend`,
+ * `bumpPity`, `consumeUrPity`), e qualquer uma podia ser pulada por quem
+ * chamasse a API na mão.
  *
- * @param {Array<number>} ids cartas a apagar (TODAS as cópias de cada uma)
- * @returns {{ok: boolean, distintas: number, copias: number}}
+ * @returns {{ok: boolean, cartas?: Array<{id:number,rarity:string}>, error?: string}}
  */
-export function removeCards(ids) {
-  const col = getCollection();
-  let distintas = 0, copias = 0;
-
-  for (const id of ids ?? []) {
-    const key = Number(id);
-    const tem = col[key] ?? 0;
-    if (!tem) continue;
-    copias += tem;
-    distintas++;
-    delete col[key];
-  }
-
-  if (!distintas) return { ok: false, distintas: 0, copias: 0 };
-  write(KEY_COL, col);
-  return { ok: true, distintas, copias };
+export async function abrirPacote(nomeDoBooster) {
+  const r = await req('rpc/abrir_pacote', {
+    method: 'POST',
+    body: { p_booster: nomeDoBooster },
+  });
+  if (!r.ok) return { ok: false, error: motivo(r, 'não consegui abrir o pacote') };
+  guardarCache(r.dados.carteira);
+  return { ok: true, cartas: r.dados.cartas ?? [] };
 }
-
-// ------------------------------------------------------------------ pity (SR garantida)
-
-/** Quantos pacotes deste booster já foram abertos (contador do "a cada 10"). */
-export function getPity(key) {
-  return read(KEY_PITY, {})[key] ?? 0;
-}
-
-/** Registra a abertura de 1 pacote deste booster; devolve o novo contador. */
-export function bumpPity(key) {
-  const p = read(KEY_PITY, {});
-  p[key] = (p[key] ?? 0) + 1;
-  write(KEY_PITY, p);
-  return p[key];
-}
-
-// ------------------------------------------------- pity da UR (por DP gasto)
 
 /**
- * Contador GLOBAL de DP gasto em pacotes desde a última UR garantida.
+ * Vende cópias por DP. `lotes` = `[{id, qty}]`.
  *
- * É por DP, e não por pacote, porque cada booster pode ter o seu preço: contar
- * pacotes faria um booster caro chegar à garantia com o mesmo esforço de um
- * barato. Global (e não por booster) porque a garantia é do jogador — ele
- * acumula abrindo o que quiser e resgata onde houver UR.
- *
- * O ciclo NÃO é consumido aqui: quem abre o pacote confirma que a UR foi mesmo
- * entregue antes de chamar `consumeUrPity()`. Um booster sem UR não pode
- * queimar o progresso de 10.000 DP do jogador.
+ * A RARIDADE não vai junto de propósito: o servidor a procura nos boosters
+ * publicados. Mandá-la daqui seria deixar o cliente vender tudo a preço de UR.
  */
-export function getUrSpend() {
-  const n = Number(read(KEY_URSPEND, 0));
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+export async function sellCards(lotes) {
+  const r = await req('rpc/vender_cartas', {
+    method: 'POST',
+    body: { p_lotes: (lotes ?? []).map(({ id, qty }) => ({ id: String(id), qty })) },
+  });
+  if (!r.ok) return { ok: false, total: 0, vendidas: 0, dp: getDP(), error: motivo(r, 'falhou') };
+  if (r.dados?.carteira) guardarCache(r.dados.carteira);
+  return {
+    ok: !!r.dados?.ok,
+    total: r.dados?.total ?? 0,
+    vendidas: r.dados?.vendidas ?? 0,
+    dp: getDP(),
+  };
 }
 
-/** Soma o gasto de um pacote ao contador. Devolve o novo total. */
-export function addUrSpend(dp) {
-  const v = getUrSpend() + Math.max(0, Math.round(Number(dp) || 0));
-  write(KEY_URSPEND, v);
-  return v;
+/** Remove cartas da coleção SEM pagar (limpeza de carta que saiu do jogo). */
+export async function removeCards(ids) {
+  const r = await req('rpc/remover_cartas', {
+    method: 'POST',
+    body: { p_ids: (ids ?? []).map(String) },
+  });
+  if (!r.ok) return { ok: false, distintas: 0, copias: 0, error: motivo(r, 'falhou') };
+  if (r.dados?.carteira) guardarCache(r.dados.carteira);
+  return { ok: !!r.dados?.ok, distintas: r.dados?.distintas ?? 0, copias: 0 };
 }
 
-/** Já deu para a UR garantida? */
-export function urPityReady() {
-  return getUrSpend() >= UR_PITY_DP;
+/**
+ * Registra a vitória sobre um adversário e credita o prêmio.
+ *
+ * O VALOR e a carta de assinatura saem de `conteudo->npcs` no servidor. Antes
+ * vinham do objeto do NPC carregado no navegador (`active.rewardDp`), ou seja:
+ * o jogador escolhia quanto ganhava.
+ *
+ * Isto ainda não PROVA a vitória — o duelo roda na máquina dele. O que muda é
+ * que a única coisa sob controle do cliente passou a ser *qual* adversário, não
+ * *quanto*.
+ */
+export async function premiarVitoria(dueloId) {
+  const r = await req('rpc/premiar_vitoria', {
+    method: 'POST',
+    body: { p_duelo: dueloId },
+  });
+  if (!r.ok) return { ok: false, premio: 0, carta: null, error: motivo(r, 'falhou') };
+  guardarCache(r.dados.carteira);
+  return { ok: true, premio: r.dados.premio ?? 0, carta: r.dados.carta ?? null };
 }
 
-/** Desconta UM ciclo (guarda o troco para o próximo). Só após entregar a UR. */
-export function consumeUrPity() {
-  const v = Math.max(0, getUrSpend() - UR_PITY_DP);
-  write(KEY_URSPEND, v);
-  return v;
+/**
+ * Registra o começo de um duelo e devolve o id que destrava o prêmio.
+ *
+ * Sem isto, `premiar_vitoria` aceitava só o nome do NPC — e chamá-la em laço
+ * era DP infinito (medido: 5 chamadas, 2000 → 2500). Agora cada prêmio consome
+ * um duelo registrado, uma vez só, e o servidor recusa duelo com menos de 30s.
+ *
+ * Continua sem PROVAR a vitória: o duelo roda no ocgcore da máquina do jogador
+ * e o servidor não o vê. O que isto faz é transformar um laço de console em
+ * trabalho — a solução de verdade é o duelo rodar no servidor.
+ */
+export async function iniciarDuelo(npcId) {
+  const r = await req('rpc/iniciar_duelo', {
+    method: 'POST',
+    body: { p_npc: String(npcId ?? '') },
+  });
+  return r.ok ? r.dados : null;
 }

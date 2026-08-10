@@ -37,9 +37,11 @@
               background:var(--panel); border:1px solid var(--line); padding:10px 14px">
     <span>Seu saldo: <b id="dp" style="color:var(--gold)">— DP</b></span>
     <span style="flex:1"></span>
-    <input type="number" id="dp-amount" value="5000" min="0" step="500"
-           style="width:90px; background:var(--bg2); color:var(--ink); border:1px solid var(--line); padding:4px 6px">
-    <button id="btn-dp">＋ Adicionar DP</button>
+    <!-- O "+ Adicionar DP" saiu daqui. O saldo passou a ser decidido pelo
+         servidor (migration 0004), então um botão que credita do lado do
+         cliente não teria efeito nenhum — e um botão que não faz nada é pior
+         que botão nenhum. Para testar com saldo alto, credite pelo SQL Editor. -->
+    <span style="font-size:10px; color:var(--dim)">DP só pela Loja e por vencer Adversários</span>
   </div>
 
   <div class="menu">
@@ -89,19 +91,12 @@
 </div>
 
 <script type="module">
-import { getDP, addDP, hydrateWallet } from '/web/js/wallet.js';
+import { getDP, hydrateWallet } from '/web/js/wallet.js';
 const $ = (id) => document.getElementById(id);
 
 await hydrateWallet();
 const renderDP = () => { $('dp').textContent = `${getDP()} DP`; };
 renderDP();
-$('btn-dp').onclick = () => {
-  const n = Number($('dp-amount').value);
-  if (!Number.isFinite(n) || n <= 0) return;
-  addDP(n);
-  renderDP();
-};
-
 $('btn-deck').onclick = () => (location.href = '/web/deck.html');
 $('btn-booster').onclick = () => (location.href = '/web/booster.html');
 $('btn-npcs').onclick = () => (location.href = '/web/npcs.html');

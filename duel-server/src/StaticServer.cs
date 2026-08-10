@@ -62,7 +62,6 @@ namespace DuelServer
             if (path.StartsWith("/__decks/")) return Decks(ctx, root, path.Substring("/__decks/".Length));
             if (path.StartsWith("/__store/")) return Store(ctx, root, path.Substring("/__store/".Length));
             if (path.StartsWith("/__boards/")) return Boards(ctx, root, path.Substring("/__boards/".Length));
-            if (path.StartsWith("/__auth/")) return Auth(ctx, root, path.Substring("/__auth/".Length));
             if (path.StartsWith("/__update/")) return UpdateApi(ctx, path.Substring("/__update/".Length));
 
             // Redireciona de verdade em vez de servir o index na raiz: um documento
@@ -104,225 +103,6 @@ namespace DuelServer
             return true;
         }
 
-        // -------------------------------------------------------------- auth/
-        //
-        // Espelho de `tools/serve.mjs`: mesmo algoritmo (PBKDF2-HMAC-SHA256,
-        // 210 mil iterações — nativo do .NET via Rfc2898DeriveBytes, zero
-        // dependência nova) e mesmo formato de hash/sessão, pra uma conta
-        // criada aqui funcionar idêntica no `npm run dev` e vice-versa.
-
-        const int Pbkdf2Iterations = 210_000;
-        const int SessionMaxAgeSeconds = 60 * 60 * 24 * 30; // 30 dias
-
-        static readonly JsonSerializerOptions CamelCase =
-            new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
-
-        sealed class Account
-        {
-            public string Username { get; set; }
-            public string PasswordHash { get; set; }
-            public string CreatedAt { get; set; }
-        }
-
-        sealed class SessionInfo
-        {
-            public string Username { get; set; }
-            public string CreatedAt { get; set; }
-        }
-
-        // token -> sessão. Concurrent porque o HttpListener pode atender mais
-        // de uma requisição ao mesmo tempo (Node é single-threaded, então
-        // serve.mjs usa um Map comum; aqui não dá pra assumir o mesmo).
-        static readonly ConcurrentDictionary<string, SessionInfo> Sessions = new();
-        static volatile bool _sessionsLoaded;
-        static readonly object SessionsLoadLock = new();
-
-        static string AccountsDir(string root) => Path.Combine(root, "store", "accounts");
-        static string UsersStoreDir(string root) => Path.Combine(root, "store", "users");
-        static string UsersDecksDir(string root) => Path.Combine(root, "decks", "users");
-        static string SessionsFile(string root) => Path.Combine(root, "store", "sessions.json");
-        static string AccountPath(string root, string username) => Path.Combine(AccountsDir(root), $"{username}.json");
-
-        /// <summary>Só letras/números/_, 3-20 caracteres — rejeita fora disso
-        /// em vez de sanitizar (mesmo espírito de `CaminhoDeck`/`CaminhoBoard`).</summary>
-        static bool SafeUsername(string s) => !string.IsNullOrEmpty(s) && Regex.IsMatch(s, @"^[a-zA-Z0-9_]{3,20}$");
-
-        /// <summary>`pbkdf2$&lt;iter&gt;$&lt;saltBase64&gt;$&lt;hashBase64&gt;` —
-        /// mesmo formato autodescritivo do lado Node.</summary>
-        static string HashPassword(string password)
-        {
-            byte[] salt = RandomNumberGenerator.GetBytes(16);
-            byte[] hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
-            return $"pbkdf2${Pbkdf2Iterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
-        }
-
-        /// <summary>Comparação em tempo constante — igual ao `timingSafeEqual`
-        /// do lado Node, pelo mesmo motivo (não vazar por timing).</summary>
-        static bool VerifyPassword(string password, string stored)
-        {
-            if (string.IsNullOrEmpty(stored)) return false;
-            var partes = stored.Split('$');
-            if (partes.Length != 4 || partes[0] != "pbkdf2") return false;
-            if (!int.TryParse(partes[1], out int iter) || iter <= 0) return false;
-            byte[] salt, esperado;
-            try { salt = Convert.FromBase64String(partes[2]); esperado = Convert.FromBase64String(partes[3]); }
-            catch { return false; }
-            byte[] atual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iter, HashAlgorithmName.SHA256, esperado.Length);
-            return CryptographicOperations.FixedTimeEquals(atual, esperado);
-        }
-
-        /// <summary>Parseia o cookie à mão em vez de usar `req.Cookies` — mesmo
-        /// formato exato do parser manual do Node, sem depender de nenhuma
-        /// particularidade de como o `HttpListener` interpreta `Set-Cookie`.</summary>
-        static string ParseSessionCookie(HttpListenerRequest req)
-        {
-            string header = req.Headers["Cookie"];
-            if (string.IsNullOrEmpty(header)) return null;
-            foreach (var parte in header.Split(';'))
-            {
-                int i = parte.IndexOf('=');
-                if (i < 0) continue;
-                if (parte.Substring(0, i).Trim() != "session") continue;
-                try { return Uri.UnescapeDataString(parte.Substring(i + 1).Trim()); }
-                catch { return parte.Substring(i + 1).Trim(); }
-            }
-            return null;
-        }
-
-        static void SetSessionCookie(HttpListenerResponse res, string token) =>
-            res.Headers.Add("Set-Cookie",
-                $"session={token}; HttpOnly; Path=/; SameSite=Lax; Max-Age={SessionMaxAgeSeconds}");
-
-        static void ClearSessionCookie(HttpListenerResponse res) =>
-            res.Headers.Add("Set-Cookie", "session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0");
-
-        static void EnsureSessionsLoaded(string root)
-        {
-            if (_sessionsLoaded) return;
-            lock (SessionsLoadLock)
-            {
-                if (_sessionsLoaded) return;
-                try
-                {
-                    string full = SessionsFile(root);
-                    if (File.Exists(full))
-                    {
-                        var raw = JsonSerializer.Deserialize<Dictionary<string, SessionInfo>>(
-                            File.ReadAllText(full), CamelCase);
-                        if (raw != null) foreach (var kv in raw) Sessions[kv.Key] = kv.Value;
-                        Log.Info($"{Sessions.Count} sessao(oes) restaurada(s) de sessions.json");
-                    }
-                }
-                catch { /* primeira vez, ou arquivo corrompido — comeca vazio */ }
-                _sessionsLoaded = true;
-            }
-        }
-
-        static void PersistSessions(string root)
-        {
-            try
-            {
-                string full = SessionsFile(root);
-                Directory.CreateDirectory(Path.GetDirectoryName(full));
-                File.WriteAllText(full, JsonSerializer.Serialize(Sessions, CamelCase), new UTF8Encoding(false));
-            }
-            catch (Exception e) { Log.Warn($"nao consegui gravar sessions.json: {e.Message}"); }
-        }
-
-        /// <summary>`(true, username)` de quem está logado nesta requisição.</summary>
-        static (bool ok, string username) SessionFor(HttpListenerContext ctx, string root)
-        {
-            EnsureSessionsLoaded(root);
-            string token = ParseSessionCookie(ctx.Request);
-            if (token != null && Sessions.TryGetValue(token, out var s)) return (true, s.Username);
-            return (false, null);
-        }
-
-        static bool Auth(HttpListenerContext ctx, string root, string acao)
-        {
-            var req = ctx.Request;
-            var res = ctx.Response;
-            EnsureSessionsLoaded(root);
-
-            if (acao == "register" && req.HttpMethod == "POST")
-            {
-                var body = Body(req);
-                string username = Str(body, "username");
-                string password = Str(body, "password");
-                if (!SafeUsername(username))
-                { Json(res, new { ok = false, error = "usuário inválido (3-20 letras/números/_)" }, 400); return true; }
-                if (string.IsNullOrEmpty(password) || password.Length < 8)
-                { Json(res, new { ok = false, error = "senha precisa de pelo menos 8 caracteres" }, 400); return true; }
-
-                string accFull = AccountPath(root, username);
-                if (File.Exists(accFull))
-                { Json(res, new { ok = false, error = "esse usuário já existe" }, 409); return true; }
-
-                Directory.CreateDirectory(AccountsDir(root));
-                var account = new Account
-                {
-                    Username = username,
-                    PasswordHash = HashPassword(password),
-                    CreatedAt = DateTime.UtcNow.ToString("o"),
-                };
-                File.WriteAllText(accFull, JsonSerializer.Serialize(account, CamelCase), new UTF8Encoding(false));
-                Log.Info($"conta criada: {username}");
-
-                string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-                Sessions[token] = new SessionInfo { Username = username, CreatedAt = DateTime.UtcNow.ToString("o") };
-                PersistSessions(root);
-                SetSessionCookie(res, token);
-                Json(res, new { ok = true, username });
-                return true;
-            }
-
-            if (acao == "login" && req.HttpMethod == "POST")
-            {
-                var body = Body(req);
-                string username = Str(body, "username");
-                string password = Str(body, "password");
-                // Mensagem genérica nos dois casos — dizer "usuário não existe"
-                // deixaria alguém varrer nomes válidos.
-                bool Falha() { Json(res, new { ok = false, error = "usuário ou senha incorretos" }, 401); return true; }
-                if (!SafeUsername(username)) return Falha();
-
-                string accFull = AccountPath(root, username);
-                if (!File.Exists(accFull)) return Falha();
-                Account account;
-                try { account = JsonSerializer.Deserialize<Account>(File.ReadAllText(accFull), CamelCase); }
-                catch { return Falha(); }
-                if (account == null || string.IsNullOrEmpty(password) || !VerifyPassword(password, account.PasswordHash))
-                    return Falha();
-
-                string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-                Sessions[token] = new SessionInfo { Username = username, CreatedAt = DateTime.UtcNow.ToString("o") };
-                PersistSessions(root);
-                SetSessionCookie(res, token);
-                Json(res, new { ok = true, username });
-                return true;
-            }
-
-            if (acao == "logout" && req.HttpMethod == "POST")
-            {
-                string token = ParseSessionCookie(req);
-                if (token != null) { Sessions.TryRemove(token, out _); PersistSessions(root); }
-                ClearSessionCookie(res);
-                Json(res, new { ok = true });
-                return true;
-            }
-
-            if (acao == "me")
-            {
-                var (ok, username) = SessionFor(ctx, root);
-                if (!ok) { Json(res, new { ok = false, error = "não logado" }, 401); return true; }
-                Json(res, new { ok = true, username });
-                return true;
-            }
-
-            Json(res, new { ok = false, error = "ação desconhecida" }, 404);
-            return true;
-        }
-
         // ------------------------------------------------------------- decks/
 
         /// <summary>
@@ -357,14 +137,13 @@ namespace DuelServer
         /// </summary>
         static (string full, string error, int status) ResolveDeckPath(HttpListenerContext ctx, string root, string rel)
         {
+            // Deck do JOGADOR nao mora mais em disco: vive em `decks_jogador`
+            // no Supabase, e gravar passa por `salvar_deck()`, que confere cada
+            // carta contra a colecao dele. Recusar aqui em vez de aceitar em
+            // silencio e' o ponto — um cliente velho que ainda tentasse este
+            // caminho estaria justamente contornando a conferencia de posse.
             if (rel != null && (rel == "player" || rel.StartsWith("player/") || rel.StartsWith("player\\")))
-            {
-                var (ok, username) = SessionFor(ctx, root);
-                if (!ok) return (null, "não logado", 401);
-                string full = CaminhoDeckEm(Path.Combine(UsersDecksDir(root), username), rel);
-                if (full == null) return (null, "caminho invalido (precisa ser .ydk dentro de decks/)", 400);
-                return (full, null, 0);
-            }
+                return (null, "decks do jogador ficam no Supabase, nao em disco", 410);
             string full2 = CaminhoDeckEm(Path.Combine(root, "decks"), rel);
             if (full2 == null) return (null, "caminho invalido (precisa ser .ydk dentro de decks/)", 400);
             return (full2, null, 0);
@@ -375,7 +154,6 @@ namespace DuelServer
             var req = ctx.Request;
             var res = ctx.Response;
             string decks = Path.Combine(root, "decks");
-            string usersDecks = UsersDecksDir(root);
             // Backup de antes do login existir — nao e' conteudo de jogo, so
             // precisa ficar fora da listagem (mesma exclusao do lado Node).
             string legacyBackup = Path.Combine(decks, "legacy-backup-player");
@@ -387,7 +165,6 @@ namespace DuelServer
                 {
                     foreach (var f in Directory.EnumerateFiles(decks, "*.ydk", SearchOption.AllDirectories))
                     {
-                        if (f.StartsWith(usersDecks + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
                         if (f.StartsWith(legacyBackup + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
                         try
                         {
@@ -402,28 +179,9 @@ namespace DuelServer
                         catch { /* sumiu no meio da varredura */ }
                     }
                 }
-                var (logado, username) = SessionFor(ctx, root);
-                if (logado)
-                {
-                    string meuDir = Path.Combine(usersDecks, username);
-                    if (Directory.Exists(meuDir))
-                    {
-                        foreach (var f in Directory.EnumerateFiles(meuDir, "*.ydk", SearchOption.AllDirectories))
-                        {
-                            try
-                            {
-                                string texto = File.ReadAllText(f);
-                                itens.Add(new
-                                {
-                                    path = Path.GetRelativePath(meuDir, f).Replace('\\', '/'),
-                                    meta = LerMeta(texto),
-                                    content = texto,
-                                });
-                            }
-                            catch { /* idem */ }
-                        }
-                    }
-                }
+                // So' conteudo do jogo (npc/...). Os decks do JOGADOR vem do
+                // Supabase e sao juntados no cliente, em `projectdecks.js` —
+                // aqui eles nem sao lidos.
                 Json(res, new { ok = true, decks = itens });
                 return true;
             }
@@ -569,21 +327,21 @@ namespace DuelServer
             var req = ctx.Request;
             var res = ctx.Response;
 
-            // wallet.json e' dado de CONTA (DP/colecao/pity), nao config do
-            // jogo — pertence a quem esta logado. Todo outro nome
-            // (banlist/boosters/npcs) continua exatamente como sempre foi.
-            string full;
+            // A carteira (DP/colecao/pity) saiu daqui: e' uma linha em
+            // `carteiras` no Supabase, onde o dono so' tem SELECT e toda
+            // mudanca passa por uma funcao que aplica a regra do jogo. Enquanto
+            // era um arquivo, trocar "dp": 2000 por "dp": 999999 num editor de
+            // texto era todo o trabalho.
             if (nome == "wallet.json")
             {
-                var (logado, username) = SessionFor(ctx, root);
-                if (!logado) { Json(res, new { ok = false, error = "não logado" }, 401); return true; }
-                full = Path.Combine(UsersStoreDir(root), username, "wallet.json");
+                Json(res, new { ok = false, error = "a carteira fica no Supabase, nao em disco" }, 410);
+                return true;
             }
-            else
-            {
-                full = CaminhoStore(root, nome);
-                if (full == null) { Json(res, new { ok = false, error = "nome invalido (use <nome>.json)" }, 400); return true; }
-            }
+
+            // O resto (banlist/boosters/npcs) e' CONTEUDO do jogo: global,
+            // versionado no git, sem sessao nenhuma — igual sempre foi.
+            string full = CaminhoStore(root, nome);
+            if (full == null) { Json(res, new { ok = false, error = "nome invalido (use <nome>.json)" }, 400); return true; }
 
             if (req.HttpMethod == "POST")
             {

@@ -5,13 +5,12 @@
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
-  listShopBoosters, openPack, boosterSize, hydrateBoosters,
+  listShopBoosters, boosterSize, hydrateBoosters,
   DEFAULT_PRICE, PITY_EVERY, UR_PITY_DP,
 } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
 import {
-  getDP, spendDP, addCards, getPity, bumpPity, hydrateWallet,
-  addUrSpend, urPityReady, consumeUrPity, getUrSpend,
+  getDP, getPity, hydrateWallet, abrirPacote, getUrSpend,
 } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
 
@@ -84,30 +83,40 @@ function renderShop() {
         urLinha +
         `<button class="buy btn-primary" ${canBuy ? '' : 'disabled'}>abrir pacote (${price} DP)</button>` +
       `</div>`;
-    el.querySelector('.buy').onclick = () => buy(b);
+    el.querySelector('.buy').onclick = (e) => { e.currentTarget.disabled = true; buy(b); };
     frag.append(el);
   }
   $('packs').replaceChildren(frag);
 }
 
-function buy(booster) {
-  const price = priceOf(booster);
-  if (!spendDP(price)) return void toast('DP insuficiente — vença Adversários para ganhar mais');
-  // "a cada N pacotes": este é o N-ésimo? então SR garantida (substitui uma N).
-  const key = pityKey(booster);
-  const garante = (getPity(key) + 1) % PITY_EVERY === 0;
+/**
+ * Compra um pacote.
+ *
+ * Todo o miolo saiu daqui: cobrar o preço, sortear as cartas e resolver as
+ * garantias (SR a cada N pacotes, UR por DP acumulado) agora acontece no banco,
+ * em `abrir_pacote()`. O que sobrou é pedir e mostrar.
+ *
+ * Isso não é reorganização: enquanto o sorteio rodava neste arquivo, quem
+ * chamasse a API na mão podia pular o `spendDP` e creditar as cartas do mesmo
+ * jeito — o cliente era a única autoridade sobre o próprio saldo.
+ */
+async function buy(booster) {
+  const r = await abrirPacote(booster.name);
+  if (!r.ok) {
+    return void toast(r.error === 'DP insuficiente'
+      ? 'DP insuficiente — vença Adversários para ganhar mais'
+      : r.error);
+  }
 
-  // UR garantida por DP acumulado: soma este pacote e só resgata se ESTE
-  // booster tiver UR — senão o jogador queimaria os 10.000 sem receber nada.
-  addUrSpend(price);
-  const temUR = (booster.cards?.UR?.length ?? 0) > 0;
-  const garanteUR = temUR && urPityReady();
+  // O servidor devolve `{id, rarity}`; a tela também quer saber o que veio por
+  // garantia, e isso é dedutível: a primeira carta com raridade acima do comum
+  // num pacote que bateu o contador é a garantida.
+  const pulls = r.cartas.map((c, i) => ({
+    id: Number(c.id),
+    rarity: c.rarity,
+    guaranteed: i === 0 && (c.rarity === 'SR' || c.rarity === 'UR'),
+  }));
 
-  const pulls = openPack(booster, undefined, { guaranteeSR: garante, guaranteeUR: garanteUR });
-  // Só desconta o ciclo se a UR foi mesmo entregue (o pacote podia já ter uma).
-  if (pulls.some((p) => p.guaranteedUR)) consumeUrPity();
-  bumpPity(key);
-  addCards(pulls.map((p) => p.id));
   lastBought = booster;
   renderDP();
   renderShop();          // atualiza os botões (DP e o progresso do pity)
@@ -142,7 +151,7 @@ $('reveal-close').onclick = () => $('reveal-back').classList.remove('show');
 $('reveal-back').addEventListener('click', (e) => {
   if (e.target === $('reveal-back')) $('reveal-back').classList.remove('show');
 });
-$('reveal-again').onclick = () => { if (lastBought) buy(lastBought); };
+$('reveal-again').onclick = (e) => { if (!lastBought) return; e.currentTarget.disabled = true; buy(lastBought).finally(() => { e.target.disabled = false; }); };
 
 // ---------------------------------------------------------------- boot
 const username = await requireLogin();

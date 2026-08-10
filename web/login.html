@@ -33,13 +33,20 @@
   .hint { color: var(--dim); font-size: 10px; margin-top: -4px; }
 
   button[type="submit"] { width: 100%; padding: 10px; margin-top: 4px; }
+
+  .aviso { color: var(--gold); font-size: 11px; line-height: 1.5; }
+  .linkish {
+    background: none; border: 0; color: var(--dim); font-size: 10px;
+    letter-spacing: 1px; padding: 4px; cursor: pointer; text-decoration: underline;
+  }
+  .linkish:hover { color: var(--gold); }
 </style>
 </head>
 <body>
 <div class="home">
   <div class="title">
     <h1>DUEL ACADEMY</h1>
-    <p>YUGI GAME V2</p>
+    <p id="versao">YUGI GAME V2</p>
   </div>
 
   <div class="slot">
@@ -50,22 +57,33 @@
 
     <form id="form">
       <div>
-        <label for="username">usuário</label>
-        <input id="username" name="username" autocomplete="username" required>
+        <label for="email">e-mail</label>
+        <input id="email" name="email" type="email" autocomplete="email" required>
+      </div>
+      <div id="campo-usuario" hidden>
+        <label for="username">nome no jogo</label>
+        <input id="username" name="username" autocomplete="username">
       </div>
       <div>
         <label for="password">senha</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required>
       </div>
-      <div class="hint" id="hint" hidden>3-20 letras/números/_ · senha com pelo menos 8 caracteres</div>
+      <div class="hint" id="hint" hidden>nome no jogo: 3-32 caracteres · senha com pelo menos 8</div>
       <div class="error" id="error"></div>
+      <div class="aviso" id="aviso" hidden></div>
       <button type="submit" class="btn-primary" id="submit">entrar</button>
+      <button type="button" class="linkish" id="esqueci">esqueci minha senha</button>
     </form>
   </div>
 </div>
 
 <script type="module">
-import { login, register } from '/web/js/auth.js';
+import { login, register, recuperarSenha, desviarParaRecuperacao } from '/web/js/auth.js';
+
+// Antes de tudo: se o link de recuperação caiu aqui (o Supabase ignora o
+// `redirect_to` que não está na lista de URLs permitidas e usa a Site URL),
+// leva para a tela certa levando o token junto.
+if (desviarParaRecuperacao()) throw new Error('indo para a recuperacao');
 
 const $ = (id) => document.getElementById(id);
 
@@ -79,8 +97,12 @@ function render() {
   $('tab-register').classList.toggle('on', mode === 'register');
   $('submit').textContent = mode === 'login' ? 'entrar' : 'criar conta';
   $('password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('campo-usuario').hidden = mode !== 'register';
+  $('username').required = mode === 'register';
   $('hint').hidden = mode !== 'register';
+  $('esqueci').hidden = mode !== 'login';
   $('error').textContent = '';
+  $('aviso').hidden = true;
 }
 
 $('tab-login').onclick = () => { mode = 'login'; render(); };
@@ -89,13 +111,46 @@ $('tab-register').onclick = () => { mode = 'register'; render(); };
 $('form').onsubmit = async (e) => {
   e.preventDefault();
   $('error').textContent = '';
+  $('aviso').hidden = true;
   $('submit').disabled = true;
-  const username = $('username').value.trim();
+
+  const email = $('email').value.trim();
   const password = $('password').value;
-  const r = mode === 'login' ? await login(username, password) : await register(username, password);
+  const usuario = $('username').value.trim();
+
+  const r = mode === 'login'
+    ? await login(email, password)
+    : await register(email, password, usuario);
+
   $('submit').disabled = false;
   if (!r.ok) { $('error').textContent = r.error || 'algo deu errado'; return; }
+
+  // Com confirmacao de e-mail ligada, cadastrar NAO loga: o jogador precisa
+  // clicar no link antes. Sem este aviso a tela ficaria parada, e parada e'
+  // exatamente como um cadastro que falhou se parece.
+  if (r.precisaConfirmar) {
+    mode = 'login';
+    render();
+    $('aviso').hidden = false;
+    $('aviso').textContent =
+      `conta criada. confira o e-mail ${email} e clique no link de confirmacao para entrar.`;
+    return;
+  }
+
   location.href = HOME;
+};
+
+$('esqueci').onclick = async () => {
+  const email = $('email').value.trim();
+  if (!email) { $('error').textContent = 'escreva o e-mail primeiro'; return; }
+  $('esqueci').disabled = true;
+  // O link do e-mail leva à tela de recuperação, não de volta para cá.
+  const r = await recuperarSenha(email, `${location.origin}/web/recuperar.html`);
+  $('esqueci').disabled = false;
+  if (!r.ok) { $('error').textContent = r.error; return; }
+  $('aviso').hidden = false;
+  // Nao confirma se a conta existe: isso entregaria quais e-mails tem conta.
+  $('aviso').textContent = `se essa conta existir, o link de redefinicao chegou em ${email}.`;
 };
 
 render();

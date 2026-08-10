@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duel Academy — Recuperar senha</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 0%, #1b2438 0%, var(--bg) 60%);
+  }
+  .home { width: min(420px, 94vw); }
+
+  .title { text-align: center; margin-bottom: 22px; border-bottom: 2px solid var(--line); padding-bottom: 16px; }
+  .title h1 { margin: 0; font-size: 30px; letter-spacing: 5px; color: var(--gold); text-shadow: 0 2px 0 #0008; }
+  .title p { margin: 6px 0 0; color: var(--dim); font-size: 11px; letter-spacing: 2px; }
+
+  .slot { background: var(--panel); border: 2px solid var(--line); padding: 18px; }
+
+  form { display: grid; gap: 10px; }
+  label { font-size: 11px; letter-spacing: 1px; color: var(--dim); display: block; margin-bottom: 4px; }
+  input { width: 100%; }
+  input:disabled { color: var(--dim); }
+
+  .hint { color: var(--dim); font-size: 10px; }
+  .error { color: var(--red); font-size: 11px; min-height: 14px; }
+  .ok { color: var(--gold); font-size: 11px; line-height: 1.5; }
+
+  button[type="submit"] { width: 100%; padding: 10px; margin-top: 4px; }
+  .linkish {
+    background: none; border: 0; color: var(--dim); font-size: 10px;
+    letter-spacing: 1px; padding: 4px; cursor: pointer; text-decoration: underline;
+  }
+  .linkish:hover { color: var(--gold); }
+</style>
+</head>
+<body>
+<div class="home">
+  <div class="title">
+    <h1>DUEL ACADEMY</h1>
+    <p>RECUPERAR SENHA</p>
+  </div>
+
+  <div class="slot">
+    <form id="form">
+      <div>
+        <label for="email">e-mail</label>
+        <input id="email" name="email" type="email" autocomplete="username" disabled>
+      </div>
+      <div>
+        <label for="senha">nova senha</label>
+        <input id="senha" name="senha" type="password" autocomplete="new-password" required>
+      </div>
+      <div class="hint">pelo menos 8 caracteres</div>
+      <div class="error" id="erro"></div>
+      <button type="submit" class="btn-primary" id="salvar">salvar nova senha</button>
+    </form>
+
+    <div id="sem-link" hidden>
+      <p class="error">este link não é válido ou já expirou.</p>
+      <p class="hint">peça um novo em "esqueci minha senha", na tela de entrada.</p>
+    </div>
+
+    <button type="button" class="linkish" id="voltar">voltar para a entrada</button>
+  </div>
+</div>
+
+<script type="module">
+/**
+ * Destino do link de recuperação que o Supabase manda por e-mail.
+ *
+ * O link volta como `…/recuperar.html#access_token=…&type=recovery`: a sessão
+ * vem no FRAGMENTO da URL, que não viaja para servidor nenhum — por isso é a
+ * página que tem de lê-lo. Enquanto o `redirect_to` apontava para o login, o
+ * link abria a tela de entrada e não acontecia nada.
+ *
+ * A sessão que chega por aqui já autentica: trocar a senha é um `PUT` em
+ * `/auth/v1/user`, sem precisar da senha antiga (que é justamente a esquecida).
+ */
+import { sessaoDoHash, trocarSenha, contaAtual } from '/web/js/auth.js';
+
+const $ = (id) => document.getElementById(id);
+const HOME = '/web/index.html';
+const LOGIN = '/web/login.html';
+
+$('voltar').onclick = () => (location.href = LOGIN);
+
+const tipo = sessaoDoHash();
+if (!tipo) {
+  // Aberta na mão, ou com o link já usado/expirado. Dizer isso é melhor que
+  // mostrar um formulário que vai falhar no envio.
+  $('form').hidden = true;
+  $('sem-link').hidden = false;
+} else {
+  const conta = await contaAtual();
+  $('email').value = conta?.email ?? '';
+
+  $('form').onsubmit = async (e) => {
+    e.preventDefault();
+    $('erro').textContent = '';
+    const senha = $('senha').value;
+    if (senha.length < 8) { $('erro').textContent = 'a senha precisa de pelo menos 8 caracteres'; return; }
+
+    $('salvar').disabled = true;
+    const r = await trocarSenha(senha);
+    $('salvar').disabled = false;
+    if (!r.ok) { $('erro').textContent = r.error; return; }
+
+    // A troca deixa a sessão válida: entra direto, em vez de pedir de novo a
+    // senha que a pessoa acabou de escolher.
+    location.href = HOME;
+  };
+}
+</script>
+</body>
+</html>

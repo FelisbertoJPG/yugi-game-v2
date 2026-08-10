@@ -293,8 +293,8 @@ function decksQueUsam(ids) {
   return nomes;
 }
 
-function confirmarLimpezaOrfas() {
-  const r = removeCards(cartasOrfas());
+async function confirmarLimpezaOrfas() {
+  const r = await removeCards(cartasOrfas());
   fecharDialogo();
   if (!r.ok) return void toast('nada foi apagado');
   renderDP();
@@ -312,9 +312,12 @@ function fecharDialogo() {
 
 let modoLimpeza = false;   // o overlay está servindo à limpeza, não à venda
 
-function confirmarVenda() {
-  const lotes = [...selecao.entries()].map(([id, qty]) => ({ id, qty, rarity: rarOf(id) }));
-  const r = sellCards(lotes);
+async function confirmarVenda() {
+  // A raridade NÃO viaja mais daqui: quem a determina, e com ela o preço, é o
+  // servidor, contra os boosters publicados. Mandá-la do cliente seria deixar
+  // qualquer um vender tudo a preço de UR.
+  const lotes = [...selecao.entries()].map(([id, qty]) => ({ id, qty }));
+  const r = await sellCards(lotes);
   fecharDialogo();
   if (!r.ok) return void toast('nada foi vendido');
   selecao.clear();

@@ -11,16 +11,11 @@ import { createServer } from 'node:http';
 import { readFile, stat, writeFile, mkdir, readdir, unlink, rename } from 'node:fs/promises';
 import { join, extname, normalize, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, pbkdf2Sync, timingSafeEqual } from 'node:crypto';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DECKS = join(ROOT, 'decks');
 const STORE = join(ROOT, 'store');
 const BOARDS = join(ROOT, 'boards');
-const ACCOUNTS = join(STORE, 'accounts');       // store/accounts/<user>.json
-const USERS_STORE = join(STORE, 'users');       // store/users/<user>/wallet.json
-const USERS_DECKS = join(DECKS, 'users');       // decks/users/<user>/player/*.ydk
-const SESSIONS_FILE = join(STORE, 'sessions.json');
 // Backup dos decks/player/*.ydk de antes do login existir — não é conteúdo
 // de jogo nem dado de conta em uso, só precisa ficar FORA da listagem.
 const LEGACY_BACKUP_DECKS = join(DECKS, 'legacy-backup-player');
@@ -81,12 +76,6 @@ const server = createServer(async (req, res) => {
       return void await handleBoards(rel.slice('/__boards/'.length), req, res);
     }
 
-    // Login/registro/sessão — conta de verdade, não perfil de brinquedo.
-    // Só localhost, mesma regra das outras rotas de escrita/leitura de disco.
-    if (rel.startsWith('/__auth/')) {
-      if (!isLocal(req)) return void res.writeHead(403).end('403');
-      return void await handleAuth(rel.slice('/__auth/'.length), req, res);
-    }
 
     // Redireciona de verdade em vez de servir o arquivo em '/': se o documento
     // ficasse na raiz, os caminhos relativos dele resolveriam contra '/' e
@@ -135,155 +124,6 @@ const readBody = (req) => new Promise((resolve) => {
   req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } });
 });
 
-// ---------------------------------------------------------------------------
-// Contas — login/registro de verdade, não perfil local sem senha. Hash com
-// PBKDF2-HMAC-SHA256 (nativo do Node, zero dependência nova) e sessão por
-// cookie httpOnly: como o front já fala com este servidor no MESMO origin,
-// `fetch` manda o cookie sozinho — nenhuma chamada existente em
-// projectstore.js/projectdecks.js precisa mudar.
-// ---------------------------------------------------------------------------
-
-const PBKDF2_ITER = 210_000;   // piso recomendado (OWASP 2023) pra PBKDF2-SHA256
-const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 dias
-
-/** username -> {passwordHash,...} vive em disco; sessão só em memória +
- *  store/sessions.json (sobrevive a reiniciar o servidor de dev). */
-const sessions = new Map();
-
-async function loadSessions() {
-  try {
-    const raw = JSON.parse(await readFile(SESSIONS_FILE, 'utf8'));
-    for (const [token, s] of Object.entries(raw)) sessions.set(token, s);
-    console.log(`  ${sessions.size} sessão(ões) restaurada(s) de sessions.json`);
-  } catch { /* primeira vez, ou arquivo corrompido — começa vazio */ }
-}
-
-function persistSessions() {
-  gravarSerializado(SESSIONS_FILE, JSON.stringify(Object.fromEntries(sessions), null, 2))
-    .catch(() => {});
-}
-
-/** Só letras/números/_, 3-20 caracteres. Rejeita fora disso — não sanitiza,
- *  mesmo espírito de safeDeckPath/safeBoardPath: falhar alto é melhor que
- *  "consertar" em silêncio. */
-function safeUsername(s) {
-  return typeof s === 'string' && /^[a-zA-Z0-9_]{3,20}$/.test(s) ? s : null;
-}
-
-function accountPath(username) {
-  return join(ACCOUNTS, `${username}.json`);
-}
-
-/** `pbkdf2$<iter>$<saltBase64>$<hashBase64>` — formato autodescritivo, dá pra
- *  subir o número de iterações no futuro sem invalidar hashes antigos. */
-function hashPassword(password) {
-  const salt = randomBytes(16);
-  const hash = pbkdf2Sync(password, salt, PBKDF2_ITER, 32, 'sha256');
-  return `pbkdf2$${PBKDF2_ITER}$${salt.toString('base64')}$${hash.toString('base64')}`;
-}
-
-/** Comparação em TEMPO CONSTANTE (timingSafeEqual) — comparar string por
- *  string vazaria, por timing, quantos bytes iniciais bateram. */
-function verifyPassword(password, stored) {
-  const parts = String(stored ?? '').split('$');
-  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
-  const iter = Number(parts[1]);
-  if (!Number.isFinite(iter) || iter <= 0) return false;
-  const salt = Buffer.from(parts[2], 'base64');
-  const expected = Buffer.from(parts[3], 'base64');
-  const actual = pbkdf2Sync(password, salt, iter, expected.length, 'sha256');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-function parseCookies(req) {
-  const header = req.headers.cookie;
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(';')) {
-    const i = part.indexOf('=');
-    if (i < 0) continue;
-    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
-  }
-  return out;
-}
-
-function setSessionCookie(res, token) {
-  res.setHeader('Set-Cookie',
-    `session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`);
-}
-
-function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', 'session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
-}
-
-/** `{token, username}` de quem está logado nesta requisição, ou null. */
-function sessionFor(req) {
-  const { session } = parseCookies(req);
-  if (!session) return null;
-  const s = sessions.get(session);
-  return s ? { token: session, username: s.username } : null;
-}
-
-async function handleAuth(action, req, res) {
-  if (action === 'register' && req.method === 'POST') {
-    const { username, password } = await readBody(req);
-    const u = safeUsername(username);
-    if (!u) return json(res, { ok: false, error: 'usuário inválido (3-20 letras/números/_)' }, 400);
-    if (typeof password !== 'string' || password.length < 8) {
-      return json(res, { ok: false, error: 'senha precisa de pelo menos 8 caracteres' }, 400);
-    }
-    try {
-      await readFile(accountPath(u), 'utf8');
-      return json(res, { ok: false, error: 'esse usuário já existe' }, 409);
-    } catch { /* não existe — segue o registro */ }
-
-    await mkdir(ACCOUNTS, { recursive: true });
-    const account = { username: u, passwordHash: hashPassword(password), createdAt: new Date().toISOString() };
-    await gravarSerializado(accountPath(u), JSON.stringify(account, null, 2));
-    console.log(`  conta criada: ${u}`);
-
-    const token = randomBytes(32).toString('hex');
-    sessions.set(token, { username: u, createdAt: new Date().toISOString() });
-    persistSessions();
-    setSessionCookie(res, token);
-    return json(res, { ok: true, username: u });
-  }
-
-  if (action === 'login' && req.method === 'POST') {
-    const { username, password } = await readBody(req);
-    const u = safeUsername(username);
-    // Mensagem genérica nos dois casos (usuário inexistente OU senha errada)
-    // — dizer "esse usuário não existe" deixaria alguém varrer nomes válidos.
-    const falha = () => json(res, { ok: false, error: 'usuário ou senha incorretos' }, 401);
-    if (!u) return falha();
-
-    let account;
-    try { account = JSON.parse(await readFile(accountPath(u), 'utf8')); }
-    catch { return falha(); }
-    if (typeof password !== 'string' || !verifyPassword(password, account.passwordHash)) return falha();
-
-    const token = randomBytes(32).toString('hex');
-    sessions.set(token, { username: u, createdAt: new Date().toISOString() });
-    persistSessions();
-    setSessionCookie(res, token);
-    return json(res, { ok: true, username: u });
-  }
-
-  if (action === 'logout' && req.method === 'POST') {
-    const { session } = parseCookies(req);
-    if (session) { sessions.delete(session); persistSessions(); }
-    clearSessionCookie(res);
-    return json(res, { ok: true });
-  }
-
-  if (action === 'me') {
-    const s = sessionFor(req);
-    if (!s) return json(res, { ok: false, error: 'não logado' }, 401);
-    return json(res, { ok: true, username: s.username });
-  }
-
-  return json(res, { ok: false, error: 'ação desconhecida' }, 404);
-}
 
 /**
  * Resolve um caminho pedido pelo cliente para dentro de `base`.
@@ -317,13 +157,14 @@ function safeDeckPath(rel, base) {
  * O cliente nunca vê essa distinção: o `path` que ele manda/recebe continua
  * `player/x.ydk`, só o lugar físico no disco muda por baixo.
  */
-function resolveDeckPath(rel, req) {
+async function resolveDeckPath(rel, req) {
+  // Deck do JOGADOR não mora mais em disco: vive em `decks_jogador` no Supabase,
+  // e gravar passa por `salvar_deck()`, que confere cada carta contra a coleção
+  // dele. Recusar aqui em vez de aceitar em silêncio é o ponto — um cliente
+  // velho que ainda tentasse este caminho estaria justamente contornando a
+  // conferência de posse.
   if (typeof rel === 'string' && (rel === 'player' || rel.startsWith('player/') || rel.startsWith('player\\'))) {
-    const s = sessionFor(req);
-    if (!s) return { error: 'não logado', status: 401 };
-    const full = safeDeckPath(rel, join(USERS_DECKS, s.username));
-    if (!full) return { error: 'caminho inválido (precisa ser .ydk dentro de decks/)', status: 400 };
-    return { full };
+    return { error: 'decks do jogador ficam no Supabase, não em disco', status: 410 };
   }
   const full = safeDeckPath(rel, DECKS);
   if (!full) return { error: 'caminho inválido (precisa ser .ydk dentro de decks/)', status: 400 };
@@ -365,28 +206,20 @@ async function handleDecks(action, req, res) {
       // não desce em decks/users/ aqui — senão um deck de outro usuário
       // vazaria pra lista de quem não é dono dele. Nem no backup legado —
       // não é conteúdo de jogo, só histórico de antes do login existir.
-      if (f.startsWith(USERS_DECKS + sep) || f.startsWith(LEGACY_BACKUP_DECKS + sep)) continue;
+      if (f.startsWith(LEGACY_BACKUP_DECKS + sep)) continue;
       try {
         const content = await readFile(f, 'utf8');
         items.push({ path: relative(DECKS, f).split(sep).join('/'), meta: peekMeta(content), content });
       } catch { /* arquivo sumiu no meio da varredura: ignora */ }
     }
-    const s = sessionFor(req);
-    if (s) {
-      const meuDir = join(USERS_DECKS, s.username);
-      for (const f of await listYdk(meuDir)) {
-        try {
-          const content = await readFile(f, 'utf8');
-          items.push({ path: relative(meuDir, f).split(sep).join('/'), meta: peekMeta(content), content });
-        } catch { /* idem */ }
-      }
-    }
+    // Só conteúdo do jogo (npc/…). Os decks do JOGADOR vêm do Supabase e são
+    // juntados no cliente, em `projectdecks.js` — aqui eles nem são lidos.
     return json(res, { ok: true, decks: items });
   }
 
   if (action === 'save' && req.method === 'POST') {
     const { path: rel, content } = await readBody(req);
-    const { full, error, status } = resolveDeckPath(rel, req);
+    const { full, error, status } = await resolveDeckPath(rel, req);
     if (!full) return json(res, { ok: false, error }, status);
     if (typeof content !== 'string' || !content.trim()) {
       return json(res, { ok: false, error: 'conteúdo vazio' }, 400);
@@ -401,7 +234,7 @@ async function handleDecks(action, req, res) {
 
   if (action === 'delete' && req.method === 'POST') {
     const { path: rel } = await readBody(req);
-    const { full, error, status } = resolveDeckPath(rel, req);
+    const { full, error, status } = await resolveDeckPath(rel, req);
     if (!full) return json(res, { ok: false, error }, status);
     try { await unlink(full); console.log(`  deck removido: ${relative(ROOT, full)}`); }
     catch (e) { return json(res, { ok: false, error: e.code === 'ENOENT' ? 'não existe' : e.message }, 404); }
@@ -518,18 +351,21 @@ function gravarSerializado(full, texto) {
 }
 
 async function handleStore(name, req, res) {
-  // wallet.json é dado de CONTA (DP/coleção/pity), não config do jogo —
-  // pertence a quem está logado. Todo outro nome (banlist/boosters/npcs)
-  // continua exatamente como sempre foi: global, sem sessão nenhuma.
-  let full;
+  // A carteira (DP/coleção/pity) saiu daqui: é uma linha em `carteiras` no
+  // Supabase, onde o dono só tem SELECT e toda mudança passa por uma função que
+  // aplica a regra do jogo. Enquanto era um arquivo, trocar `"dp": 2000` por
+  // `"dp": 999999` num editor de texto era todo o trabalho.
+  //
+  // Recusa em vez de servir: aceitar o caminho velho devolveria ao jogador um
+  // lugar gravável com o nome de carteira.
   if (name === 'wallet.json') {
-    const s = sessionFor(req);
-    if (!s) return json(res, { ok: false, error: 'não logado' }, 401);
-    full = join(USERS_STORE, s.username, 'wallet.json');
-  } else {
-    full = safeStorePath(name);
-    if (!full) return json(res, { ok: false, error: 'nome inválido (use <nome>.json)' }, 400);
+    return json(res, { ok: false, error: 'a carteira fica no Supabase, não em disco' }, 410);
   }
+
+  // O resto (banlist/boosters/npcs) é CONTEÚDO do jogo: global, versionado no
+  // git, sem sessão nenhuma — igual sempre foi.
+  const full = safeStorePath(name);
+  if (!full) return json(res, { ok: false, error: 'nome inválido (use <nome>.json)' }, 400);
 
   if (req.method === 'POST') {
     const data = await readBody(req);
@@ -547,13 +383,6 @@ async function handleStore(name, req, res) {
   }
 }
 
-// Só agora — DEPOIS que toda função/const acima já foi declarada de verdade
-// (não só hoisted) — é seguro chamar `loadSessions()` (usa `sessions`, um
-// `const`) e abrir a porta. Fazer isso mais acima no arquivo, antes da
-// declaração de `sessions` executar, dispara `ReferenceError` (temporal dead
-// zone) — e como `loadSessions` engole erro em `catch{}`, o sintoma era só
-// "sessão nunca sobrevive a reiniciar o servidor", sem nenhuma mensagem.
-await loadSessions();
 server.listen(PORT, () => {
   console.log(`\n  yugi-game-v2 em http://localhost:${PORT}\n`);
 });

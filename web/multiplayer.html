@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duel Academy — Multiplayer</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  .wrap { width: min(920px, 94vw); margin: 0 auto; padding: 18px 0 60px; }
+
+  .topo { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+          border-bottom: 2px solid var(--line); padding-bottom: 14px; margin-bottom: 18px; }
+  .topo h1 { margin: 0; font-size: 24px; letter-spacing: 4px; color: var(--gold); }
+  .eu { margin-left: auto; font-size: 12px; color: var(--dim); }
+  .eu b { color: var(--gold); font-size: 14px; letter-spacing: 1px; }
+  .eu button { margin-left: 6px; padding: 3px 8px; font-size: 10px; }
+
+  .grade { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .grade { grid-template-columns: 1fr; } }
+
+  .painel { background: var(--panel); border: 2px solid var(--line); padding: 16px; }
+  .painel h2 { margin: 0 0 4px; font-size: 13px; letter-spacing: 2px; color: var(--gold); }
+  .painel .sub { font-size: 10px; color: var(--dim); margin-bottom: 12px; line-height: 1.5; }
+
+  .linha { display: flex; gap: 6px; margin-bottom: 10px; }
+  .linha input { flex: 1; min-width: 0; }
+
+  .lista { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+  .item { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+          background: var(--panel2); border: 1px solid var(--line); }
+  .item .nome { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .item .tag { color: var(--gold); font-size: 11px; }
+  .item button { padding: 4px 9px; font-size: 10px; white-space: nowrap; }
+  .item .aguardando { font-size: 10px; color: var(--dim); }
+
+  .vazio { font-size: 11px; color: var(--dim); padding: 10px 2px; }
+
+  .codigo { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+  .codigo code { flex: 1; background: var(--panel2); border: 1px solid var(--line);
+                 padding: 9px 10px; font-size: 15px; letter-spacing: 3px; color: var(--gold);
+                 overflow-x: auto; }
+
+  /* Desafio recebido: precisa saltar aos olhos sem virar pop-up que rouba clique. */
+  .desafios { margin-bottom: 16px; }
+  .desafio { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+             border: 2px solid var(--gold); background: var(--panel);
+             margin-bottom: 8px; animation: pulsa 1.4s ease-in-out infinite; }
+  .desafio .txt { flex: 1; font-size: 12px; }
+  .desafio .txt b { color: var(--gold); }
+  @keyframes pulsa { 0%, 100% { box-shadow: 0 0 0 0 #d9a03855; } 50% { box-shadow: 0 0 0 6px #d9a03800; } }
+  @media (prefers-reduced-motion: reduce) { .desafio { animation: none; } }
+
+  .aviso { font-size: 11px; margin-top: 10px; min-height: 15px; }
+  .aviso.erro { color: var(--red); }
+  .aviso.ok { color: var(--green, #7ac74f); }
+
+  .rodape { margin-top: 18px; display: flex; gap: 8px; }
+  .secundario { background: var(--panel2); color: var(--dim); }
+
+  .nota { font-size: 10px; color: var(--dim); line-height: 1.6; margin-top: 14px;
+          border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topo">
+    <h1>MULTIPLAYER</h1>
+    <div class="eu">
+      voce e' <b id="eu-rotulo">…</b>
+      <button id="btn-copiar-tag" class="secundario" title="copiar sua etiqueta">copiar</button>
+    </div>
+  </div>
+
+  <!-- Desafios recebidos. Fica no topo porque é a única coisa aqui com prazo. -->
+  <div class="desafios" id="desafios"></div>
+
+  <div class="linha" style="margin-bottom:18px">
+    <label for="deck" style="font-size:11px;color:var(--dim);align-self:center">seu deck:</label>
+    <select id="deck" style="flex:1"></select>
+  </div>
+
+  <div class="grade">
+
+    <div class="painel">
+      <h2>AMIGOS</h2>
+      <p class="sub">
+        Procure pelo numero da etiqueta (ex.: <b>22502</b>) ou pelo comeco do nome.
+        Depois de aceito, e' um clique para chamar para duelar.
+      </p>
+
+      <div class="linha">
+        <input id="busca" type="text" placeholder="etiqueta ou nome" autocomplete="off" maxlength="32">
+        <button id="btn-buscar">buscar</button>
+      </div>
+      <div class="lista" id="resultados"></div>
+
+      <div class="lista" id="amigos" style="margin-top:12px"></div>
+      <div class="aviso" id="aviso-amigos"></div>
+    </div>
+
+    <div class="painel">
+      <h2>SALA POR CONVITE</h2>
+      <p class="sub">
+        Para quem nao esta na sua lista: crie a sala, mande o codigo, ele entra.
+        O codigo vale para UMA pessoa e queima no primeiro que usar.
+      </p>
+
+      <button id="btn-criar" style="width:100%">criar sala</button>
+      <div class="codigo" id="bloco-codigo" hidden>
+        <code id="codigo">—</code>
+        <button id="btn-copiar-codigo" class="secundario">copiar</button>
+      </div>
+
+      <div class="linha" style="margin-top:16px">
+        <input id="convite" type="text" placeholder="codigo do convite" autocomplete="off" maxlength="16">
+        <button id="btn-entrar">entrar</button>
+      </div>
+
+      <div class="aviso" id="aviso-sala"></div>
+
+      <div id="bloco-partida" hidden>
+        <div class="aviso ok" id="estado-partida"></div>
+        <button id="btn-abandonar" class="secundario" style="width:100%">cancelar a sala</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="rodape">
+    <button id="btn-voltar" class="secundario">voltar</button>
+  </div>
+
+  <p class="nota">
+    O duelo entre duas pessoas roda na maquina de quem convidou, e por isso
+    partidas daqui <b>nao pagam DP nem contam para ranking</b> — quem hospeda
+    executa o motor e teria como ver o que nao deve. E' uma escolha consciente
+    para o modo entre amigos custar zero. Duelo contra os NPCs continua valendo
+    normalmente.
+  </p>
+</div>
+
+<script type="module" src="/web/js/multiplayertela.js"></script>
+</body>
+</html>

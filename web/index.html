@@ -118,6 +118,11 @@
       <span>Adversário</span>
       <span class="why">escolha um NPC e duele · vitória = +100 DP e a carta dele</span>
     </button>
+    <button id="btn-mp">
+      <span class="k">5</span>
+      <span>Multiplayer</span>
+      <span class="why">duele com uma pessoa · amigos, convite e desafio de 1 clique</span>
+    </button>
   </div>
 
   <footer id="foot">carregando…</footer>
@@ -215,6 +220,7 @@ $('btn-shop').onclick = () => (location.href = '/web/loja.html');
 $('btn-deck').onclick = () => (location.href = '/web/deck.html?owned=1');
 $('btn-inv').onclick = () => (location.href = '/web/inventario.html');
 $('btn-adv').onclick = () => (location.href = '/web/adversario.html');
+$('btn-mp').onclick = () => (location.href = '/web/multiplayer.html');
 $('btn-test').onclick = () => (location.href = '/web/teste.html');
 
 document.addEventListener('keydown', (e) => {
@@ -222,6 +228,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '2') $('btn-deck').click();
   if (e.key === '3') $('btn-inv').click();
   if (e.key === '4') $('btn-adv').click();
+  if (e.key === '5') $('btn-mp').click();
 });
 
 try {

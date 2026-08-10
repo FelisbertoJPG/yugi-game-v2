@@ -41,6 +41,11 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-remote") >= 0)
                 return TestUpdate.RunRemote();
 
+            // Projecao por espectador (duelo entre dois humanos). Nao toca no
+            // ocgcore: monta eventos a mao e confere o que cada lado recebe.
+            if (Array.IndexOf(args, "--test-visao") >= 0)
+                return TestVisao.Run();
+
             // O contrario do --test-remote: a rede FORA do ar. Fonte inexistente,
             // manifesto corrompido, asset que some no meio — nada disso pode
             // travar o boot nem instalar meia atualizacao.

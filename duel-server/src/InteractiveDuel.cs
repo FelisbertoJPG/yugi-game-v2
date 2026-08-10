@@ -50,11 +50,20 @@ namespace DuelServer
         const byte LOCATION_HAND = 0x2;
         const byte LOCATION_SZONE = 0x8;
 
-        /// <summary>A carta está OCULTA para você? Virada (pos &amp; 0xa = face-down)
-        /// e do oponente (ctrl != HUMAN). O front nunca deve receber o código dela —
-        /// senão dá para espiar o que o adversário setou. Confia no core: é ele que
-        /// diz a posição. (O código real fica só no `_board`, para a IA enxergar.)</summary>
-        static bool Oculta(int pos, int ctrl) => (pos & 0xa) != 0 && ctrl != HUMAN;
+        /// <summary>
+        /// A carta está OCULTA para <paramref name="espectador"/>? Virada
+        /// (pos &amp; 0xa = face-down) e de OUTRO jogador. O front nunca deve receber
+        /// o código dela — senão dá para espiar o que o adversário setou. Confia no
+        /// core: é ele que diz a posição. (O código real fica só no `_board`, para
+        /// a IA enxergar.)
+        ///
+        /// O parâmetro `espectador` existe porque num duelo entre DOIS HUMANOS a
+        /// mesma jogada tem duas leituras: o que está virado para um está aberto
+        /// para o outro. Antes isto era `ctrl != HUMAN`, com `HUMAN` fixo em 0 —
+        /// o que só funciona enquanto o jogador 1 for um robô que não recebe tela.
+        /// </summary>
+        static bool Oculta(int pos, int ctrl, int espectador) =>
+            (pos & 0xa) != 0 && ctrl != espectador;
         const int POS_FACEUP = 0x1 | 0x4;   // ataque OU defesa com a face para cima
 
         readonly NpcBrain _npc;
@@ -158,9 +167,107 @@ namespace DuelServer
 
         public sealed class Result
         {
+            /// <summary>
+            /// Eventos com a informação COMPLETA — inclusive o código de carta que
+            /// está virada. Isto NUNCA vai para a rede como está.
+            ///
+            /// `JsonIgnore` é a trava: quem serializar um `Result` direto manda um
+            /// objeto sem `events` e percebe na hora. Sem ela, esquecer de projetar
+            /// num caminho novo entregaria ao jogador o código do que o adversário
+            /// baixou — e ninguém veria erro nenhum, só alguém "adivinhando" o
+            /// Mirror Force antes de atacar.
+            /// </summary>
+            [System.Text.Json.Serialization.JsonIgnore]
             public List<object> events = new();
+
             public Question question;            // null se acabou
             public bool ended;
+
+            /// <summary>
+            /// A resposta pronta para UM jogador: os mesmos eventos, com o que ele
+            /// não pode ver apagado. Chame uma vez por espectador.
+            /// </summary>
+            public object Para(byte espectador) => new
+            {
+                // `Where(!= null)`: alguns eventos não são "apagados", são
+                // SUPRIMIDOS — o `stats` de um monstro virado não existe para quem
+                // não é o dono dele.
+                events = events.Select(e => Projetar(e, espectador))
+                               .Where(e => e != null).ToList(),
+                question,
+                ended,
+            };
+
+            /// <summary>
+            /// Apaga de UM evento o que <paramref name="espectador"/> não pode ver.
+            ///
+            /// Quatro tipos carregam segredo:
+            ///   `move` / `pos` — carta virada no campo de outro jogador;
+            ///   `draw`         — a compra é sempre do dono, ninguém mais vê o quê;
+            ///   `stats`        — ATK/DEF de um monstro VIRADO diz o que ele é, então
+            ///                    o evento inteiro é suprimido para quem não é o dono.
+            /// O resto passa intacto: LP, fase, corrente e batalha são públicos, e
+            /// é assim que o duelo é jogado na mesa também.
+            ///
+            /// Devolver `null` = o evento não existe para este espectador.
+            /// </summary>
+            static object Projetar(object ev, byte espectador)
+            {
+                var t = ev.GetType();
+                string tipo = t.GetProperty("type")?.GetValue(ev) as string;
+
+                if (tipo == "stats")
+                {
+                    // Sem `pos` no evento (o `stats` do MSG_EQUIP), a carta é
+                    // necessariamente aberta — equipamento não mira carta virada.
+                    var pProp = t.GetProperty("pos");
+                    if (pProp != null)
+                    {
+                        int p = Convert.ToInt32(pProp.GetValue(ev) ?? 0);
+                        int c = Convert.ToInt32(t.GetProperty("controller")?.GetValue(ev) ?? 0);
+                        if (Oculta(p, c, espectador)) return null;
+                    }
+                    return ev;
+                }
+
+                if (tipo == "move" || tipo == "pos")
+                {
+                    int pos = Convert.ToInt32(t.GetProperty("pos")?.GetValue(ev) ?? 0);
+                    int ctrl = Convert.ToInt32(t.GetProperty("controller")?.GetValue(ev) ?? 0);
+                    if (!Oculta(pos, ctrl, espectador)) return ev;
+
+                    var d = Campos(ev, t);
+                    d["code"] = 0u;
+                    d["hidden"] = true;
+                    return d;
+                }
+
+                if (tipo == "draw")
+                {
+                    int dono = Convert.ToInt32(t.GetProperty("player")?.GetValue(ev) ?? 0);
+                    if (dono == espectador) return ev;
+
+                    // Compra do adversário: ele comprou N cartas, e é só o que se vê.
+                    var d = Campos(ev, t);
+                    if (d.TryGetValue("cards", out var cs) && cs is System.Collections.IEnumerable lista)
+                    {
+                        var anon = new List<object>();
+                        foreach (var _ in lista) anon.Add(new { code = 0u, hidden = true });
+                        d["cards"] = anon;
+                    }
+                    return d;
+                }
+
+                return ev;
+            }
+
+            /// <summary>Objeto anônimo → dicionário, para poder reescrever um campo.</summary>
+            static Dictionary<string, object> Campos(object ev, Type t)
+            {
+                var d = new Dictionary<string, object>();
+                foreach (var p in t.GetProperties()) d[p.Name] = p.GetValue(ev);
+                return d;
+            }
         }
 
         /// <param name="npcLeitura">
@@ -749,19 +856,24 @@ namespace DuelServer
                     uint code = BitConverter.ToUInt32(d, p) & 0x7FFFFFFF; p += 4;
                     byte pc = d[p++], pl = d[p++]; int ps = BitConverter.ToInt32(d, p); p += 4; int ppo = BitConverter.ToInt32(d, p); p += 4;
                     byte cc = d[p++], cl = d[p++]; int cs = BitConverter.ToInt32(d, p); p += 4; int cpo = BitConverter.ToInt32(d, p); p += 4;
-                    // Carta que ASSENTA virada no campo do oponente sai sem código.
-                    bool ocultaMv = Oculta(cpo, cc);
-                    ev.Add(new { type = "move", code = ocultaMv ? 0u : code, hidden = ocultaMv, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
+                    // O código REAL viaja aqui dentro. Quem apaga a carta virada é
+                    // `Result.Projetar`, na SAÍDA, uma vez por espectador — porque
+                    // com dois humanos a mesma jogada tem duas leituras.
+                    ev.Add(new { type = "move", code, hidden = false, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
 
                     // Monstro chegando na zona já com bônus de campo em vigor (Forest
                     // etc. injetada pelo editor de tabuleiro, ou qualquer contínua já
                     // ativa) — o mesmo evento `stats` do MSG_EQUIP, só que disparado
                     // aqui em vez de esperar um equipamento. `duel.html` já sabe
                     // desenhar isso (destaca ATK e DEF, igual ao equip); sem isto o
-                    // bônus só aparecia consultando manualmente, nunca na tela. Não
-                    // emite para monstro virado (`ocultaMv`) — revelar o ATK/DEF ali
-                    // entregaria informação que o jogo não mostra.
-                    if (cl == LOCATION_MZONE && cc <= 1 && !ocultaMv)
+                    // bônus só aparecia consultando manualmente, nunca na tela.
+                    //
+                    // Monstro VIRADO também emite — mas com o `pos` junto, para a
+                    // projeção poder descartar o evento de quem não é o dono.
+                    // Revelar o ATK/DEF de uma carta setada entrega o que o jogo não
+                    // mostra; escondê-lo do PRÓPRIO dono seria igualmente errado, e
+                    // é por isso que a decisão não cabe mais aqui.
+                    if (cl == LOCATION_MZONE && cc <= 1)
                     {
                         var (mAtk, mBase) = QueryAtk(cc, cs);
                         var (mDef, mBaseDef) = QueryDef(cc, cs);
@@ -770,6 +882,7 @@ namespace DuelServer
                         if (atkMudou || defMudou)
                         {
                             ev.Add(new { type = "stats", controller = cc, loc = cl, seq = cs,
+                                         pos = cpo,
                                          atk = mAtk ?? 0, baseAtk = mBase ?? mAtk ?? 0,
                                          def = mDef ?? 0, baseDef = mBaseDef ?? mDef ?? 0 });
                         }
@@ -795,11 +908,10 @@ namespace DuelServer
                     uint code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF;
                     byte ctrl = d[o + 5], loc = d[o + 6], seq = d[o + 7];
                     byte anterior = d[o + 8], atual = d[o + 9];
-                    // Se PASSA a ficar virada no campo do oponente, some com o código.
-                    bool ocultaPos = Oculta(atual, ctrl);
+                    // Idem: código real aqui, `Projetar` decide na saída.
                     ev.Add(new
                     {
-                        type = "pos", code = ocultaPos ? 0u : code, hidden = ocultaPos,
+                        type = "pos", code, hidden = false,
                         controller = ctrl, loc, seq = (int)seq, pos = (int)atual, prevPos = (int)anterior,
                     });
                     if (loc == LOCATION_MZONE && _board.TryGetValue((ctrl, seq), out var antes))
@@ -1256,8 +1368,11 @@ namespace DuelServer
                     // Alvo de ataque virado do oponente: o SELECT_CARD não traz a
                     // posição, então consulto o _board (que o core mantém). Sem isto,
                     // o overlay de seleção mostrava a arte real da carta setada.
-                    bool oculta = cl == LOCATION_MZONE && cc != HUMAN
-                        && _board.TryGetValue((cc, cseq), out var bi) && Oculta(bi.pos, cc);
+                    // A pergunta JA' nasce enderecada (`q.player`), entao aqui nao ha'
+                    // projecao a fazer: basta ocultar do ponto de vista de quem esta'
+                    // sendo perguntado, seja ele o jogador 0 ou o 1.
+                    bool oculta = cl == LOCATION_MZONE && cc != q.player
+                        && _board.TryGetValue((cc, cseq), out var bi) && Oculta(bi.pos, cc, q.player);
                     q.choices.Add(new Sel
                     {
                         code = oculta ? 0u : rawCode,

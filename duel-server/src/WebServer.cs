@@ -19,6 +19,13 @@ namespace DuelServer
     {
         static readonly JsonSerializerOptions Json = new() { IncludeFields = true };
         static readonly object _lock = new();
+        /// <summary>
+        /// Quem esta' na frente DESTA maquina. Hoje e' sempre o jogador 0 — o
+        /// oponente e' o NPC, que nao recebe tela. No duelo entre dois humanos e'
+        /// isto que passa a variar por conexao.
+        /// </summary>
+        const byte HUMANO_LOCAL = 0;
+
         static InteractiveDuel _duel;
         static bool _duelEncerrado = true;
         static string _sa;
@@ -178,7 +185,9 @@ namespace DuelServer
                                             npcLeitura: leitura);
                 var r = _duel.Advance();
                 _duelEncerrado = r.ended;
-                return r;
+                // `Para(0)` = a visao do jogador 0. E' obrigatorio projetar: o
+                // Result cru guarda o codigo das cartas viradas de TODO MUNDO.
+                return r.Para(HUMANO_LOCAL);
             }
         }
 
@@ -238,7 +247,7 @@ namespace DuelServer
                 if (_duel == null) return new { error = "nenhum duelo ativo — dê /start" };
                 var r = _duel.Respond(action ?? "endturn", arg, args);
                 _duelEncerrado = r.ended;
-                return r;
+                return r.Para(HUMANO_LOCAL);
             }
         }
 

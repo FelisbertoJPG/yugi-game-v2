@@ -864,11 +864,13 @@ async function act(action, arg, label, args) {
   render(); renderSelection(); renderChain(); renderYesno();
   try {
     if (ehMultiplayer()) {
-      // A ponte devolve `null` para o convidado: a resposta dele não volta por
-      // aqui, chega pelo laço quando o anfitrião publicar. `busy` continua
-      // ligado até lá, que é o certo — a jogada está em trânsito.
-      const minha = await ponte.responder(action, arg, args);
-      if (minha) await apply(minha);
+      // A ponte NÃO devolve a visão: os dois lados recebem pelo callback que o
+      // boot registrou, e é ele quem chama `apply`. Aplicar o retorno aqui
+      // também faria cada evento entrar duas vezes.
+      //
+      // `busy` fica ligado até a visão chegar — que é o certo: a jogada está em
+      // trânsito, e clicar de novo mandaria a mesma coisa outra vez.
+      await ponte.responder(action, arg, args);
     } else {
       await apply(await rpc('/respond', args ? { action, arg, args } : { action, arg }));
     }

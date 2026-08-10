@@ -14,6 +14,7 @@ cd duel-server && dotnet run -- --serve   # motor de duelo em http://localhost:8
 node web/js/deck.test.mjs    # 33 testes das regras de construção de deck
 node web/js/banlist.test.mjs # 24 testes da banlist (Ponto/Banlist/Lista compartilhada)
 node web/js/automontagem.test.mjs  # 18 testes da Auto montagem (curva, ritual, fusão)
+node web/js/ponte.test.mjs   # 13 testes da perspectiva do multiplayer (virar a mesa)
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run data:build           # regenera ygo-data/data a partir do cards.cdb (precisa de Python 3)
 

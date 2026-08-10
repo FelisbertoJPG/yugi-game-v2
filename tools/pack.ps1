@@ -144,11 +144,29 @@ try {
     $zip, (Join-Path $conteudo 'payload.markers'), 'payload.markers',
     [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
 
-  foreach ($arq in $arquivosSemente) {
-    $rel = 'seed/' + $arq.FullName.Substring($semente.Length).TrimStart('\').Replace('\', '/')
-    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-      $zip, $arq.FullName, $rel, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+  # O caminho relativo sai do PROPRIO shell, nao de aritmetica de string.
+  #
+  # BUG QUE ISTO CONSERTA: antes era
+  # `$arq.FullName.Substring($semente.Length)`. O `$stage` nasce de `$env:TEMP`,
+  # que no Windows pode vir em nome CURTO 8.3 (`C:\Users\SUPORT~2\...`), enquanto
+  # o `Get-ChildItem` devolve o nome LONGO (`C:\Users\suporteti2\...`). Os dois
+  # apontam para a mesma pasta e tem TAMANHOS DIFERENTES — aqui, 2 caracteres —,
+  # entao o Substring cortava no lugar errado e as entradas viravam
+  # `seed/ed/store/...`. O resultado no jogador: `store/*.json` e
+  # `decks/npc/*.ydk` extraidos numa pasta `ed/` que ninguem le, ou seja, tela de
+  # Adversario sem deck nenhum. Nada acusava: o zip era valido e o exe abria.
+  Push-Location $semente
+  try {
+    foreach ($arq in $arquivosSemente) {
+      $rel = 'seed/' + ((Resolve-Path -Relative $arq.FullName) -replace '^\.\\', '' -replace '\\', '/')
+      if ($rel -notmatch '^seed/(store|decks|package\.json)') {
+        Falhar "entrada de semente com caminho inesperado: $rel"
+      }
+      [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+        $zip, $arq.FullName, $rel, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
   }
+  finally { Pop-Location }
 }
 finally { $zip.Dispose(); $fs.Dispose() }
 

@@ -165,15 +165,10 @@ function pintarDesafios(lista) {
   }
 }
 
-/**
- * A sala está formada. O duelo em si (a ponte entre as duas máquinas) é o
- * próximo passo do projeto — até lá, a tela diz onde parou em vez de fingir.
- */
+/** A sala fechou: os dois entram no mesmo duelo. */
 function entrarNoDuelo(partida) {
-  avisar('aviso-sala',
-         `sala pronta (${String(partida).slice(0, 8)}). A ponte entre as duas maquinas ` +
-         'e o proximo passo — o duelo ainda nao abre sozinho.', 'ok');
-  pintarPartida();
+  if (!partida) { avisar('aviso-sala', 'sala sem id — nao consegui abrir o duelo'); return; }
+  location.href = `/web/duel.html?partida=${encodeURIComponent(partida)}`;
 }
 
 // ---------------------------------------------------------------- a partida
@@ -190,13 +185,15 @@ async function pintarPartida() {
     return;
   }
 
+  // A sala fechou enquanto eu esperava: o outro entrou/aceitou. Vou junto — sem
+  // isto o anfitriao ficaria olhando "esperando" com o duelo ja' de pe'.
+  if (p.estado === 'em_andamento') { entrarNoDuelo(p.id); return; }
+
   bloco.hidden = false;
   $('btn-criar').disabled = true;
   $('estado-partida').textContent =
-    p.estado === 'em_andamento'
-      ? 'sala formada — os dois jogadores entraram'
-      : p.convidado ? 'desafio enviado, esperando o outro aceitar'
-                    : 'sala aberta, esperando alguem entrar com o codigo';
+    p.convidado ? 'desafio enviado, esperando o outro aceitar'
+                : 'sala aberta, esperando alguem entrar com o codigo';
 
   if (p.convite) {
     cod.hidden = false;
@@ -288,6 +285,10 @@ async function boot() {
 
   // Um amigo pode te chamar a qualquer momento enquanto esta tela está aberta.
   mp.vigiarDesafios(pintarDesafios);
+
+  // E a minha própria sala pode fechar a qualquer momento — quando o convidado
+  // aceitar, `pintarPartida` leva os dois para o duelo.
+  setInterval(pintarPartida, 3000);
 }
 
 boot();

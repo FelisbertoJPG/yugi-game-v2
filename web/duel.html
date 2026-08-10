@@ -464,7 +464,8 @@ import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/boards.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
-import { requireLogin } from '/web/js/auth.js';
+import { requireLogin, contaAtual } from '/web/js/auth.js';
+import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -483,6 +484,14 @@ let advSignature = null;
 let advReward = WIN_REWARD; // DP que este deck do NPC dá ao ser vencido
 let rewardGiven = false;   // trava LOCAL; a de verdade é o `premiado_em` no banco
 let dueloId = null;        // id do duelo registrado no servidor; sem ele, sem premio
+
+// MULTIPLAYER: duel.html?partida=<uuid>. O adversário é gente, o deck de cada um
+// veio congelado da sala, e quem hospeda roda o motor para os dois. Sem este
+// parâmetro absolutamente nada muda — é o modo NPC de sempre.
+const partidaId = new URLSearchParams(location.search).get('partida');
+let sala = null;           // dados da partida (quem sou eu, quem hospeda, os ydk)
+let ponte = null;          // canal com a outra máquina
+const ehMultiplayer = () => !!ponte;
 
 const SRV = 'http://localhost:8770';
 const $ = (id) => document.getElementById(id);
@@ -740,6 +749,8 @@ function chosenDeck() {
 }
 
 async function start() {
+  if (ehMultiplayer()) return startMultiplayer();
+
   busy = false; $('fx').replaceChildren();   // aborta qualquer animação em curso
   const deck = chosenDeck();
   const ids = deck ? deck.main : [];
@@ -789,6 +800,59 @@ async function start() {
   } catch (e) { conn(false); warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).'); }
 }
 
+/**
+ * Duelo entre duas pessoas. Diferenças do modo NPC:
+ *
+ *  - o deck NÃO vem do seletor: vem congelado da sala, para ninguém trocar de
+ *    baralho depois do pareamento;
+ *  - só o ANFITRIÃO chama `/start`. O convidado não tem motor nenhum — ele
+ *    espera a primeira visão chegar pela ponte;
+ *  - não há prêmio. Quem hospeda roda o motor e enxerga tudo, então partida de
+ *    ponte não paga DP (é o que `partidas.modo = 'ponte'` registra).
+ */
+async function startMultiplayer() {
+  busy = false; $('fx').replaceChildren();
+
+  const meu = idsDoYdk(sala.meuYdk);
+  const dele = idsDoYdk(sala.ydkAdversario);
+
+  // O jogador 0 do motor é sempre o `jogador_a` da sala, então quem monta o
+  // `/start` manda o deck do A como `deck` e o do B como `npcDeck`.
+  const deckA = sala.meuJogador === 0 ? meu : dele;
+  const deckB = sala.meuJogador === 0 ? dele : meu;
+
+  hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
+  lp = { 0: 8000, 1: 8000 };
+  ended = false; turnNo = 0; selectedHand = null;
+  rewardGiven = true;          // trava o prêmio de vez neste modo
+  dueloId = null;
+  dragging = null; pendingZone = null; fecharPopupPosicao(); fecharFimDuelo();
+  $('log').replaceChildren();
+
+  deckName = 'multiplayer';
+  deckCount = { 0: deckA.main.length, 1: deckB.main.length };
+  extraCount = { 0: deckA.extra.length, 1: deckB.extra.length };
+  extraPicker = null;
+
+  if (!ponte.souAnfitriao) {
+    conn(true);
+    log('● duelo online — esperando o anfitrião abrir a mesa…', true);
+    return;   // a primeira visão chega pela ponte
+  }
+
+  try {
+    const corpo = { deck: deckA.main, npcDeck: deckB.main, seed: Number(sala.seed) || undefined };
+    if (deckA.extra.length) corpo.extra = deckA.extra;
+    if (deckB.extra.length) corpo.npcExtra = deckB.extra;
+    await ponte.iniciarComoAnfitriao(corpo);
+    conn(true);
+    log('● duelo online — você é o anfitrião (o motor roda nesta máquina)', true);
+  } catch (e) {
+    conn(false);
+    warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).');
+  }
+}
+
 async function act(action, arg, label, args) {
   if (ended || busy) return;   // busy = animação rolando; ignora cliques até assentar
   // A pergunta antiga não pode sobreviver enquanto a resposta está a caminho:
@@ -798,7 +862,17 @@ async function act(action, arg, label, args) {
   busy = true;
   question = null;
   render(); renderSelection(); renderChain(); renderYesno();
-  try { await apply(await rpc('/respond', args ? { action, arg, args } : { action, arg })); }
+  try {
+    if (ehMultiplayer()) {
+      // A ponte devolve `null` para o convidado: a resposta dele não volta por
+      // aqui, chega pelo laço quando o anfitrião publicar. `busy` continua
+      // ligado até lá, que é o certo — a jogada está em trânsito.
+      const minha = await ponte.responder(action, arg, args);
+      if (minha) await apply(minha);
+    } else {
+      await apply(await rpc('/respond', args ? { action, arg, args } : { action, arg }));
+    }
+  }
   catch (e) {
     question = perguntaRespondida;
     busy = false;
@@ -2200,6 +2274,36 @@ if (advNpc) {
 
 await loadActiveBoard();   // antes do 1º render, senão pisca do padrão pro customizado
 populateDecks();
+
+// MULTIPLAYER: abre a ponte ANTES do primeiro start(). Sem isto o convidado
+// tentaria falar com um duel-server que ele nem tem.
+if (partidaId) {
+  const eu = await contaAtual();
+  sala = eu ? await carregarPartida(partidaId, eu.id) : null;
+
+  if (!sala) {
+    warn('nao achei essa partida — ela pode ter sido cancelada.');
+  } else if (sala.estado !== 'em_andamento') {
+    warn('a partida ainda nao comecou (o outro jogador nao entrou).');
+  } else {
+    const h1 = document.querySelector('.topbar h1');
+    if (h1) h1.textContent = `▚ MULTIPLAYER — ${sala.souAnfitriao ? 'anfitrião' : 'convidado'}`;
+
+    // O seletor de deck sai de cena: o baralho foi congelado na sala, e trocar
+    // no meio seria trocar de deck depois de ver a mão do outro.
+    const selBox = $('deck-sel')?.closest('label') ?? $('deck-sel');
+    if (selBox) selBox.hidden = true;
+
+    ponte = abrirPonte(sala, (visao) => {
+      // Toda visão que chega da ponte entra pelo MESMO `apply` do modo NPC —
+      // eventos são eventos, venham do motor ao lado ou do outro estado.
+      busy = false;
+      apply(visao);
+    });
+    window.addEventListener('beforeunload', () => ponte?.fechar());
+  }
+}
+
 start();
 </script>
 </body>

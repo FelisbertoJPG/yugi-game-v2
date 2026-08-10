@@ -206,6 +206,11 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-update-duelo") >= 0)
                 return TestUpdateDuelo.Run(streamingAssets);
 
+            // Modo multiplayer: os dois lados decidem, ninguem joga pelo outro — e
+            // o duelo contra o NPC continua exatamente como era.
+            if (Array.IndexOf(args, "--test-multiplayer") >= 0)
+                return TestMultiplayer.Run(streamingAssets);
+
             // Teste de aceitacao das invocacoes especiais.
             if (Array.IndexOf(args, "--test-summons") >= 0)
                 return TestSummons.Run(streamingAssets);

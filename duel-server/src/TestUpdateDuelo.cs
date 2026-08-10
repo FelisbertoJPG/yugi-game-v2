@@ -88,9 +88,9 @@ namespace DuelServer
             Checa(WebServer.LiberarDueloEncerrado(),
                   "sem duelo nenhum: aplicar a atualizacao e' liberado");
 
-            var r = (InteractiveDuel.Result)WebServer.StartDuel(Corpo(
+            var r = WebServer.StartDuel(Corpo(
                 "{\"deck\":[" + Repetido(BATTLE_OX, 40) + "],\"npc\":false,\"seed\":424242}"));
-            Checa(!r.ended, "o duelo de teste comecou");
+            Checa(!Terminou(r), "o duelo de teste comecou");
 
             Checa(WebServer.DueloEmAndamento, "com duelo vivo: ha' duelo em andamento");
             Checa(!WebServer.LiberarDueloEncerrado(),
@@ -102,12 +102,12 @@ namespace DuelServer
             // duelo de verdade: ninguém ataca, ninguém invoca, o motor encerra
             // sozinho quando alguém não tem o que comprar.
             int voltas = 0;
-            while (!r.ended && voltas++ < 400)
-                r = (InteractiveDuel.Result)WebServer.RespondDuel(Corpo("{\"action\":\"endturn\"}"));
+            while (!Terminou(r) && voltas++ < 400)
+                r = WebServer.RespondDuel(Corpo("{\"action\":\"endturn\"}"));
 
-            Checa(r.ended, $"o duelo terminou (deck-out) em {voltas} jogadas",
+            Checa(Terminou(r), $"o duelo terminou (deck-out) em {voltas} jogadas",
                   "o duelo nao acabou dentro do teto — o resto do caso nao pode ser avaliado");
-            if (!r.ended) return;
+            if (!Terminou(r)) return;
 
             Checa(!WebServer.DueloEmAndamento, "duelo encerrado: nao conta mais como em andamento");
             Checa(WebServer.LiberarDueloEncerrado(),
@@ -143,6 +143,15 @@ namespace DuelServer
         }
 
         static JsonElement Corpo(string json) => JsonDocument.Parse(json).RootElement;
+
+        /// <summary>
+        /// O duelo acabou? As rotas devolvem a resposta JA' PROJETADA para um
+        /// jogador (`Result.Para`), que e' um objeto anonimo — nao da' para receber
+        /// como `Result`. E' de proposito: quem serializar o Result cru vaza o
+        /// codigo das cartas viradas, entao o tipo forca a projecao.
+        /// </summary>
+        static bool Terminou(object resposta) =>
+            Convert.ToBoolean(resposta?.GetType().GetProperty("ended")?.GetValue(resposta) ?? false);
 
         static string Repetido(uint code, int quantas) =>
             string.Join(",", System.Linq.Enumerable.Repeat(code.ToString(), quantas));

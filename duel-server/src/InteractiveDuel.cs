@@ -14,7 +14,12 @@ namespace DuelServer
     public sealed class InteractiveDuel : IDisposable
     {
         const int END = 0, AWAITING = 1, CONTINUE = 2;
-        const byte HUMAN = 0; // só o player 0 joga; o 1 (oponente) passa automático
+        /// <summary>
+        /// O jogador que está nesta máquina no modo de sempre (contra o NPC). No
+        /// MULTIPLAYER os dois são humanos e esta constante deixa de mandar — use
+        /// <see cref="EhHumano"/>, nunca compare com ela direto.
+        /// </summary>
+        const byte HUMAN = 0;
 
         /// <summary>Liga o despejo hexadecimal das mensagens ainda em investigação.</summary>
         public static bool DebugSelect = false;
@@ -68,6 +73,25 @@ namespace DuelServer
 
         readonly NpcBrain _npc;
         readonly bool _npcEnabled;
+
+        /// <summary>
+        /// MULTIPLAYER: os dois lados são gente, e ninguém joga por ninguém.
+        ///
+        /// É o único interruptor do modo. O adversário NPC continua existindo
+        /// exatamente como antes — multiplayer é uma opção À PARTE, e lá dentro é
+        /// só humano contra humano. Sem este campo ligado, nada muda.
+        /// </summary>
+        readonly bool _doisHumanos;
+
+        /// <summary>
+        /// Este jogador tem alguém de carne e osso decidindo por ele?
+        ///
+        /// Se NÃO, o motor responde no lugar dele (NpcBrain, ou auto-passe quando a
+        /// IA está desligada). Se SIM, a pergunta sobe para a tela e o motor espera.
+        /// Toda a diferença entre "duelo contra o NPC" e "duelo entre dois humanos"
+        /// mora aqui — nunca num `if` espalhado pelas regras.
+        /// </summary>
+        bool EhHumano(int player) => _doisHumanos || player == HUMAN;
         List<object> _events;   // para o NPC registrar o que fez
         uint? _pendingFieldSpellEvent; // Bônus de Campo injetado antes do 1º Advance()
 
@@ -194,7 +218,13 @@ namespace DuelServer
                 // não é o dono dele.
                 events = events.Select(e => Projetar(e, espectador))
                                .Where(e => e != null).ToList(),
-                question,
+
+                // A pergunta é de UM jogador. Mandá-la para o outro entregaria a
+                // jogada que ele está montando (os alvos oferecidos dizem muito) e
+                // ainda deixaria os dois com botão para clicar na mesma decisão.
+                // Quem não é o perguntado recebe `null` e simplesmente espera.
+                question = question != null && question.player == espectador ? question : null,
+
                 ended,
             };
 
@@ -278,16 +308,23 @@ namespace DuelServer
         /// do `NpcBrain` simplesmente não têm o que avaliar e não disparam. Os
         /// dois sabem jogar igual; só um deles sabe o que você tem.
         /// </param>
+        /// <param name="doisHumanos">
+        /// MULTIPLAYER. Liga o modo em que ninguém joga por ninguém: as perguntas
+        /// dos DOIS jogadores sobem para quem chamou, e o duelo espera. Desliga o
+        /// NPC junto — no multiplayer é humano contra humano, e um robô decidindo
+        /// pelo jogador 1 no meio seria pior que não ter modo nenhum.
+        /// </param>
         public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed,
                                ulong flags = 0, bool npc = true, uint[] npcDeck = null,
                                uint[] extra = null, uint[] npcExtra = null, uint? fieldSpell = null,
-                               bool npcLeitura = false)
+                               bool npcLeitura = false, bool doisHumanos = false)
         {
             // Sem `npcDeck` o oponente joga com o SEU deck; o Extra segue a mesma
             // regra, senão ele duelaria com o seu main e o extra de outro deck.
             _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags,
                                  extra, npcDeck != null ? npcExtra : (npcExtra ?? extra), fieldSpell);
-            _npcEnabled = npc;
+            _doisHumanos = doisHumanos;
+            _npcEnabled = npc && !doisHumanos;
             _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
                                 npcLeitura ? HandOf : HandHonesta,
                                 StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf, LpOf,
@@ -490,11 +527,14 @@ namespace DuelServer
                 if (q.kind == "chain")
                 {
                     if (q.choices.Count == 0) { _s.Respond(I32(-1)); continue; }
-                    if (q.player != HUMAN) { _s.Respond(NpcChain(q)); continue; }
+                    if (!EhHumano(q.player)) { _s.Respond(NpcChain(q)); continue; }
                     r.question = q; return r;
                 }
 
-                if (q.player != HUMAN) { AutoPass(q); continue; }          // oponente desligado
+                // Sem gente do outro lado, o motor joga por ele (NPC ou auto-passe).
+                // Com gente, a pergunta sobe e o duelo ESPERA — inclusive quando é a
+                // vez do jogador 1, que antes nunca chegava até aqui.
+                if (!EhHumano(q.player)) { AutoPass(q); continue; }
 
                 // Alvos de carta são sempre uma decisão visível do jogador. Mesmo
                 // com um único alvo legal (ex.: uma Equip Spell e um monstro), o
@@ -536,12 +576,12 @@ namespace DuelServer
                 // com a face para cima — não é Set, é escolha de posição. Antes
                 // respondíamos 0x1 aqui e o ritual sempre caía em ataque, sem a
                 // pergunta jamais chegar à tela.
-                if (q.kind == "position" && q.player == HUMAN) { r.question = q; return r; }
-                // pergunta do player 0 que não sei responder: devolve pro front avisar
-                // (em vez de travar). O usuário começa um novo duelo.
+                if (q.kind == "position" && EhHumano(q.player)) { r.question = q; return r; }
+                // pergunta que não sei responder: devolve pro front avisar (em vez de
+                // travar). O usuário começa um novo duelo.
                 if (q.kind == "unsupported") { r.question = q; return r; }
 
-                r.question = q;   // idle / place / battle do player 0 -> devolve pro front
+                r.question = q;   // idle / place / battle de um humano -> devolve pro front
                 return r;
             }
             // Estourar o guard significa laço fechado: o motor pede algo que
@@ -672,8 +712,26 @@ namespace DuelServer
         };
 
         /// <summary>Aplica a jogada do player e avança de novo.</summary>
-        public Result Respond(string action, int arg, IReadOnlyList<int> args = null)
+        /// <param name="porJogador">
+        /// Quem está mandando a jogada. `null` = não confere (é o modo de sempre,
+        /// em que só existe um humano e a pergunta é sempre dele).
+        ///
+        /// No multiplayer isto NÃO é opcional: sem conferir, o jogador 1 responde a
+        /// pergunta do jogador 0 e joga o turno do adversário. Não é nem preciso má
+        /// intenção — duas telas abertas e um clique atrasado bastam.
+        /// </param>
+        public Result Respond(string action, int arg, IReadOnlyList<int> args = null,
+                              byte? porJogador = null)
         {
+            if (porJogador.HasValue && _pending != null && _pending.player != porJogador.Value)
+            {
+                Log.Err($"[respond] jogador {porJogador} tentou responder a pergunta " +
+                        $"do jogador {_pending.player} — recusado");
+                var naoEhSuaVez = new Result { question = _pending };
+                naoEhSuaVez.events.Add(new { type = "refused", action, reason = "nao e' sua vez" });
+                return naoEhSuaVez;
+            }
+
             string esperada = _pending?.kind;
             if (esperada != null && AcoesValidas.TryGetValue(esperada, out var ok)
                 && Array.IndexOf(ok, action) < 0)
@@ -712,7 +770,10 @@ namespace DuelServer
             "activate" => I32((arg << 16) | 5),       // idle, comando 5 = Ativar
             "battle" => I32(6),                       // idle, ir pra Battle Phase
             "endturn" => I32(7),                      // idle, End Phase
-            "place" => new byte[] { HUMAN, _placeLoc, (byte)arg }, // zona escolhida
+            // Zona escolhida. O 1o byte e' DE QUEM e' a zona — no multiplayer isso
+            // deixa de ser sempre 0, senao o jogador 1 colocaria a carta no campo do
+            // adversario (e o core aceitaria, porque foi o que pedimos).
+            "place" => new byte[] { (byte)(_pending?.player ?? HUMAN), _placeLoc, (byte)arg },
             // ⚠ No battlecmd a lista de ATIVÁVEIS vem antes da de atacantes, então
             // ativar é o comando 0 e atacar é o 1 — o contrário do que parece.
             "battleactivate" => I32(arg << 16),       // battlecmd, comando 0 = ativar

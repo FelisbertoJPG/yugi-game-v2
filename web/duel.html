@@ -354,6 +354,9 @@
   <select id="deck-sel" title="deck do treino" style="max-width:160px; font-size:11px"></select>
   <button id="btn-end">encerrar turno</button>
   <button id="btn-start">novo duelo</button>
+  <!-- Só no multiplayer: contra o NPC "novo duelo" já resolve. -->
+  <button id="btn-desistir" class="btn-danger" hidden
+          title="encerra o duelo — seu adversário vence">desistir</button>
   <button id="btn-home">← home</button>
 </div>
 
@@ -466,6 +469,7 @@ import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/
 import { listProjectBoards } from '/web/js/projectboards.js';
 import { requireLogin, contaAtual } from '/web/js/auth.js';
 import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
+import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -1445,6 +1449,22 @@ async function handle(ev) {
       const empate = w === 2 || w < 0;
       const venci = w === 0;
       log(`=== ${empate ? 'duelo encerrado' : venci ? 'você venceu!' : 'oponente venceu'} ===`, true);
+
+      // MULTIPLAYER: fecha a partida no servidor. Sem isto ela ficava em
+      // 'em_andamento' para sempre — e como toda porta de entrada recusa quem
+      // já está numa partida, os dois jogadores ficavam trancados. Era o laço
+      // de "clico em multiplayer e volto pro duelo".
+      //
+      // Os dois lados chamam, e tudo bem: `encerrar_partida` é idempotente e
+      // não reescreve o vencedor já gravado.
+      if (ehMultiplayer() && sala) {
+        const vencedor = empate ? null
+          : venci ? (sala.meuJogador === 0 ? sala.jogador_a : sala.jogador_b)
+                  : (sala.meuJogador === 0 ? sala.jogador_b : sala.jogador_a);
+        try { await encerrarPartida(sala.id, vencedor); }
+        catch (e) { console.warn('[ponte] nao consegui encerrar a partida:', e.message); }
+      }
+
       const premio = await concederRecompensa(venci);
       mostrarFimDuelo(venci, empate, premio);
       break;
@@ -2244,6 +2264,28 @@ function fecharFimDuelo() { $('end-overlay').hidden = true; }
 
 $('btn-start').onclick = start;
 $('btn-end').onclick = () => act('endturn', 0, 'encerrar turno');
+
+/**
+ * Desistir. É a única saída honesta de um duelo online que emperrou — o outro
+ * fechou o navegador, a máquina caiu, a rede sumiu. Sem isto a partida ficava
+ * em 'em_andamento' e trancava os DOIS jogadores, porque criar sala ou entrar
+ * na fila recusa quem já está numa partida.
+ */
+$('btn-desistir').onclick = async () => {
+  if (!ehMultiplayer() || !sala) return;
+  if (!confirm('Desistir do duelo?\n\nSeu adversário vence.')) return;
+  $('btn-desistir').disabled = true;
+  try {
+    await encerrarPartida(sala.id);          // sem vencedor = o outro ganha
+    ended = true;
+    ponte?.fechar();
+    log('=== você desistiu do duelo ===', true);
+    location.href = '/web/multiplayer.html';
+  } catch (e) {
+    warn(`não consegui desistir: ${e.message}`);
+    $('btn-desistir').disabled = false;
+  }
+};
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 $('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
 $('end-home').onclick = () => (location.href = '/web/index.html');
@@ -2290,6 +2332,11 @@ if (partidaId) {
   } else {
     const h1 = document.querySelector('.topbar h1');
     if (h1) h1.textContent = `▚ MULTIPLAYER — ${sala.souAnfitriao ? 'anfitrião' : 'convidado'}`;
+
+    // "novo duelo" não faz sentido aqui (o deck vem congelado da sala e o outro
+    // jogador não seria consultado); "desistir" faz.
+    $('btn-desistir').hidden = false;
+    $('btn-start').hidden = true;
 
     // O seletor de deck sai de cena: o baralho foi congelado na sala, e trocar
     // no meio seria trocar de deck depois de ver a mão do outro.

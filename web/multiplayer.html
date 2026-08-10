@@ -121,8 +121,18 @@
 
       <div id="bloco-partida" hidden>
         <div class="aviso ok" id="estado-partida"></div>
+        <button id="btn-voltar-duelo" hidden style="width:100%; margin-bottom:6px">voltar para o duelo</button>
         <button id="btn-abandonar" class="secundario" style="width:100%">cancelar a sala</button>
       </div>
+
+      <!-- Escape para quem ficou preso: toda porta de entrada recusa quem já
+           está numa partida, então uma que travou (o outro fechou o navegador)
+           trancava o jogador sem saída. -->
+      <button id="btn-destravar" class="secundario"
+              style="width:100%; margin-top:10px; font-size:10px"
+              title="encerra qualquer duelo em aberto e te tira da fila">
+        estou preso — encerrar tudo e recomeçar
+      </button>
     </div>
 
   </div>

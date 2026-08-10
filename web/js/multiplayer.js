@@ -83,6 +83,23 @@ export async function minhaPartida() {
 
 export const abandonar = (partida) => rpc('abandonar_partida', { p_partida: partida });
 
+/**
+ * Encerra a partida. Sem `vencedor` = eu desisti, e o outro ganha.
+ * Funciona com o duelo EM ANDAMENTO — o `abandonar_partida` só cobre a sala que
+ * ainda não formou.
+ */
+export const encerrar = (partida, vencedor = null) =>
+  rpc('encerrar_partida', { p_partida: partida, p_vencedor: vencedor });
+
+/**
+ * A válvula de escape: encerra tudo que eu tenho em aberto e me tira da fila.
+ *
+ * Existe porque toda porta de entrada (fila, sala, desafio) recusa quem já está
+ * numa partida. Uma que travou — o outro fechou o navegador, a máquina caiu —
+ * trancava o jogador para sempre, sem nenhuma forma de sair.
+ */
+export const sairDeTudo = () => rpc('sair_de_tudo');
+
 // ------------------------------------------------------------------ avisos
 
 /**

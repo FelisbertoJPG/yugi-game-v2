@@ -11,6 +11,15 @@ import * as mp from '/web/js/multiplayer.js';
 const $ = (id) => document.getElementById(id);
 const texto = (s) => document.createTextNode(String(s ?? ''));
 
+/**
+ * Eu estou esperando alguém entrar na MINHA sala?
+ *
+ * Só nesse caso a tela entra no duelo sozinha quando a sala fecha. Chegando com
+ * uma partida já em andamento, redirecionar viraria o laço que travou o
+ * primeiro teste.
+ */
+let aguardavaSala = false;
+
 /** Nunca monte HTML com nome de jogador por concatenação — nome vem de fora. */
 function el(tag, cls, conteudo) {
   const n = document.createElement(tag);
@@ -185,12 +194,29 @@ async function pintarPartida() {
     return;
   }
 
-  // A sala fechou enquanto eu esperava: o outro entrou/aceitou. Vou junto — sem
-  // isto o anfitriao ficaria olhando "esperando" com o duelo ja' de pe'.
-  if (p.estado === 'em_andamento') { entrarNoDuelo(p.id); return; }
-
   bloco.hidden = false;
   $('btn-criar').disabled = true;
+
+  if (p.estado === 'em_andamento') {
+    // Aqui NÃO se redireciona sozinho, e o motivo é um laço que travou o
+    // primeiro teste: a partida não saía de 'em_andamento', a tela via isso e
+    // mandava de volta para o duelo — abrir o Multiplayer virava um vaivém sem
+    // fim, sem nenhuma forma de escapar.
+    //
+    // Só há auto-redirecionamento quando a sala fecha DIANTE DOS OLHOS de quem
+    // está esperando (`aguardavaSala` abaixo). Chegando com uma partida já em
+    // andamento, o jogador escolhe: voltar para ela ou desistir.
+    if (aguardavaSala) { aguardavaSala = false; entrarNoDuelo(p.id); return; }
+
+    $('estado-partida').textContent = 'você tem um duelo em andamento';
+    $('btn-voltar-duelo').hidden = false;
+    $('btn-abandonar').textContent = 'desistir do duelo';
+    return;
+  }
+
+  aguardavaSala = true;   // estou esperando: quando fechar, entro sozinho
+  $('btn-voltar-duelo').hidden = true;
+  $('btn-abandonar').textContent = 'cancelar a sala';
   $('estado-partida').textContent =
     p.convidado ? 'desafio enviado, esperando o outro aceitar'
                 : 'sala aberta, esperando alguem entrar com o codigo';
@@ -270,11 +296,37 @@ async function boot() {
     entrarNoDuelo(r.dados?.partida);
   });
 
+  $('btn-voltar-duelo').addEventListener('click', async () => {
+    const p = await mp.minhaPartida();
+    if (p) entrarNoDuelo(p.id);
+  });
+
   $('btn-abandonar').addEventListener('click', async () => {
     const p = await mp.minhaPartida();
     if (!p) return;
-    await mp.abandonar(p.id);
-    avisar('aviso-sala', 'sala cancelada');
+
+    // Sala que ainda não formou é só cancelar. Duelo em andamento é DESISTIR —
+    // o outro ganha, e por isso pergunta antes.
+    if (p.estado === 'em_andamento') {
+      if (!confirm('Desistir do duelo? Seu adversário vence.')) return;
+      const r = await mp.encerrar(p.id);
+      avisar('aviso-sala', r.ok ? 'você desistiu do duelo' : r.erro, r.ok ? 'ok' : 'erro');
+    } else {
+      await mp.abandonar(p.id);
+      avisar('aviso-sala', 'sala cancelada');
+    }
+    aguardavaSala = false;
+    await pintarPartida();
+  });
+
+  $('btn-destravar').addEventListener('click', async () => {
+    if (!confirm('Encerrar TUDO que você tem em aberto?\n\n'
+               + 'Use se um duelo travou e você não consegue começar outro.')) return;
+    const r = await mp.sairDeTudo();
+    avisar('aviso-sala',
+           r.ok ? `pronto — ${r.dados?.encerradas ?? 0} partida(s) encerrada(s)` : r.erro,
+           r.ok ? 'ok' : 'erro');
+    aguardavaSala = false;
     await pintarPartida();
   });
 

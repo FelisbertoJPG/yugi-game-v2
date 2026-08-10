@@ -19,6 +19,7 @@ import {
   getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks, hydrateCustomNpcs,
 } from '/web/js/npcs.js';
 import { inLista1 } from '/web/js/lista1.js';
+import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
@@ -706,6 +707,81 @@ $('btn-new').onclick = () => {
   refreshDeckSelect();
   refresh();
 };
+
+/**
+ * ⚡ AUTO MONTAGEM.
+ *
+ * Monta um deck de 40 com o que o jogador tem. A lógica mora em
+ * `automontagem.js` (sem DOM, testada em Node); aqui só se junta o POOL — que é
+ * o único lugar que sabe quantas cópias cada carta vale, se a Lista 1 está
+ * ligada e o que a banlist limita.
+ *
+ * O texto das cartas (`cards.json`, ~14 MB) é carregado SÓ AQUI, no clique. Sem
+ * ele não há como saber qual magia invoca qual Ritual nem quais são os materiais
+ * de uma Fusão — e sem isso o botão entregaria cartas mortas. Pagar 14 MB uma
+ * vez, quando o jogador pediu, é melhor que carregar sempre "por via das
+ * dúvidas".
+ */
+$('btn-auto').onclick = async () => {
+  if (!confirmDiscard()) return;
+
+  const antes = $('btn-auto').textContent;
+  $('btn-auto').disabled = true;
+  $('btn-auto').textContent = 'montando…';
+  try {
+    const textos = await carregarTextos();
+
+    // O pool respeita TUDO que a tela já respeita: Lista 1 marcada, o teto da
+    // banlist e as cópias que a Coleção realmente tem.
+    const usarLista1 = $('f-lista1').checked;
+    const pool = [];
+    // `db.filter({})` é a porta pública para o índice inteiro — e já descarta
+    // arte alternativa, que contaria como cópia da mesma carta.
+    for (const c of db.filter({})) {
+      if (usarLista1 && !inLista1(c)) continue;
+      if (ownedMode && !ownsCard(c.id)) continue;
+      let copias = availableCopies(c.id);
+      if (usarLista1 && banlist) {
+        const lim = banlist.cardLimits[String(c.id)];
+        if (Number.isFinite(lim)) copias = Math.min(copias, lim);
+      }
+      if (copias > 0) pool.push({ card: c, copias });
+    }
+
+    const { main, extra, relatorio } = montarAuto(pool, { descOf: (id) => textos.get(Number(id)) ?? '' });
+    if (!main.length) return void toast('sua Coleção ainda não dá para montar um deck');
+
+    deck = new Deck({ name: deck.name || 'Auto', main, extra, coverId: main[0] ?? null });
+    markDirty();
+    refresh();
+
+    // O relatório vai para o console porque é longo e detalhado: quem quer saber
+    // POR QUE tal carta entrou abre o F12; quem só queria o deck já o tem.
+    console.groupCollapsed(`⚡ auto montagem — ${main.length} no main, ${extra.length} no extra`);
+    for (const l of relatorio) console.log(l);
+    console.groupEnd();
+
+    const problemas = relatorio.filter((l) => l.startsWith('✗') || l.startsWith('⚠'));
+    toast(problemas.length
+      ? `deck montado — ${problemas.length} ressalva(s), veja o console (F12)`
+      : `deck montado: ${main.length} cartas`);
+  } catch (e) {
+    toast(`não consegui montar: ${e.message}`);
+  } finally {
+    $('btn-auto').disabled = false;
+    $('btn-auto').textContent = antes;
+  }
+};
+
+/** `id -> desc`, carregado uma vez e guardado. */
+let textosCache = null;
+async function carregarTextos() {
+  if (textosCache) return textosCache;
+  const r = await fetch('/ygo-data/data/cards.json');
+  if (!r.ok) throw new Error('não achei o texto das cartas');
+  textosCache = new Map((await r.json()).map((c) => [Number(c.id), c.desc ?? '']));
+  return textosCache;
+}
 
 $('btn-delete').onclick = () => {
   if (deckIndex === null) return;

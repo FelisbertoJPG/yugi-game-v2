@@ -14,7 +14,11 @@
  * boosters.js. Gravar antes de ler é como um estado vazio sobrescreve dados bons.
  */
 
-import { cabecalhoAuth, req } from '/web/js/supabase.js';
+// RELATIVO, e isto não é estilo: `banlist.js` importa este arquivo, e
+// `banlist.test.mjs` roda em Node — que não resolve `/web/js/...` (vira
+// `C:\web\js\...`). No browser os dois caminhos dão na mesma URL; em Node só
+// este funciona. Trocar por absoluto quebra `node web/js/banlist.test.mjs`.
+import { cabecalhoAuth, req } from './supabase.js';
 
 /**
  * Lê `store/<name>.json` distinguindo os dois "vazios":

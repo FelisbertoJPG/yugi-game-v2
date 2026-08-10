@@ -423,7 +423,9 @@ function definirMoldura(id) {
   const deck = listDecks()[moldurando];
   if (!deck) return;
   deck.coverId = id ? Number(id) : null;
-  saveDeck(deck, moldurando);
+  // A moldura é só visual, mas o deck INTEIRO é reenviado ao servidor — se ele
+  // já estava inválido, a recusa aparece aqui. Melhor dizer do que fingir.
+  saveDeck(deck, moldurando, (erro) => toast(`moldura trocada só aqui — ${erro}`));
   $('cover-back').classList.remove('show');
   renderDecks();
   toast(id ? `moldura: ${nameOf(id)}` : 'moldura: a primeira carta do Main');

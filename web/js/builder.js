@@ -357,7 +357,11 @@ function enterNpcModeUI() {
     if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
     const n = (npcDeckIndex ?? 0) + 1;
     const name = `${npcMode.id} ${n}`;
-    saveDeck(new Deck({ name, main: deck.main, extra: deck.extra }), null);
+    // Copiar o deck de um NPC costuma trazer cartas que você NÃO possui — é o
+    // caso mais provável de o servidor recusar, e o mais confuso se calar.
+    saveDeck(new Deck({ name, main: deck.main, extra: deck.extra }), null, (erro) =>
+      alert(`"${name}" ficou salvo só neste navegador.\n\n${erro}\n\n`
+          + 'Decks de NPC costumam ter cartas que você ainda não abriu.'));
     toast(`salvo nos seus decks como "${name}"`);
   };
 }
@@ -691,7 +695,15 @@ $('btn-save').onclick = () => {
   const st = deckStatus();   // fora do modo NPC, ignoreBanlist é sempre false
   if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
   deck.name = $('deck-name').value.trim() || 'Novo Deck';
-  deckIndex = saveDeck(deck, deckIndex);
+  // O 3º argumento é o que faz a recusa do servidor CHEGAR ao jogador. Sem ele,
+  // "deck salvo" aparecia mesmo quando o banco tinha recusado — e o deck existia
+  // só neste navegador, sumindo na hora de entrar num duelo online.
+  deckIndex = saveDeck(deck, deckIndex, (erro) => {
+    markDirty();                       // não salvou de verdade: o `*` volta
+    alert(`O deck ficou salvo só neste navegador.\n\n${erro}\n\n`
+        + 'Ajuste o deck e salve de novo — assim ele vale em qualquer máquina '
+        + 'e nos duelos online.');
+  });
   setActiveIndex(deckIndex);
   markDirty(false);
   refreshDeckSelect();

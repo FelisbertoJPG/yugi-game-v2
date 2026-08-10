@@ -54,7 +54,20 @@ export function listDecks() {
   });
 }
 
-export function saveDeck(deck, index = null) {
+/**
+ * Grava o deck: `localStorage` na hora, servidor logo atrás.
+ *
+ * @param {(erro: string) => void} [aoFalharNoServidor] chamado se o SERVIDOR
+ *   recusar. Não é opcional por preguiça — é opcional porque o `localStorage`
+ *   realmente gravou, e quem chama decide se isso basta.
+ *
+ *   Passe SEMPRE, no fluxo do jogador. Sem isto o deck fica só neste navegador:
+ *   a tela diz "deck salvo", o jogador vai ao Multiplayer e lê "nenhum deck
+ *   salvo" — foi exatamente o que aconteceu com o primeiro tester, e o erro do
+ *   banco ("cartas que voce nao possui: …") morria aqui dentro sem nunca chegar
+ *   a ninguém.
+ */
+export function saveDeck(deck, index = null, aoFalharNoServidor = null) {
   const decks = read(KEY_DECKS, []);
   const i = (index === null || index < 0 || index >= decks.length) ? decks.length : index;
   // Renomear NÃO troca o arquivo: o `path` de quem já está no projeto é
@@ -63,7 +76,7 @@ export function saveDeck(deck, index = null) {
   const path = decks[i]?.path ?? null;
   decks[i] = { ...deck.toJSON(), path };
   write(KEY_DECKS, decks);
-  pushDeckToProject(i, deck, path);   // fire-and-forget, igual ao wallet/boosters
+  pushDeckToProject(i, deck, path, aoFalharNoServidor);
   return i;
 }
 
@@ -88,10 +101,14 @@ function caminhoLivre(nome, ocupados) {
 }
 
 /**
- * Espelha um deck em `decks/player/`. Silencioso de propósito: sem servidor de
- * desenvolvimento no ar não há o que fazer, e o `localStorage` já guardou.
+ * Espelha um deck no servidor (o seu vai para o banco, via `salvar_deck`).
+ *
+ * A falha de REDE continua silenciosa — sem servidor no ar não há o que fazer, e
+ * o `localStorage` já guardou. A falha de REGRA, não: "cartas que você não
+ * possui" é uma decisão do jogo, e o jogador precisa saber para poder corrigir
+ * o deck. Eram as duas tratadas como uma só, e a segunda sumia junto.
  */
-async function pushDeckToProject(index, deck, path) {
+async function pushDeckToProject(index, deck, path, aoFalhar = null) {
   if (!(await canWrite())) return;
   let alvo = path;
   if (!alvo) {
@@ -100,7 +117,11 @@ async function pushDeckToProject(index, deck, path) {
     alvo = caminhoLivre(deck.name, ocupados);
   }
   const r = await saveProjectDeck(alvo, deck, { updated: new Date().toISOString() });
-  if (!r.ok) return;
+  if (!r.ok) {
+    console.warn('[deck] o servidor recusou:', r.error);
+    aoFalhar?.(r.error || 'o servidor recusou o deck');
+    return;
+  }
   const decks = read(KEY_DECKS, []);
   if (decks[index]) { decks[index].path = r.path; write(KEY_DECKS, decks); }
 }

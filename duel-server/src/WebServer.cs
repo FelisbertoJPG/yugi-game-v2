@@ -28,6 +28,7 @@ namespace DuelServer
 
         static InteractiveDuel _duel;
         static bool _duelEncerrado = true;
+        static bool _multiplayer;
         static string _sa;
         static string _webRoot;
         static volatile bool _shutdown;
@@ -175,21 +176,49 @@ namespace DuelServer
                 : "";
             bool leitura = nivel.Equals("avancado", StringComparison.OrdinalIgnoreCase);
 
+            // MULTIPLAYER: os dois lados sao gente. O `npcDeck` passa a ser o deck
+            // do OUTRO JOGADOR (congelado pela sala no Supabase), e nenhum NPC
+            // decide nada. Sem este campo, tudo continua como sempre foi.
+            bool multi = body.TryGetProperty("multiplayer", out var mp)
+                         && mp.ValueKind == JsonValueKind.True;
+
             Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
                      $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")} " +
-                     $"nivel={(leitura ? "avancado" : "iniciante")}");
+                     $"nivel={(leitura ? "avancado" : "iniciante")} multiplayer={multi}");
             lock (_lock)
             {
                 _duel?.Dispose();
                 _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
-                                            npcLeitura: leitura);
+                                            npcLeitura: leitura, doisHumanos: multi);
+                _multiplayer = multi;
                 var r = _duel.Advance();
                 _duelEncerrado = r.ended;
-                // `Para(0)` = a visao do jogador 0. E' obrigatorio projetar: o
-                // Result cru guarda o codigo das cartas viradas de TODO MUNDO.
-                return r.Para(HUMANO_LOCAL);
+                return Entregar(r);
             }
         }
+
+        /// <summary>
+        /// A resposta pronta para quem chamou.
+        ///
+        /// Contra o NPC: a visao do jogador 0, e so'. E' obrigatorio projetar — o
+        /// `Result` cru guarda o codigo das cartas viradas de TODO MUNDO.
+        ///
+        /// No MULTIPLAYER devolve as DUAS visoes, porque quem chama e' o navegador
+        /// do anfitriao, que faz dois papeis: desenha a propria tela e repassa ao
+        /// convidado a visao dele. Sem as duas na mesma resposta, o anfitriao teria
+        /// de perguntar de novo — e as duas respostas poderiam descrever estados
+        /// diferentes do duelo.
+        ///
+        /// Isso significa que o navegador do anfitriao recebe a visao do convidado,
+        /// e portanto a mao dele. E' a fraqueza CONHECIDA e ACEITA do modo ponte —
+        /// quem hospeda roda o motor e enxerga tudo de qualquer jeito. E' por isso
+        /// que a partida de ponte nao paga DP nem conta ranking (migration 0010).
+        /// </summary>
+        static object Entregar(InteractiveDuel.Result r) =>
+            _multiplayer
+                ? new { multiplayer = true, visoes = new Dictionary<string, object>
+                        { ["0"] = r.Para(0), ["1"] = r.Para(1) } }
+                : r.Para(HUMANO_LOCAL);
 
         /// <summary>
         /// Ha' um duelo EM ANDAMENTO neste momento? (Um duelo que ja' acabou nao
@@ -240,14 +269,24 @@ namespace DuelServer
                     if (e.ValueKind == JsonValueKind.Number) args.Add(e.GetInt32());
             }
 
+            // DE QUEM e' a jogada. So' o multiplayer manda: contra o NPC existe um
+            // humano so' e a pergunta e' sempre dele. Sem isto, no multiplayer um
+            // jogador responderia a pergunta do outro — a trava existe no motor
+            // (`InteractiveDuel.Respond`), mas ela precisa saber quem esta' falando.
+            byte? porJogador = body.TryGetProperty("jogador", out var pj)
+                               && pj.ValueKind == JsonValueKind.Number
+                ? (byte)pj.GetInt32()
+                : (byte?)null;
+
             Log.Info($"[rpc] /respond {action ?? "endturn"} arg={arg}"
-                     + (args != null ? $" args=[{string.Join(",", args)}]" : ""));
+                     + (args != null ? $" args=[{string.Join(",", args)}]" : "")
+                     + (porJogador.HasValue ? $" jogador={porJogador}" : ""));
             lock (_lock)
             {
                 if (_duel == null) return new { error = "nenhum duelo ativo — dê /start" };
-                var r = _duel.Respond(action ?? "endturn", arg, args);
+                var r = _duel.Respond(action ?? "endturn", arg, args, porJogador);
                 _duelEncerrado = r.ended;
-                return r.Para(HUMANO_LOCAL);
+                return Entregar(r);
             }
         }
 

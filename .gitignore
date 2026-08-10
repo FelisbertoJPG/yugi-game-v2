@@ -33,8 +33,16 @@ decks/users/
 .claude/
 node_modules/
 
-# Handoff local — instrucoes de retomada, nao vao para o GitHub
+# Handoff local — instrucoes de retomada, nao vao para o GitHub.
+#
+# Sao bilhetes de passagem entre maquinas: citam e-mail de admin, procedimento de
+# publicacao e o estado do que ficou pela metade. O que vira documento permanente
+# mora em INSTALADOR.md, INSTALADOR-PENDENCIAS.md e supabase/README.md.
+#
+# ATENCAO ao nomear: `DUEL-TRAINING-HANDOFF.md` E' documento do projeto e E'
+# versionado. Nao generalize isto para `*HANDOFF*`.
 continue.md
+OQ-FALTOU.md
 
 # Unity — o duel_academy/.gitignore ja cobre a subpasta, isto e' rede de seguranca.
 # NAO adicione *.csproj / *.sln aqui: o repositorio tem projetos .NET de verdade
@@ -106,6 +114,31 @@ supabase/.env
 supabase/.env.*
 supabase/.temp/
 .supabase/
+
+# REDE DE SEGURANCA GERAL PARA SEGREDO.
+#
+# As linhas acima nomeiam os segredos que ja' sabemos que existem. Estas pegam os
+# que ainda nao existem — e o motivo de existirem e' que ESTE REPOSITORIO E'
+# PUBLICO (github.com/FelisbertoJPG/yugi-game-v2). Aqui nao ha' "commitei sem
+# querer e depois removo": o que subiu foi indexado, clonado e fica no historico.
+# Rotacionar a chave e' o unico conserto de verdade.
+#
+# `.env` sem barra pega em QUALQUER pasta, nao so' na raiz.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Backups do projeto largados dentro do proprio projeto. O fluxo de trabalho aqui
+# e' zipar a pasta inteira e levar para a outra maquina (v9.zip, v11.zip, ...);
+# um desses caindo na raiz e sendo commitado sao ~60 MB de conteudo duplicado no
+# historico, que nao sai mais. So' a RAIZ — `duel-server/payload.zip` ja' tem
+# regra propria e nada mais no projeto depende de .zip versionado.
+/*.zip
+/*.7z
+/*.rar
 
 # libocgcore.so: compilado da fonte do ygopro-core para o servidor de duelo
 # rodar em Linux. E' artefato de build (2,3 MB) e se refaz com o Dockerfile da

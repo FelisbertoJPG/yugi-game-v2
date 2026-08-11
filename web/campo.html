@@ -438,7 +438,12 @@ async function persist() {
   saving = false;
   if (r.ok) {
     currentPath = r.path;
-    setStatus('✓ salvo', '--green');
+    // O status diz ONDE ficou. "Salvo" sozinho escondia a diferença que
+    // importa: salvo no disco só vale nesta máquina; publicado chega em quem
+    // joga sem Release nenhum (exige sessão de admin).
+    if (r.semDisco) setStatus('✓ publicado (sem disco local)', '--green');
+    else if (r.publicado) setStatus('✓ salvo e publicado', '--green');
+    else setStatus(`✓ salvo no disco — não publicado (${r.erroRemoto ?? 'sem sessão'})`, '--gold');
     await refreshBoardList();
   } else if (r.downloaded) {
     setStatus('⚠ sem servidor — baixado como arquivo', '--gold');

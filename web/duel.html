@@ -671,9 +671,13 @@ function positionHandRows() {
 
 /** Carrega o tabuleiro ativo (se houver) ANTES do primeiro render, pra não
  *  nascer no layout padrão e só depois "pular" pro customizado. Sem servidor
- *  de desenvolvimento no ar, `listProjectBoards()` já devolve lista vazia —
- *  cai pro layout padrão em silêncio, mesmo padrão de `canWrite()` em
- *  `projectdecks.js`. */
+ *  de desenvolvimento no ar, `listProjectBoards()` cai no banco (`tabuleiros`)
+ *  e, faltando os dois, devolve lista vazia — o layout padrão em silêncio,
+ *  mesmo padrão de `canWrite()` em `projectdecks.js`.
+ *
+ *  Antes de 11/08/2026 essa "queda silenciosa" era o caso NORMAL no `.exe`:
+ *  a pasta `boards/` não viajava no pacote e nada lia o banco, então todo
+ *  adversário duelava no layout genérico, sem Bônus de Campo. */
 async function loadActiveBoard() {
   // Adversário com tabuleiro próprio manda mais que o ponteiro global — cada
   // NPC pode ter seu campo específico (estilo "campo de Floresta do Weevil").

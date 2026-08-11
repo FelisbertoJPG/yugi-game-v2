@@ -61,6 +61,17 @@
   .zone-empty { font-size: 10px; color: var(--dim); padding: 6px 0; }
   .spacer { flex: 1; }
 
+  /* Arrastar — mesmas cores do Booster Builder: dourado aceita, vermelho recusa
+     (raridade travada por um booster publicado). */
+  .dropzone { min-height: 60px; transition: background .12s, outline-color .12s; }
+  .dropzone.over {
+    background: #e8c46a12;
+    outline: 2px dashed var(--gold); outline-offset: -3px;
+  }
+  .dropzone.reject.over { outline-color: var(--red); background: #e2707a12; }
+  .carta.dragging { opacity: .35; }
+  .carta[draggable="true"] { cursor: grab; }
+
   /* Mesmo bloco de filtros do Booster Builder (web/booster.html) — quem monta
      um booster monta um estrutural, e um pool de 1158 cartas sem filtro só se
      navega sabendo o nome de cor. */
@@ -168,9 +179,11 @@
     <div class="sec-head">
       POOL · <span class="n" id="conta-pool">—</span> cartas da Lista 1
       <span class="spacer"></span>
-      <span style="font-size:10px">clique = adicionar · segurar = ver o efeito</span>
+      <span style="font-size:10px">clique/arraste = adicionar · segurar = ver o efeito</span>
     </div>
-    <div class="lista"><div class="grade" id="grade-pool"></div></div>
+    <!-- O pool inteiro também recebe solta: arrastar uma carta do deck para cá
+         é como se tira ela do deck. -->
+    <div class="lista dropzone" id="pool-zone"><div class="grade" id="grade-pool"></div></div>
   </div>
 </div>
 
@@ -268,18 +281,30 @@ function pintarDeck() {
     head.onclick = () => { raridadeAtiva = r; pintarDeck(); pintarPool(); };
     bloco.append(head);
 
+    // A zona de solta envolve a grade E a mensagem de vazio — arrastar para uma
+    // raridade que ainda não tem carta nenhuma é justamente o caso comum, e um
+    // alvo que só existe quando já há carta seria inútil.
+    const zona = document.createElement('div');
+    zona.className = 'dropzone';
+
     if (!ids.length) {
       const vazio = document.createElement('div');
       vazio.className = 'zone-empty';
-      vazio.textContent = `Nenhuma carta em ${r}.`;
-      bloco.append(vazio);
+      vazio.textContent = `Nenhuma carta em ${r}. Arraste uma para cá.`;
+      zona.append(vazio);
     } else {
       const grade = document.createElement('div');
       grade.className = 'grade';
       for (const id of ids) {
+        const travada = travadaPorBooster(id, boosters);
         const el = document.createElement('div');
         el.className = 'carta tem';
-        el.title = `${nomeDe(id)}\nclique = tirar uma cópia · segurar = detalhes`;
+        el.draggable = true;
+        el.title = `${nomeDe(id)}\nclique = tirar uma cópia · segurar = detalhes`
+          + (travada
+            ? `\nraridade travada em ${travada.rarity} por "${travada.booster}"`
+              + '\narraste para o pool para tirar do deck'
+            : '\narraste para outra raridade, ou para o pool (tirar do deck)');
         el.innerHTML = `<img src="${ART(id)}" alt="" draggable="false">`
                      + `<span class="q">${quantidades[id]}</span>`;
         // `segurou()` consome o gesto: sem consultar isto, soltar o botão
@@ -292,13 +317,113 @@ function pintarDeck() {
           pintarDeck(); pintarPool();
         };
         el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(id); };
+        armarArrasto(el, id, r);
         grade.append(el);
       }
-      bloco.append(grade);
+      zona.append(grade);
     }
+    bloco.append(zona);
+    armarSolta(zona, r);
     wrap.append(bloco);
   }
   $('zonas').replaceChildren(wrap);
+}
+
+// ---------------------------------------------------------------- arrastar
+// Mesmo desenho do Booster Builder: a origem guarda `{id, de}` num módulo e a
+// zona decide se aceita. O `dataTransfer` sozinho não basta — ele só carrega
+// texto, e a zona precisa saber DE ONDE a carta veio para não aceitar largar
+// na mesma raridade.
+
+let arrasto = null;
+
+function armarArrasto(el, id, de) {
+  el.addEventListener('dragstart', (e) => {
+    arrasto = { id: Number(id), de };
+    el.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(id));
+  });
+  el.addEventListener('dragend', () => {
+    el.classList.remove('dragging');
+    arrasto = null;
+    document.querySelectorAll('.dropzone.over, .dropzone.reject')
+      .forEach((z) => z.classList.remove('over', 'reject'));
+  });
+}
+
+/**
+ * Esta zona aceita o que está sendo arrastado? `zona` é 'pool' ou uma raridade.
+ *
+ * A trava de booster manda: a raridade é da CARTA, não do pacote. Arrastar uma
+ * carta travada para outra raridade é recusado aqui e não só ignorado no drop —
+ * o contorno vermelho diz que não vai dar antes de soltar.
+ */
+function aceita(zona) {
+  if (!arrasto) return false;
+  if (zona === 'pool') return arrasto.de !== 'pool';   // devolver = tirar do deck
+  // Vindo do pool a carta SEMPRE entra — se for travada ela cai na raridade
+  // travada, exatamente como no clique. Recusar aqui seria a única forma de
+  // uma carta ser adicionável por clique e não por arrasto.
+  if (arrasto.de === 'pool') return true;
+  if (arrasto.de === zona) return false;               // já está aqui
+  return !travadaPorBooster(arrasto.id, boosters);     // mover de raridade: só se livre
+}
+
+function armarSolta(el, zona) {
+  el.addEventListener('dragover', (e) => {
+    if (!arrasto) return;
+    e.preventDefault();
+    const ok = aceita(zona);
+    e.dataTransfer.dropEffect = ok ? 'move' : 'none';
+    el.classList.add('over');
+    el.classList.toggle('reject', !ok);
+  });
+  el.addEventListener('dragleave', (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove('over', 'reject');
+  });
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    el.classList.remove('over', 'reject');
+    if (!arrasto) return;
+
+    const { id, de } = arrasto;
+    const travada = travadaPorBooster(id, boosters);
+
+    if (!aceita(zona)) {
+      if (travada && zona !== 'pool' && de !== zona) {
+        msg(`${nomeDe(id)} é ${travada.rarity} em "${travada.booster}" — a raridade é da carta`, 'erro');
+      }
+      return;
+    }
+
+    if (zona === 'pool') {
+      // Tira a carta INTEIRA, não uma cópia: para tirar de uma em uma já existe
+      // o clique, e arrastar de volta pedindo 3 vezes seria trabalho à toa.
+      delete quantidades[id];
+      delete raridades[id];
+      msg(`${nomeDe(id)} saiu do deck`);
+    } else if (de === 'pool') {
+      if ((quantidades[id] ?? 0) >= 3) return void msg('máximo de 3 cópias', 'erro');
+      quantidades[id] = (quantidades[id] ?? 0) + 1;
+      // Reprint entra na raridade que a carta JÁ tem — mesma regra do clique e
+      // do Booster Builder. Soltar uma UR no bloco N não a rebaixa.
+      if (travada) {
+        raridades[id] = travada.rarity;
+        if (travada.rarity !== zona)
+          msg(`${nomeDe(id)} é ${travada.rarity} em "${travada.booster}" — entrou como ${travada.rarity}`);
+      } else {
+        raridades[id] = zona;
+      }
+    } else {
+      // Move a carta de raridade — todas as cópias juntas, porque a raridade é
+      // da carta e duas cópias da mesma carta em raridades diferentes não
+      // existem nem aqui nem no Booster Builder.
+      raridades[id] = zona;
+      msg(`${nomeDe(id)} agora é ${zona}`);
+    }
+    pintarDeck(); pintarPool();
+  });
 }
 
 // ---------------------------------------------------------------- filtros do pool
@@ -383,11 +508,16 @@ function pintarPool() {
 
     const el = document.createElement('div');
     el.className = 'carta' + (q ? ' tem' : '');
+    el.draggable = true;
     el.title = `${c.name}${q ? ` — ${q} no deck` : ''}`
              + (trava ? ` · ${trava.rarity} em "${trava.booster}"` : '')
-             + `\nclique = adicionar em ${trava ? trava.rarity : raridadeAtiva} · segurar = detalhes`;
+             + `\nclique = adicionar em ${trava ? trava.rarity : raridadeAtiva} · segurar = detalhes`
+             + (trava
+               ? `\narraste para qualquer bloco: entra como ${trava.rarity} de qualquer jeito`
+               : '\narraste para um bloco de raridade para entrar direto nele');
     el.innerHTML = `<img src="${ART(c.id)}" alt="" draggable="false">`
       + (q ? `<span class="r ${r}">${r}</span><span class="q">${q}</span>` : '');
+    armarArrasto(el, c.id, 'pool');
     const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(c.id));
     el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(c.id); };
     el.onclick = () => {
@@ -513,6 +643,7 @@ $('f-clear').onclick = () => {
 
 // ---------------------------------------------------------------- boot
 injectHoldStyles();   // o anel de progresso do "segurar"
+armarSolta($('pool-zone'), 'pool');   // arrastar do deck para cá tira a carta
 
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });

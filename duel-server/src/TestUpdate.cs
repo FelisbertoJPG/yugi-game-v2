@@ -45,6 +45,7 @@ namespace DuelServer
                 ZipSlipRejeitado(Sub(bancada, "4-zipslip"));
                 DadoDeContaIntocado(Sub(bancada, "5-conta"));
                 OrfaoVaiParaBackupNaoParaOLixo(Sub(bancada, "6-orfao"));
+                TabuleiroDoJogadorSobrevive(Sub(bancada, "6b-tabuleiro"));
                 ManifestoComBomParseia();
                 PacoteVolatilNaoArrastaOPesado(Sub(bancada, "7-volatilidade"));
                 RaizesSobrepostasNaoSeApagam(Sub(bancada, "8-sobreposicao"));
@@ -199,6 +200,43 @@ namespace DuelServer
             Checa(File.ReadAllText(deck).Contains("joao"), "decks/users/joao/player/meu.ydk intacto");
             Checa(File.Exists(Path.Combine(raiz, "store", "banlist.json")),
                   "mas o conteudo GLOBAL (store/banlist.json) foi atualizado");
+        }
+
+        /// <summary>
+        /// O tabuleiro que o JOGADOR criou no editor sobrevive à atualização.
+        ///
+        /// `boards/` entrou nas `roots` do pacote 'game' (para o inventário saber
+        /// o que o pacote pôs lá), mas de propósito NÃO entrou em `managedRoots`:
+        /// a varredura de órfãos só percorre managedRoots com `removeMode` != keep,
+        /// e é ela que apagaria um arquivo que ninguém publicou.
+        ///
+        /// A diferença entre as duas listas é sutil e o custo de errar é o
+        /// jogador perder um campo que ele desenhou — daí o teste.
+        /// </summary>
+        static void TabuleiroDoJogadorSobrevive(string dir)
+        {
+            var (raiz, fonte) = Cenario(dir);
+            var eng = NovaEngine(raiz, fonte);
+            var m = eng.CarregarManifestoAsync().GetAwaiter().GetResult();
+            eng.AplicarAsync(eng.Montar(m)).GetAwaiter().GetResult();
+
+            Checa(File.Exists(Path.Combine(raiz, "boards", "oficial.json")),
+                  "o tabuleiro do PACOTE foi instalado");
+
+            // O jogador desenha o dele no editor: vai para a mesma pasta, mas
+            // nao esta' em manifesto nenhum.
+            string meu = Path.Combine(raiz, "boards", "meu_campo.json");
+            File.WriteAllText(meu, "{\"name\":\"Meu Campo\",\"fieldSpell\":87430998}");
+
+            var eng2 = NovaEngine(raiz, fonte);
+            var plano = eng2.Montar(m);
+            Checa(!plano.Orfaos.Any(o => o.Path.EndsWith("meu_campo.json")),
+                  "tabuleiro do jogador NAO e' tratado como orfao", plano.Resumo());
+
+            eng2.AplicarAsync(plano).GetAwaiter().GetResult();
+            Checa(File.Exists(meu), "e continua no disco depois da atualizacao");
+            Checa(File.ReadAllText(meu).Contains("87430998"),
+                  "com o Bonus de Campo intacto");
         }
 
         /// <summary>
@@ -652,7 +690,11 @@ namespace DuelServer
                 // De propósito na MESMA pasta que o pacote 'cards' usa: é a
                 // sobreposição de raízes que quebrou de verdade (ver
                 // RaizesSobrepostasNaoSeApagam).
-                ["ygo-data/data/cards.index.json"] = "[]"
+                ["ygo-data/data/cards.index.json"] = "[]",
+                // Tabuleiro que VEM no pacote. Ele e o de baixo (criado pelo
+                // jogador) tem destinos opostos numa atualizacao, e e' isso que
+                // TabuleiroDoJogadorSobrevive prova.
+                ["boards/oficial.json"] = "{\"name\":\"Oficial\"}"
             };
             if (zipMalicioso) game["../FUGIU.txt"] = "escapei da raiz";
             if (zipComDadoDeConta)

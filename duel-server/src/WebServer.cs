@@ -86,32 +86,53 @@ namespace DuelServer
         {
             _sa = streamingAssets;
             _webRoot = webRoot == null ? null : Path.GetFullPath(webRoot).TrimEnd(Path.DirectorySeparatorChar);
-            var listener = new HttpListener();
-            listener.Prefixes.Add(url);
-            if (extraUrl != null) listener.Prefixes.Add(extraUrl);
-
-            try { listener.Start(); }
-            catch (HttpListenerException)
+            // SEMPRE um listener novo por tentativa. Um HttpListener que falhou
+            // no Start() nao pode ser reaproveitado: a segunda chamada lanca
+            // ObjectDisposedException, que nao e' HttpListenerException — passava
+            // reto pelo catch e derrubava o processo SEM logar nada. O sintoma
+            // era o pior possivel: o jogo sumia da tela e o log parava no meio.
+            HttpListener Novo()
             {
+                var l = new HttpListener();
+                l.Prefixes.Add(url);
+                if (extraUrl != null) l.Prefixes.Add(extraUrl);
+                return l;
+            }
+
+            var listener = Novo();
+            Exception ultimo = null;
+            try { listener.Start(); }
+            catch (Exception e1)
+            {
+                ultimo = e1;
                 // A porta esta ocupada. Antes de desistir, tenta recuperar de um
                 // ORFAO NOSSO: um duel-server que ficou vivo sem jogo aberto (o
                 // usuario matou a janela, o processo sobreviveu). Ele responde
                 // /__shutdown; qualquer outra coisa ignora e o erro segue.
-                //
-                // Isto e' a contencao que faltava: ate' agora o unico caminho era
-                // o usuario descobrir sozinho que havia um processo pendurado.
-                if (PedirParaSair(url) | PedirParaSair(extraUrl))
+                bool pediu = PedirParaSair(url) | PedirParaSair(extraUrl);
+
+                // Insistir, em vez de esperar um tempo fixo: a instancia antiga
+                // ainda precisa sair do laco, soltar o ocgcore e devolver o
+                // registro ao http.sys — e esse ultimo passo nao e' instantaneo.
+                if (pediu)
                 {
-                    Thread.Sleep(1200);
-                    try { listener.Start(); Log.Info("porta recuperada de uma instancia antiga."); }
-                    catch (HttpListenerException e2) { return NaoSubiu(url, extraUrl, e2); }
-                }
-                else
-                {
-                    try { listener.Start(); }
-                    catch (HttpListenerException e3) { return NaoSubiu(url, extraUrl, e3); }
+                    for (int tentativa = 1; tentativa <= 12; tentativa++)
+                    {
+                        Thread.Sleep(400);
+                        try { listener.Close(); } catch { }
+                        listener = Novo();
+                        try
+                        {
+                            listener.Start();
+                            ultimo = null;
+                            Log.Info($"porta recuperada de uma instancia antiga (tentativa {tentativa}).");
+                            break;
+                        }
+                        catch (Exception ex) { ultimo = ex; }
+                    }
                 }
             }
+            if (ultimo != null) return NaoSubiu(url, extraUrl, ultimo);
 
             // Solta o registro do http.sys e a memoria nativa em QUALQUER forma de
             // fechamento — X da janela, Ctrl+C, logoff. Sem isto, fechar no X
@@ -168,7 +189,7 @@ namespace DuelServer
             catch { return false; }
         }
 
-        static bool NaoSubiu(string url, string extraUrl, HttpListenerException e)
+        static bool NaoSubiu(string url, string extraUrl, Exception e)
         {
             Log.Err($"Não consegui abrir {url}{(extraUrl != null ? " / " + extraUrl : "")}: {e.Message}");
             Log.Err("Porta ocupada? Feche outra instância (duel-academy-stop.exe) e tente de novo.");

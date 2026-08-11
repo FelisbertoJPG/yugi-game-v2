@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -26,9 +27,44 @@ namespace DuelServer
         /// </summary>
         const byte HUMANO_LOCAL = 0;
 
-        static InteractiveDuel _duel;
-        static bool _duelEncerrado = true;
-        static bool _multiplayer;
+        /// <summary>
+        /// Um duelo vivo e o que o cerca. Cada sala tem o PRÓPRIO cadeado: dois
+        /// duelos concorrentes não têm por que esperar um pelo outro, e um duelo
+        /// travado não pode congelar o servidor inteiro.
+        /// </summary>
+        sealed class Sala
+        {
+            public readonly object Trava = new();
+            public InteractiveDuel Duel;
+            public bool Encerrado = true;
+            public bool Multiplayer;
+            public DateTime Ultimo = DateTime.UtcNow;
+        }
+
+        /// <summary>
+        /// Salas por id. O jogo de mesa e a ponte não mandam id nenhum e caem
+        /// todos em <see cref="SalaPadrao"/> — para eles nada mudou, continua
+        /// um duelo por processo.
+        ///
+        /// O id só passa a existir na ARENA, onde um processo hospeda vários
+        /// duelos ao mesmo tempo. Sem isto, dois jogadores em partidas
+        /// diferentes se sobrescreveriam: o `/start` do segundo destruía o duelo
+        /// do primeiro, e o `/respond` dele caía no duelo errado.
+        /// </summary>
+        const string SalaPadrao = "_";
+        static readonly ConcurrentDictionary<string, Sala> _salas = new();
+
+        /// <summary>Sala ociosa há mais que isto é recolhida (ver <see cref="Faxina"/>).</summary>
+        static readonly TimeSpan ValidadeDaSala = TimeSpan.FromMinutes(30);
+
+        static Sala SalaDe(JsonElement body)
+        {
+            string id = body.TryGetProperty("sala", out var s) && s.ValueKind == JsonValueKind.String
+                ? (s.GetString() ?? SalaPadrao)
+                : SalaPadrao;
+            return _salas.GetOrAdd(id, _ => new Sala());
+        }
+
         static string _sa;
         static string _webRoot;
         static volatile bool _shutdown;
@@ -77,10 +113,13 @@ namespace DuelServer
             // Encerramento limpo: libera a memoria nativa do ocgcore antes de sair.
             // Um kill do processo pularia isto — funciona, mas deixa o duelo vivo
             // ate o SO recolher, e nao e' o que queremos quando da' pra pedir bonito.
-            lock (_lock)
-            {
-                if (_duel != null) { _duel.Dispose(); _duel = null; Log.Info("duelo ativo liberado."); }
-            }
+            foreach (var (id, s) in _salas)
+                lock (s.Trava)
+                {
+                    if (s.Duel == null) continue;
+                    s.Duel.Dispose(); s.Duel = null;
+                    Log.Info($"duelo da sala {id} liberado.");
+                }
             try { listener.Stop(); listener.Close(); } catch { }
             Log.Info("servidor de duelo encerrado.");
         }
@@ -185,15 +224,40 @@ namespace DuelServer
             Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
                      $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")} " +
                      $"nivel={(leitura ? "avancado" : "iniciante")} multiplayer={multi}");
-            lock (_lock)
+            Faxina();
+            var sala = SalaDe(body);
+            lock (sala.Trava)
             {
-                _duel?.Dispose();
-                _duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
-                                            npcLeitura: leitura, doisHumanos: multi);
-                _multiplayer = multi;
-                var r = _duel.Advance();
-                _duelEncerrado = r.ended;
-                return Entregar(r);
+                sala.Duel?.Dispose();
+                sala.Duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
+                                                npcLeitura: leitura, doisHumanos: multi);
+                sala.Multiplayer = multi;
+                sala.Ultimo = DateTime.UtcNow;
+                var r = sala.Duel.Advance();
+                sala.Encerrado = r.ended;
+                return Entregar(r, sala.Multiplayer);
+            }
+        }
+
+        /// <summary>
+        /// Recolhe salas paradas. Cada duelo segura memória nativa do ocgcore, e
+        /// um cliente que fecha a aba no meio da partida nunca avisa ninguém —
+        /// sem isto, um servidor de arena vaza um duelo por desistência
+        /// silenciosa até acabar a memória.
+        /// </summary>
+        static void Faxina()
+        {
+            var limite = DateTime.UtcNow - ValidadeDaSala;
+            foreach (var (id, s) in _salas)
+            {
+                if (id == SalaPadrao || s.Ultimo > limite) continue;
+                if (!_salas.TryRemove(id, out var morta)) continue;
+                lock (morta.Trava)
+                {
+                    morta.Duel?.Dispose();
+                    morta.Duel = null;
+                }
+                Log.Info($"sala {id} recolhida por inatividade");
             }
         }
 
@@ -214,8 +278,8 @@ namespace DuelServer
         /// quem hospeda roda o motor e enxerga tudo de qualquer jeito. E' por isso
         /// que a partida de ponte nao paga DP nem conta ranking (migration 0010).
         /// </summary>
-        static object Entregar(InteractiveDuel.Result r) =>
-            _multiplayer
+        static object Entregar(InteractiveDuel.Result r, bool multiplayer) =>
+            multiplayer
                 ? new { multiplayer = true, visoes = new Dictionary<string, object>
                         { ["0"] = r.Para(0), ["1"] = r.Para(1) } }
                 : r.Para(HUMANO_LOCAL);
@@ -227,7 +291,15 @@ namespace DuelServer
         /// </summary>
         public static bool DueloEmAndamento
         {
-            get { lock (_lock) return _duel != null && !_duelEncerrado; }
+            get
+            {
+                // QUALQUER sala conta: numa arena, atualizar por causa de uma sala
+                // vazia derrubaria as outras que estao no meio de um duelo.
+                foreach (var (_, s) in _salas)
+                    lock (s.Trava)
+                        if (s.Duel != null && !s.Encerrado) return true;
+                return false;
+            }
         }
 
         /// <summary>
@@ -242,17 +314,20 @@ namespace DuelServer
         /// </summary>
         public static bool LiberarDueloEncerrado()
         {
-            lock (_lock)
-            {
-                if (_duel != null && !_duelEncerrado) return false;
-                if (_duel != null)
+            // Duas passadas de proposito: so' solta DEPOIS de saber que ninguem
+            // esta jogando. Soltar sala a sala enquanto confere deixaria metade
+            // liberada e metade nao, com o update abortando no meio.
+            if (DueloEmAndamento) return false;
+
+            foreach (var (id, s) in _salas)
+                lock (s.Trava)
                 {
-                    _duel.Dispose();
-                    _duel = null;
-                    Log.Info("duelo encerrado liberado (o cards.cdb foi fechado).");
+                    if (s.Duel == null) continue;
+                    s.Duel.Dispose();
+                    s.Duel = null;
+                    Log.Info($"duelo encerrado da sala {id} liberado (o cards.cdb foi fechado).");
                 }
-                return true;
-            }
+            return true;
         }
 
         internal static object RespondDuel(JsonElement body)
@@ -281,12 +356,14 @@ namespace DuelServer
             Log.Info($"[rpc] /respond {action ?? "endturn"} arg={arg}"
                      + (args != null ? $" args=[{string.Join(",", args)}]" : "")
                      + (porJogador.HasValue ? $" jogador={porJogador}" : ""));
-            lock (_lock)
+            var sala = SalaDe(body);
+            lock (sala.Trava)
             {
-                if (_duel == null) return new { error = "nenhum duelo ativo — dê /start" };
-                var r = _duel.Respond(action ?? "endturn", arg, args, porJogador);
-                _duelEncerrado = r.ended;
-                return Entregar(r);
+                if (sala.Duel == null) return new { error = "nenhum duelo ativo — dê /start" };
+                sala.Ultimo = DateTime.UtcNow;
+                var r = sala.Duel.Respond(action ?? "endturn", arg, args, porJogador);
+                sala.Encerrado = r.ended;
+                return Entregar(r, sala.Multiplayer);
             }
         }
 

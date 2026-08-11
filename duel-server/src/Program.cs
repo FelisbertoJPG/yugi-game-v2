@@ -208,6 +208,10 @@ namespace DuelServer
 
             // Modo multiplayer: os dois lados decidem, ninguem joga pelo outro — e
             // o duelo contra o NPC continua exatamente como era.
+            // Duelos concorrentes no mesmo processo (base da arena).
+            if (Array.IndexOf(args, "--test-salas") >= 0)
+                return TestSalas.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-multiplayer") >= 0)
                 return TestMultiplayer.Run(streamingAssets);
 

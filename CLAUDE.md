@@ -182,6 +182,15 @@ flexbox de sempre; sem tabuleiro ativo, nada muda. O motor de arrastar/snap
 mora em `web/js/campoeditor.js`; o schema das zonas e o gerador do layout
 padrão, em `web/js/boards.js`.
 
+Os `boards/*.json` **viajam dentro do `game.zip`** (pacote `game`, ver
+`tools/publish-release.ps1`). Isso não é detalhe: até 11/08/2026 eles não
+viajavam em lugar nenhum, e o jogo instalado não tinha a pasta `boards/` —
+`/__boards/list` voltava vazio, `duel.html` caía no layout padrão do
+`boards.js` e o Bônus de Campo do adversário sumia. No `npm run dev` sempre
+funcionou (o servidor lê a pasta do repositório), então o buraco só aparecia
+no `.exe`. A limpeza é por inventário, então tabuleiro criado pelo JOGADOR no
+editor sobrevive à atualização.
+
 Um tabuleiro também pode fixar um **Bônus de Campo** (`fieldSpell` no JSON,
 escolhido no editor entre os 6 campos básicos da Lista 1): a magia de campo
 de verdade entra ativada antes do duelo começar

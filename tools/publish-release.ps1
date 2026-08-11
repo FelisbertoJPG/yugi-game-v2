@@ -101,6 +101,20 @@ Passo 1 "montando o pacote 'game' (front + indices)"
 $g = Join-Path $stage 'game'
 Copiar (Join-Path $root 'web')          (Join-Path $g 'web')
 Copiar (Join-Path $root 'ygo-data\src') (Join-Path $g 'ygo-data\src')
+
+# `boards/*.json` NUNCA viajou - nem no Release nem na semente do pack - e por
+# isso o jogo instalado nao tinha a pasta `boards/` de jeito nenhum. Sem ela o
+# `/__boards/list` volta vazio, o `duel.html` nao acha o tabuleiro do adversario
+# e cai no layout padrao do `boards.js`, sem Bonus de Campo. No `npm run dev`
+# funcionava (o servidor le a pasta do repositorio), entao o buraco so' aparecia
+# no `.exe`: o Weevil perdia a Forest e o campo virava o generico.
+#
+# Sao conteudo do jogo, versionados de proposito (boards/README.md), e por isso
+# entram no pacote 'game' junto com o front - nao na semente: assim um tabuleiro
+# corrigido chega por atualizacao, sem exigir um exe novo.
+$tabuleiros = Get-ChildItem (Join-Path $root 'boards') -Filter '*.json' -File -ErrorAction SilentlyContinue
+foreach ($b in $tabuleiros) { Copiar $b.FullName (Join-Path $g "boards\$($b.Name)") }
+Ok "$($tabuleiros.Count) tabuleiro(s)"
 foreach ($f in @('cards.index.json','archetypes.json','scripts.index.json','meta.json','constants.json')) {
   $de = Join-Path $root "ygo-data\data\$f"
   if (-not (Test-Path $de)) { Falhar "nao achei ygo-data\data\$f (rode npm run data:build)" }
@@ -221,7 +235,11 @@ $manifesto = [ordered]@{
   )
   files    = $avulsos
   payloads = @(
-    (PayloadInfo 'game'  $zipGame  @('web','ygo-data/src','ygo-data/data')),
+    # `boards` entra nas roots do pacote para o INVENTARIO cobri-la: um tabuleiro
+    # que sai do jogo tem de sumir do disco do jogador. Fora do managedRoots de
+    # proposito - a limpeza e' por inventario, entao o tabuleiro que o JOGADOR
+    # criou no editor nunca esteve la' e sobrevive a atualizacao.
+    (PayloadInfo 'game'  $zipGame  @('web','ygo-data/src','ygo-data/data','boards')),
     (PayloadInfo 'cards' $zipCards @('ygo-data/data','duel_academy/Assets/StreamingAssets/YGODemo'))
   )
 }

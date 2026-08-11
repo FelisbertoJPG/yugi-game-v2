@@ -470,6 +470,15 @@ namespace DuelServer
                     : 0;
                 Checa(luas > 20000, $"scripts lua instalados ({luas})");
 
+                // Os tabuleiros nao viajavam, e o sintoma nao parecia falta de
+                // arquivo: o duelo simplesmente abria no layout padrao, sem o
+                // Bonus de Campo do adversario. Sem `boards/`, `/__boards/list`
+                // volta vazio e o `duel.html` nao tem o que sobrepor.
+                string tabuleiros = Path.Combine(raiz, "boards");
+                int quantos = Directory.Exists(tabuleiros)
+                    ? Directory.GetFiles(tabuleiros, "*.json").Length : 0;
+                Checa(quantos > 0, $"boards/*.json instalados ({quantos})");
+
                 var eng2 = NovaEngine(raiz, fonte);
                 var plano2 = eng2.Montar(eng2.CarregarManifestoAsync().GetAwaiter().GetResult());
                 Checa(plano2.NadaAFazer, "re-scan nao acha nada a fazer", plano2.Resumo());

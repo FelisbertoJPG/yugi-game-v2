@@ -262,12 +262,20 @@ namespace DuelServer.Update
         static bool EhIntocavel(string rel) => Intocaveis.Any(t => SafePath.DentroDe(rel, t));
 
         /// <summary>
-        /// `store/banlist.json`, `store/boosters.json` e `store/npcs.json` são
-        /// CONTEÚDO do jogo (versionado de propósito), não progresso de ninguém —
-        /// só esses três podem ser atualizados dentro de uma pasta intocável.
+        /// Banlist, boosters, NPCs e as listas de cartas são CONTEÚDO do jogo
+        /// (versionado de propósito), não progresso de ninguém — só estes podem
+        /// ser atualizados dentro de uma pasta intocável.
+        ///
+        /// A lista é fechada por arquivo, e não por "qualquer .json solto em
+        /// store/", justamente para um arquivo novo precisar de uma decisão:
+        /// `store/wallet.json` também é um .json solto, e sobrescrevê-lo apagaria
+        /// a coleção de quem joga.
         /// </summary>
         static readonly string[] GlobaisPermitidos =
-            { "store/banlist.json", "store/boosters.json", "store/npcs.json", "store/npc-base-meta.json" };
+        {
+            "store/banlist.json", "store/boosters.json", "store/npcs.json",
+            "store/npc-base-meta.json", "store/cardlists.json",
+        };
 
         static bool ConteudoGlobalPermitido(string rel) =>
             GlobaisPermitidos.Contains((rel ?? "").Replace('\\', '/'), StringComparer.OrdinalIgnoreCase);

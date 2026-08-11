@@ -135,7 +135,8 @@ $zipCards = Join-Path $saida 'cards.zip'
 Ok "cards.zip: $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB ($($luas.Count) scripts lua)"
 
 # ------------------------------------------------------------- 3. arquivos avulsos
-# CONTEUDO GLOBAL do jogo (banlist, boosters, NPCs) - versionado de proposito.
+# CONTEUDO GLOBAL do jogo (banlist, boosters, NPCs, listas de cartas) -
+# versionado de proposito.
 # O resto de store/ e decks/ e' dado de CONTA e o cliente recusa por codigo,
 # mesmo que um manifesto peca.
 Passo 3 'coletando o conteudo global (store/*.json)'
@@ -146,7 +147,7 @@ Passo 3 'coletando o conteudo global (store/*.json)'
 # so' ensina a ignorar os avisos que importam.
 $opcionais = @('store/npc-base-meta.json')
 $avulsos = @()
-foreach ($rel in @('store/banlist.json','store/boosters.json','store/npcs.json','store/npc-base-meta.json')) {
+foreach ($rel in @('store/banlist.json','store/boosters.json','store/npcs.json','store/npc-base-meta.json','store/cardlists.json')) {
   $de = Join-Path $root ($rel -replace '/','\')
   if (-not (Test-Path $de)) {
     if ($opcionais -notcontains $rel) { Aviso "sem $rel (pulando)" }

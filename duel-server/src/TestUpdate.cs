@@ -78,7 +78,7 @@ namespace DuelServer
             var plano = eng.Montar(m);
             Checa(plano.PayloadsPendentes.Count() == 2, "plano pede os 2 pacotes numa instalacao limpa",
                   $"pediu {plano.PayloadsPendentes.Count()}");
-            Checa(plano.ABaixar.Count() == 1, "plano pede o arquivo avulso (store/banlist.json)",
+            Checa(plano.ABaixar.Count() == 2, "plano pede os avulsos (store/banlist.json, store/cardlists.json)",
                   $"pediu {plano.ABaixar.Count()}");
 
             bool aplicou = eng.AplicarAsync(plano).GetAwaiter().GetResult();
@@ -88,6 +88,10 @@ namespace DuelServer
             Checa(File.Exists(Path.Combine(raiz, "ygo-data", "data", "cards.json")), "cards.json instalado");
             Checa(File.ReadAllText(Path.Combine(raiz, "store", "banlist.json")).Contains("v1"),
                   "store/banlist.json instalado com o conteudo certo");
+            // Sem `store/cardlists.json` na lista de globais, isto some em
+            // silencio: o WARN vai para o log e o jogador fica com a lista velha.
+            Checa(File.Exists(Path.Combine(raiz, "store", "cardlists.json")),
+                  "store/cardlists.json (pool permitido) instalado, nao recusado como dado de conta");
 
             // O re-scan é a prova real: mesma fonte, mesmo disco → plano vazio.
             var eng2 = NovaEngine(raiz, fonte);
@@ -402,10 +406,16 @@ namespace DuelServer
                 foreach (var p in m.Payloads) w.WriteLine($"{p.Id}={p.Version}");
             }
 
-            // A semente: o que os dois pacotes não trazem.
-            var seed = zip.CreateEntry("seed/store/banlist.json", CompressionLevel.Optimal);
-            using (var w = new StreamWriter(seed.Open()))
-                w.Write(File.ReadAllText(Path.Combine(release, "banlist.json")));
+            // A semente: o que os dois pacotes não trazem. TODO avulso do
+            // manifesto precisa estar aqui — o que falta na semente vira
+            // "atualização fantasma": a instalação recém-feita já oferece um
+            // download na primeira checagem.
+            foreach (var nome in new[] { "banlist.json", "cardlists.json" })
+            {
+                var seed = zip.CreateEntry($"seed/store/{nome}", CompressionLevel.Optimal);
+                using var w = new StreamWriter(seed.Open());
+                w.Write(File.ReadAllText(Path.Combine(release, nome)));
+            }
         }
 
         /// <summary>
@@ -653,9 +663,14 @@ namespace DuelServer
             string zipCards = Path.Combine(release, "cards.zip");
             CriarZip(zipCards, cards);
 
-            // --- arquivo avulso: conteúdo GLOBAL do jogo
+            // --- arquivos avulsos: conteúdo GLOBAL do jogo
             string banlist = Path.Combine(release, "banlist.json");
             File.WriteAllText(banlist, "{\"listId\":\"lista1\",\"v\":\"v1\"}");
+            // O pool permitido (editor web/listas.html). Mora em store/, que é
+            // intocável por padrão, então precisa estar na lista de globais —
+            // sem isso o manifesto o carrega e o cliente o recusa em silêncio.
+            string cardlists = Path.Combine(release, "cardlists.json");
+            File.WriteAllText(cardlists, "{\"listas\":[{\"id\":\"lista1\",\"tipos\":[],\"ids\":[1]}]}");
 
             var m = new Manifest
             {
@@ -675,6 +690,12 @@ namespace DuelServer
                         Path = "store/banlist.json", Asset = "banlist.json",
                         Sha256 = HashCache.Computar(banlist),
                         Size = new FileInfo(banlist).Length
+                    },
+                    new()
+                    {
+                        Path = "store/cardlists.json", Asset = "cardlists.json",
+                        Sha256 = HashCache.Computar(cardlists),
+                        Size = new FileInfo(cardlists).Length
                     }
                 },
                 Payloads = new List<PayloadManifesto>

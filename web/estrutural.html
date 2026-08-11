@@ -327,6 +327,10 @@ function pintarDeck() {
     wrap.append(bloco);
   }
   $('zonas').replaceChildren(wrap);
+
+  // Toda mudança no deck passa por aqui, então é o único lugar que precisa
+  // gravar o rascunho — nenhuma alteração escapa sem ser guardada.
+  salvarRascunho();
 }
 
 // ---------------------------------------------------------------- arrastar
@@ -577,8 +581,55 @@ function limpar() {
   $('na-loja').checked = true;
   quantidades = {};
   raridades = {};
+  apagarRascunho();
   pintarDeck(); pintarPool(); pintarSalvos();
   msg('novo deck estrutural');
+}
+
+// ---------------------------------------------------------------- rascunho local
+/**
+ * O deck em montagem vivia SÓ na memória da aba. Qualquer tropeço — a recusa do
+ * servidor, cair a rede, fechar sem querer — levava junto o trabalho inteiro, e
+ * foi exatamente o que aconteceu quando `validar_deck_estrutural` passou a
+ * recusar tudo (migration 0021).
+ *
+ * O rascunho é local de propósito: publicar exige admin e servidor no ar, e é
+ * justamente quando esses dois faltam que ele precisa existir. Ele NÃO é o
+ * deck publicado — some assim que a publicação dá certo.
+ */
+const RASCUNHO = 'ygo:estrutural:rascunho';
+
+function salvarRascunho() {
+  try {
+    if (!total()) return void localStorage.removeItem(RASCUNHO);
+    localStorage.setItem(RASCUNHO, JSON.stringify({
+      idAtual, nome: $('nome').value, preco: $('preco').value,
+      na_loja: $('na-loja').checked, quantidades, raridades, em: Date.now(),
+    }));
+  } catch { /* sem localStorage: segue sem rascunho, não é motivo para travar */ }
+}
+
+function apagarRascunho() {
+  try { localStorage.removeItem(RASCUNHO); } catch { /* idem */ }
+}
+
+/** Devolve `true` se restaurou algo. */
+function restaurarRascunho() {
+  let r = null;
+  try { r = JSON.parse(localStorage.getItem(RASCUNHO) ?? 'null'); } catch { return false; }
+  if (!r || !r.quantidades || !Object.keys(r.quantidades).length) return false;
+
+  idAtual = r.idAtual ?? null;
+  $('nome').value = r.nome ?? '';
+  $('preco').value = r.preco ?? 300;
+  $('na-loja').checked = r.na_loja !== false;
+  quantidades = r.quantidades;
+  raridades = r.raridades ?? {};
+  pintarDeck(); pintarPool();
+
+  const quando = new Date(r.em ?? Date.now()).toLocaleString('pt-BR');
+  msg(`rascunho recuperado (${total()} cartas, de ${quando}) — "novo" descarta`, 'ok');
+  return true;
 }
 
 /** "Deck do Dragão Branco" -> "deck-do-dragao-branco" */
@@ -596,7 +647,12 @@ $('btn-salvar').onclick = async () => {
   // Valida NO SERVIDOR, com a mesma função que a compra usa — validar só aqui
   // deixaria a tela e o banco discordando justo na publicação.
   const v = await validarYdk(ydk);
-  if (!v.ok) return void msg(`deck inválido: ${(v.problemas ?? []).join('; ')}`, 'erro');
+  if (!v.ok) {
+    // "o rascunho está guardado" não é enfeite: a recusa aqui é o caminho que
+    // fez perder um deck inteiro, quando o erro era do servidor e não do deck.
+    return void msg(`não publicou — ${(v.problemas ?? []).join('; ')} `
+                  + '(o rascunho está guardado, nada foi perdido)', 'erro');
+  }
 
   // A capa é a carta mais frequente; empate resolve pela primeira. Serve só de
   // arte na vitrine.
@@ -608,9 +664,11 @@ $('btn-salvar').onclick = async () => {
     raridades: Object.fromEntries(Object.keys(quantidades).map((id) => [id, raridadeDe(id)])),
     na_loja: $('na-loja').checked,
   });
-  if (!r.ok) return void msg(r.error, 'erro');
+  if (!r.ok) return void msg(`não publicou — ${r.error} (o rascunho está guardado)`, 'erro');
 
   idAtual = idAtual ?? slug(nome);
+  // Só agora: o rascunho existe justamente para o caminho que NÃO chegou aqui.
+  apagarRascunho();
   await pintarSalvos();
   msg(`"${nome}" publicado — todo mundo recebe no próximo boot`, 'ok');
 };
@@ -625,7 +683,14 @@ $('btn-apagar').onclick = async () => {
 };
 
 $('btn-novo').onclick = limpar;
-$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+$('btn-voltar').onclick = () => {
+  if (total() && !confirm('Sair? O rascunho fica guardado e volta quando você reabrir esta tela.')) return;
+  location.href = '/web/teste.html';
+};
+
+// Nome/preço/vitrine também entram no rascunho — recuperar as 40 cartas e
+// perder o nome ainda seria perder trabalho.
+for (const id of ['nome', 'preco', 'na-loja']) $(id).addEventListener('input', salvarRascunho);
 
 for (const id of FILTRO_IDS) $(id).addEventListener('input', pintarPool);
 for (const id of TIPO_IDS) {
@@ -673,7 +738,9 @@ try {
 }
 
 await pintarSalvos();
-limpar();
+// O rascunho manda: se a última sessão terminou sem publicar, ela volta inteira.
+// `limpar()` (o botão "novo") é o que descarta.
+if (!restaurarRascunho()) limpar();
 pintarPool();
 </script>
 </body>

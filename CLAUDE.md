@@ -16,6 +16,7 @@ node web/js/banlist.test.mjs # 24 testes da banlist (Ponto/Banlist/Lista compart
 node web/js/automontagem.test.mjs  # 18 testes da Auto montagem (curva, ritual, fusão)
 node web/js/ponte.test.mjs   # 13 testes da perspectiva do multiplayer (virar a mesa)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
+node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run data:build           # regenera ygo-data/data a partir do cards.cdb (precisa de Python 3)
 

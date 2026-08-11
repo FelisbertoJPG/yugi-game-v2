@@ -161,7 +161,7 @@ namespace DuelServer
                         Log.Info("ha' uma versao nova do proprio Duel Academy.exe");
                 }
 
-                WebServer.Run(streamingAssets,
+                bool subiu = WebServer.Run(streamingAssets,
                     url: duelBindUrl,
                     webRoot: appRoot,
                     extraUrl: frontBindUrl,
@@ -171,6 +171,18 @@ namespace DuelServer
                         if (Array.IndexOf(args, "--no-browser") >= 0) return;
                         AbrirNavegador(FrontUrl + (temUpdate ? "web/atualizando.html" : "web/index.html"));
                     });
+
+                // Nao subiu: ate' agora o processo saia com 0 e a janela fechava
+                // antes de qualquer um conseguir ler. Do lado do jogador o jogo
+                // "simplesmente nao abre" — e a unica explicacao ficava no log,
+                // que ninguem le'. Pior pelo launcher, que abre sem janela
+                // nenhuma: nao havia console onde a mensagem pudesse aparecer.
+                if (!subiu)
+                {
+                    Aviso.PortaOcupada($"{duelBindUrl} / {frontBindUrl}",
+                                       "outro processo ja' esta usando a porta.");
+                    return Segurar(4);
+                }
                 return 0;
             }
 

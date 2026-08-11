@@ -74,7 +74,11 @@ namespace DuelServer
         /// --app, sem Node); `extraUrl` adiciona a porta do front ao MESMO
         /// listener, para o executavel empacotado ser um processo so'.
         /// </summary>
-        public static void Run(string streamingAssets, string url = "http://localhost:8770/",
+        /// <summary>
+        /// Sobe o servidor. Devolve `false` se nem chegou a escutar — quem chama
+        /// precisa saber, para poder AVISAR o jogador em vez de sair calado.
+        /// </summary>
+        public static bool Run(string streamingAssets, string url = "http://localhost:8770/",
                                string webRoot = null, string extraUrl = null,
                                Action onReady = null)
         {
@@ -91,7 +95,7 @@ namespace DuelServer
                 Log.Err("Se for acesso negado (comum com --lan): reserve a URL, como administrador.");
                 Log.Err($"  PowerShell: netsh http add urlacl url={url} user=$env:USERNAME");
                 Log.Err($"  cmd.exe:    netsh http add urlacl url={url} user=%USERNAME%");
-                return;
+                return false;
             }
 
             Log.Info($"Servidor de duelo (treino W2) em {url}");
@@ -122,6 +126,7 @@ namespace DuelServer
                 }
             try { listener.Stop(); listener.Close(); } catch { }
             Log.Info("servidor de duelo encerrado.");
+            return true;
         }
 
         static void Handle(HttpListenerContext ctx)

@@ -247,10 +247,9 @@ export const LISTA1_SPELLTRAP = [
   94377247, // Curse of the Masked Beast
 ];
 
-const SET = new Set(LISTA1_SPELLTRAP);
-
 /**
- * A carta (entrada do índice) faz parte da Lista 1?
+ * Os TIPOS de monstro que entram por REGRA (casamento exato com o `tl` do
+ * índice), sem precisar listar id por id.
  *
  * Monstro Normal entra por não ter efeito nenhum — nada a implementar.
  *
@@ -262,9 +261,51 @@ const SET = new Set(LISTA1_SPELLTRAP);
  *
  * Elas precisam da Polymerization (24094653), que está na lista de magias, e do
  * Extra Deck sendo enviado ao motor (`extra` no POST /start).
+ *
+ * O casamento é EXATO de propósito: `Tuner/Normal Monster` e
+ * `Pendulum/Normal Monster` NÃO entram por "Normal Monster". Um `includes()`
+ * aqui mudaria a Lista 1 em silêncio (mais 51 cartas) só por causa de uma
+ * mudança de estilo.
  */
+export const LISTA1_TIPOS = ['Normal Monster', 'Fusion Monster'];
+
+// ---------------------------------------------------------------------------
+// Estado VIVO. As duas constantes acima são o padrão de fábrica (o que viaja
+// dentro do `.exe`); o editor da Área de Teste (`web/listas.html`) publica a
+// lista no Supabase e `aplicarLista1` a instala aqui no boot. Sem isso, o
+// cliente conferiria contra a lista embutida e o servidor contra a publicada —
+// e a divergência só apareceria na hora de salvar um deck.
+//
+// `inLista1` continua SÍNCRONA (é chamada dentro de `filter` no pool inteiro);
+// quem hidrata é `cardlists.js`, uma vez por página.
+// ---------------------------------------------------------------------------
+let SET = new Set(LISTA1_SPELLTRAP);
+let TIPOS = new Set(LISTA1_TIPOS);
+
+/** A carta (entrada do índice) faz parte da Lista 1? */
 export function inLista1(card) {
   if (SET.has(card.id)) return true;
   if (card.t !== 'M') return false;
-  return card.tl === 'Normal Monster' || card.tl === 'Fusion Monster';
+  return TIPOS.has(card.tl);
+}
+
+/** O conteúdo atual da Lista 1, no formato que o editor edita e publica. */
+export function fonteDaLista1() {
+  return { tipos: [...TIPOS], ids: [...SET] };
+}
+
+/**
+ * Troca o conteúdo da Lista 1. Campo ausente mantém o que já estava — assim
+ * uma publicação só com `ids` não zera os tipos por engano.
+ */
+export function aplicarLista1(fonte) {
+  if (!fonte || typeof fonte !== 'object') return;
+  if (Array.isArray(fonte.tipos)) TIPOS = new Set(fonte.tipos.map(String));
+  if (Array.isArray(fonte.ids)) SET = new Set(fonte.ids.map(Number).filter(Number.isFinite));
+}
+
+/** Volta ao padrão de fábrica (usado pelo botão "restaurar" do editor). */
+export function restaurarLista1() {
+  SET = new Set(LISTA1_SPELLTRAP);
+  TIPOS = new Set(LISTA1_TIPOS);
 }

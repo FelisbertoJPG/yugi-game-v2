@@ -15,6 +15,7 @@ node web/js/deck.test.mjs    # 33 testes das regras de construção de deck
 node web/js/banlist.test.mjs # 24 testes da banlist (Ponto/Banlist/Lista compartilhada)
 node web/js/automontagem.test.mjs  # 18 testes da Auto montagem (curva, ritual, fusão)
 node web/js/ponte.test.mjs   # 13 testes da perspectiva do multiplayer (virar a mesa)
+node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run data:build           # regenera ygo-data/data a partir do cards.cdb (precisa de Python 3)
 
@@ -117,9 +118,26 @@ escolhidas por já terem Lua pronto no `ocgcore`, então nenhum efeito precisa
 ser escrito à mão.
 
 `web/js/cardlists.js` é o registro de **listas de cartas** que uma banlist
-pode reger — hoje só a Lista 1, mas o desenho escala: pra adicionar uma
-"Lista 2" basta um novo arquivo com sua função de filtro (formato de
-`inLista1`) e uma entrada no registro.
+pode reger, e a camada de persistência delas. Uma lista tem duas partes: os
+**tipos por regra** (os `tl` que entram em bloco — `Normal Monster`, `Fusion
+Monster`; não dá pra listar 1005 monstros à mão) e as **cartas avulsas**
+(magia, armadilha, Sincro, Xyz, escolhidas uma a uma). O `lista1.js` acima é
+só o **padrão de fábrica**: a verdade viva é publicada no Supabase e entra
+por `hydrateCardLists()` no boot de quem filtra pelo pool (Deck Builder,
+Booster Builder, Deck Estrutural, Banlist).
+
+Editado em **`web/listas.html`** (Área de Teste), no mesmo molde de duas
+colunas da Banlist. Salvar grava as DUAS chaves de uma vez:
+`conteudo/cardlists` (a fonte, espelhada em `store/cardlists.json`) e
+`conteudo/<id da lista>` (o **resultado resolvido** contra o banco de
+cartas). São duas porque `salvar_deck` roda no Postgres, que não tem o banco
+de cartas e não consegue avaliar "todo monstro Normal" — quem resolve a
+regra é o navegador, que tem o índice. Antes disto, acrescentar uma carta à
+Lista 1 era editar `lista1.js`, rodar `tools/publicar-conteudo.mjs` e
+publicar um Release. Qual lista vale no servidor sai do `listId` da banlist
+(`lista_ativa()`, migration 0020), não mais de um `'lista1'` escrito na mão.
+Só admin publica (RLS `eh_admin()`); a chave da lista tem que casar
+`^lista[a-z0-9-]{0,31}$`, e o editor já gera o slug assim.
 
 `web/js/banlist.js` é uma camada **opcional** por cima da lista escolhida
 (`banlist.listId`) — não mexe nas regras oficiais de `deck.js` (min/max, 3

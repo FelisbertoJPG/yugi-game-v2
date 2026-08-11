@@ -85,8 +85,13 @@
       <span>Banlist</span>
       <span class="why">pontos e grupos de cópias por cima da Lista 1</span>
     </button>
-    <button id="btn-mundo">
+    <button id="btn-listas">
       <span class="k">8</span>
+      <span>Listas de cartas</span>
+      <span class="why">o pool permitido — a Lista 1 e as que vierem</span>
+    </button>
+    <button id="btn-mundo">
+      <span class="k">9</span>
       <span>Mundo andável (mapa mundi)</span>
       <span class="why">em standby · fora do fluxo do jogador, que usa a lista de Adversário</span>
     </button>
@@ -110,6 +115,7 @@ $('btn-train').onclick = () => (location.href = '/web/duel.html');
 $('btn-cards').onclick = () => (location.href = '/ygo-data/examples/web-demo.html');
 $('btn-campo').onclick = () => (location.href = '/web/campo.html');
 $('btn-banlist').onclick = () => (location.href = '/web/banlist.html');
+$('btn-listas').onclick = () => (location.href = '/web/listas.html');
 $('btn-mundo').onclick = () => (location.href = '/web/mundo.html');
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 document.addEventListener('keydown', (e) => {
@@ -120,7 +126,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '5') $('btn-cards').click();
   if (e.key === '6') $('btn-campo').click();
   if (e.key === '7') $('btn-banlist').click();
-  if (e.key === '8') $('btn-mundo').click();
+  if (e.key === '8') $('btn-listas').click();
+  if (e.key === '9') $('btn-mundo').click();
   if (e.key === 'Escape') $('btn-home').click();
 });
 </script>

@@ -318,6 +318,21 @@ export async function req(caminho, { method = 'GET', body, prefer } = {}) {
 export const ehFalhaDeRede = (erro) => erro === 'sem conexao';
 
 /**
+ * O perfil (`{usuario, admin}`) de quem está logado, ou `null`.
+ *
+ * Filtra pelo PRÓPRIO id porque a policy de `perfis` deixa um admin ver todo
+ * mundo — sem o filtro a primeira linha podia ser de outra conta. Isto é só
+ * para a TELA saber o que mostrar; quem barra a escrita é a RLS, não isto.
+ */
+export async function perfilAtual() {
+  const conta = await contaAtual();
+  if (!conta?.id) return null;
+  const r = await req(`perfis?select=usuario,admin&id=eq.${conta.id}`);
+  if (!r.ok || !Array.isArray(r.dados) || !r.dados.length) return null;
+  return { ...r.dados[0], email: conta.email };
+}
+
+/**
  * Cabeçalho de autorização para o SERVIDOR LOCAL (`/__store/*`, `/__decks/*`).
  *
  * O servidor local não tem mais sessão própria: ele valida este mesmo token do

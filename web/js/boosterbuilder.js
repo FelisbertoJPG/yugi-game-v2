@@ -14,6 +14,7 @@ import {
 } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
 import { inLista1 } from '/web/js/lista1.js';
+import { hydrateCardLists } from '/web/js/cardlists.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
@@ -613,6 +614,7 @@ configureCardDetail({
 
 // Traz os boosters do projeto (store/boosters.json) antes de qualquer leitura.
 await hydrateBoosters();
+await hydrateCardLists();   // o pool permitido publicado, antes de filtrar por ele
 
 for (const c of listCustom()) injectCustom(c);
 annotateDb(db);

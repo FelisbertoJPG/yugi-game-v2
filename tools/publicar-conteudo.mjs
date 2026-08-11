@@ -157,18 +157,23 @@ const quem = await conferirAdmin(token);
 linha(`admin: ${quem}\n`);
 
 // 1. store/*.json -> conteudo
-for (const chave of ['banlist', 'boosters', 'npcs', 'npc-base-meta']) {
+for (const chave of ['banlist', 'boosters', 'npcs', 'npc-base-meta', 'cardlists']) {
   const dados = await lerJson(join(ROOT, 'store', `${chave}.json`));
   if (dados === null) { linha(`--   ${chave} (nao existe, pulando)`); continue; }
   await enviar(token, `conteudo/${chave}`, 'conteudo', { chave, dados }, 'chave');
 }
 
-// 1b. Lista 1 RESOLVIDA -> conteudo/lista1
+// 1b. Listas de cartas RESOLVIDAS -> conteudo/<id>
 //
-// A regra (`inLista1`) depende do banco de cartas, que não vive no Supabase:
-// são "todos os monstros Normais e de Fusão mais 153 magias/armadilhas por id".
-// O servidor não tem como avaliar isso, então publicamos o RESULTADO — a lista
-// de ids permitidos — e `salvar_deck` só confere pertinência.
+// A regra depende do banco de cartas, que não vive no Supabase: são "todos os
+// monstros Normais e de Fusão mais N magias/armadilhas por id". O servidor não
+// tem como avaliar isso, então publicamos o RESULTADO — a lista de ids
+// permitidos — e `salvar_deck` só confere pertinência.
+//
+// A FONTE vem de `store/cardlists.json` quando ele existe (é o que o editor
+// `web/listas.html` grava); sem ele, cai no padrão de fábrica de `lista1.js`.
+// A ordem importa: publicar o padrão por cima de uma lista editada apagaria em
+// silêncio as cartas acrescentadas na Área de Teste.
 //
 // Republicar isto é obrigatório depois de um `npm run data:build` que mude o
 // conjunto; sem republicar, o servidor conferiria contra uma lista velha.
@@ -176,10 +181,24 @@ for (const chave of ['banlist', 'boosters', 'npcs', 'npc-base-meta']) {
   const { pathToFileURL } = await import('node:url');
   const idx = JSON.parse(await readFile(join(ROOT, 'ygo-data', 'data', 'cards.index.json'), 'utf8'));
   const cartas = Array.isArray(idx) ? idx : (idx.cards ?? idx.data ?? Object.values(idx)[0]);
-  const { inLista1 } = await import(pathToFileURL(join(ROOT, 'web', 'js', 'lista1.js')).href);
-  const ids = cartas.filter(inLista1).map((c) => c.id);
-  await enviar(token, `conteudo/lista1  (${ids.length} cartas)`, 'conteudo',
-               { chave: 'lista1', dados: ids }, 'chave');
+
+  const mod = await import(pathToFileURL(join(ROOT, 'web', 'js', 'lista1.js')).href);
+  const fonte = await lerJson(join(ROOT, 'store', 'cardlists.json'));
+  const listas = Array.isArray(fonte?.listas) && fonte.listas.length
+    ? fonte.listas
+    : [{ id: 'lista1', label: 'Lista 1', tipos: mod.LISTA1_TIPOS, ids: mod.LISTA1_SPELLTRAP }];
+
+  for (const l of listas) {
+    const avulsas = new Set((l.ids ?? []).map(Number));
+    const tipos = new Set(l.tipos ?? []);
+    const ids = new Set(cartas
+      .filter((c) => avulsas.has(c.id) || (c.t === 'M' && tipos.has(c.tl)))
+      .map((c) => c.id));
+    for (const id of avulsas) ids.add(id);
+    const lista = [...ids].sort((a, b) => a - b);
+    await enviar(token, `conteudo/${l.id}  (${lista.length} cartas)`, 'conteudo',
+                 { chave: l.id, dados: lista }, 'chave');
+  }
 }
 
 // 2. decks/npc/**.ydk -> decks_npc

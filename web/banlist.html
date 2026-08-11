@@ -231,7 +231,7 @@
 
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { CARD_LISTS, getCardList } from '/web/js/cardlists.js';
+import { CARD_LISTS, getCardList, hydrateCardLists } from '/web/js/cardlists.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import {
   hydrateBanlist, getBanlist, saveBanlist,
@@ -543,6 +543,7 @@ window.addEventListener('beforeunload', (e) => {
 
 // ---------------------------------------------------------------- boot
 await hydrateBanlist();
+await hydrateCardLists();   // as listas publicadas, antes de montar o select
 banlist = getBanlist();
 $('budget').value = banlist.pointBudget || '';
 fillListSelect();

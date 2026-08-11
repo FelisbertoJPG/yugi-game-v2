@@ -19,6 +19,7 @@ import {
   getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks, hydrateCustomNpcs,
 } from '/web/js/npcs.js';
 import { inLista1 } from '/web/js/lista1.js';
+import { hydrateCardLists } from '/web/js/cardlists.js';
 import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
@@ -1132,6 +1133,7 @@ if (!npcId) {
   await hydrateDecks();        // decks/users/<u>/player/*.ydk ANTES de qualquer gravação
 }
 await hydrateCustomNpcs();   // adversários criados na Área de Teste (outra máquina inclusive)
+await hydrateCardLists();    // o pool permitido publicado (Lista 1 e as que vierem)
 await hydrateBanlist();
 banlist = getBanlist();
 

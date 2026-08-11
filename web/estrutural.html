@@ -134,6 +134,7 @@
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { inLista1 } from '/web/js/lista1.js';
+import { hydrateCardLists } from '/web/js/cardlists.js';
 import { RARITIES, RARITY_LABEL, listBoosters, hydrateBoosters } from '/web/js/boosters.js';
 import {
   listarEstruturais, salvarEstrutural, apagarEstrutural,
@@ -357,6 +358,7 @@ $('btn-voltar').onclick = () => (location.href = '/web/teste.html');
 // ---------------------------------------------------------------- boot
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });
+  await hydrateCardLists();   // o pool publicado, ANTES de filtrar por ele
   // `db.filter({})` é como o Deck Builder semeia o pool — não existe `all()`.
   pool = db.filter({}).filter(inLista1).sort((a, b) => a.name.localeCompare(b.name));
   await hydrateBoosters();

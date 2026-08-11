@@ -29,6 +29,13 @@ Arquivos (criados no primeiro save com o servidor no ar):
 - `npc-base-meta.json` — o mesmo `{ level, campaign, board }` dos **3 NPCs
   fixos**, que não têm registro próprio (são um array const no código). Só
   isso: nome/tema/deck deles continuam de onde sempre vieram.
+- `cardlists.json` — a **fonte** das listas de cartas (o pool permitido),
+  editada em `web/listas.html`: `{ listas: [{ id, label, tipos, ids }] }`.
+  `tipos` são os `tl` que entram por REGRA (`Normal Monster`, `Fusion
+  Monster`), `ids` são as cartas escolhidas uma a uma. O padrão de fábrica
+  mora em `web/js/lista1.js`; este arquivo passa a mandar assim que existir.
+  O **resultado** resolvido (o array de ids que o servidor confere) NÃO vem
+  para cá: ele é derivado, e só o Supabase precisa dele (`conteudo/<id>`).
 
 Depois de mexer nesses (montar booster, comprar, ganhar duelo, criar adversário), é só
 `git add store/ && git commit` para levar para outra máquina.

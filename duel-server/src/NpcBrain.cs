@@ -811,6 +811,11 @@ namespace DuelServer
             var deitar = DeitarContraVarredora(q, me, foe);
             if (deitar.HasValue) return deitar.Value;
 
+            // 7.6 LEVANTAR PARA ATACAR. Vem depois de deitar: contra uma
+            //     varredora, proteger o campo vale mais que abrir o ataque.
+            var levantar = LevantarParaAtacar(q, me, foe);
+            if (levantar.HasValue) return levantar.Value;
+
             // 8. Nada mais no Main: vai à batalha se tiver monstro, senão encerra.
             if (q.canBattle && _fieldOf(me).Count > 0)
                 return new Play("battle", 0, "ir para a Battle Phase");
@@ -1006,6 +1011,59 @@ namespace DuelServer
         /// Deita-se um por chamada, do mais forte para o mais fraco — protege
         /// primeiro o que vale mais, e o motor volta a perguntar até acabar.
         /// </summary>
+        /// <summary>
+        /// Levanta para ATAQUE o monstro em defesa que já ganha a batalha.
+        ///
+        /// Esta regra faltava, e a falta dela travava o NPC inteiro. Ele SETA
+        /// quando a ameaça supera o que tem na mão (`Escolher`), e a única outra
+        /// regra de posição que existia só DEITAVA (formação de isca). Sem
+        /// ninguém para levantar, monstro setado ficava em defesa para sempre:
+        /// `q.attackers` vinha vazio todo turno e a `DecideBattle` respondia
+        /// "sem atacantes" — por mais forte que o campo dele ficasse.
+        ///
+        /// Foi exatamente o que apareceu no log de um duelo real: o NPC equipava
+        /// +700 no "melhor atacante" e, no mesmo instante, encerrava a batalha
+        /// por não ter atacante nenhum.
+        ///
+        /// Critério: levanta o MAIOR ATK que supere a maior ameaça com a face
+        /// para cima — o mesmo teste que a `DecideBattle` usa para decidir se
+        /// vale atacar. Levantar quem não vence só entregaria o monstro (em
+        /// ataque ele morre e ainda tira LP).
+        ///
+        /// Monstro setado do oponente NÃO entra na conta, igual ao resto do
+        /// cérebro: DEF desconhecida é risco assumido, não motivo para ficar
+        /// parado.
+        /// </summary>
+        Play? LevantarParaAtacar(InteractiveDuel.Question q, int me, int foe)
+        {
+            if (q.repositionable.Count == 0) return null;
+
+            // Com uma varredora baixada do outro lado, quem manda é a formação
+            // de isca — que já rodou antes desta e teria devolvido uma jogada.
+            if (SetadaDele(foe, PUNE_O_CAMPO_TODO) != 0) return null;
+
+            int ameaca = MonstrosDele(foe).Select(m => m.valor).DefaultIfEmpty(0).Max();
+
+            // Só os que estão em DEFESA (setado ou com a face para cima): quem já
+            // está em ataque não tem o que levantar.
+            var emDefesa = _todoFieldPosOf(me)
+                .Where(m => (m.pos & POS_ATAQUE) == 0 && _cards.Stats(m.code).IsMonster)
+                .ToList();
+            if (emDefesa.Count == 0) return null;
+
+            var alvo = q.repositionable
+                .Where(a => a.location == MZONE
+                            && emDefesa.Any(m => m.seq == a.sequence)
+                            && _cards.Stats(a.code).AtkValue > ameaca)
+                .OrderByDescending(a => _cards.Stats(a.code).AtkValue)
+                .FirstOrDefault();
+            if (alvo.code == 0) return null;
+
+            return new Play("reposition", alvo.index,
+                $"levanta {alvo.code} (ATK {_cards.Stats(alvo.code).AtkValue}) para atacar — " +
+                (ameaca > 0 ? $"supera a maior ameaca ({ameaca})" : "o campo dele esta vazio"));
+        }
+
         Play? DeitarContraVarredora(InteractiveDuel.Question q, int me, int foe)
         {
             var varredora = SetadaDele(foe, PUNE_O_CAMPO_TODO);

@@ -370,6 +370,49 @@ namespace DuelServer
             p = brain.Decide(Idle((GAIA, 0), (BATTLE_OX, 1)), 1);
             Check("sem varredora baixada, NAO deita ninguem",
                   p.Action != "reposition", $"(veio {p.Action}: {p.Why})");
+
+            // ---------------------------------------------------------------
+            // LEVANTAR PARA ATACAR — o outro lado da moeda, e o que faltava.
+            //
+            // Sem esta regra o NPC travava sozinho: `Escolher` SETA quando a
+            // ameaca supera o que ele tem na mao, e a unica outra regra de
+            // posicao (a de cima) so' DEITA. Monstro setado ficava em defesa
+            // para sempre, `q.attackers` vinha vazio todo turno e a
+            // `DecideBattle` respondia "sem atacantes" — por mais forte que o
+            // campo dele ficasse. Foi o que apareceu num duelo real: equipava
+            // +700 no "melhor atacante" e encerrava a batalha sem atacante.
+            mesa.Limpa();
+            mesa.CampoDeleTodo.Add((CELTIC, ATAQUE, 0));            // ameaca 1400
+            mesa.MeuCampo.Add((GAIA, DEFESA_VIRADA, 0));            // 2300, deitado
+            p = brain.Decide(Idle((GAIA, 0)), 1);
+            Check("LEVANTA o monstro em defesa que ja' vence (Gaia 2300 > 1400)",
+                  p.Action == "reposition" && p.Index == 0, $"(veio {p.Action}: {p.Why})");
+            Check("e o motivo diz que ele supera a ameaca",
+                  p.Why.Contains("1400"), $"({p.Why})");
+
+            // Nao levanta quem PERDE: em ataque ele morre e ainda tira LP.
+            mesa.Limpa();
+            mesa.CampoDeleTodo.Add((GAIA, ATAQUE, 0));              // ameaca 2300
+            mesa.MeuCampo.Add((BATTLE_OX, DEFESA_VIRADA, 0));       // 1700, perde
+            p = brain.Decide(Idle((BATTLE_OX, 0)), 1);
+            Check("NAO levanta quem perde a troca (Battle Ox 1700 < 2300)",
+                  p.Action != "reposition", $"(veio {p.Action}: {p.Why})");
+
+            // Campo dele vazio: levanta para bater direto.
+            mesa.Limpa();
+            mesa.MeuCampo.Add((BATTLE_OX, DEFESA_VIRADA, 0));
+            p = brain.Decide(Idle((BATTLE_OX, 0)), 1);
+            Check("com o campo dele vazio, levanta para atacar direto",
+                  p.Action == "reposition", $"(veio {p.Action}: {p.Why})");
+
+            // A varredora manda mais: melhor proteger que abrir o ataque.
+            mesa.Limpa();
+            mesa.SetadasDele.Add(MIRROR);
+            mesa.CampoDeleTodo.Add((CELTIC, ATAQUE, 0));
+            mesa.MeuCampo.Add((GAIA, DEFESA_VIRADA, 0));
+            p = brain.Decide(Idle((GAIA, 0)), 1);
+            Check("com Mirror Force baixada, NAO levanta (proteger vale mais)",
+                  p.Action != "reposition", $"(veio {p.Action}: {p.Why})");
         }
 
         // ------------------------------------------------------------------

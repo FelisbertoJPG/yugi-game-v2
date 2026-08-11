@@ -41,6 +41,79 @@ function Ok($t)        { Write-Host "  OK   $t" -ForegroundColor Green }
 function Aviso($t)     { Write-Host "  !    $t" -ForegroundColor Yellow }
 function Falhar($t)    { Write-Host "  ERRO $t" -ForegroundColor Red; exit 1 }
 
+# ---------------------------------------------------------------- tabuleiros
+# Um campo criado NO JOGO grava em %LOCALAPPDATA%\DuelAcademy\game\boards\, nao
+# no repositorio - so' o banco ve os dois mundos. Sem isto, um tabuleiro feito
+# no .exe chegava nos outros jogadores (o front le `tabuleiros`) mas nunca
+# entrava no game.zip nem no git: instalacao nova e offline ficavam sem ele.
+#
+# A leitura de `tabuleiros` e' aberta (policy `tabuleiros_ler_todos`), entao
+# basta a chave publicavel - a mesma que ja' vai dentro do jogo. Ler dela em
+# `web/js/supabase.js` evita uma segunda copia da URL/chave para envelhecer.
+function ConfigSupabase {
+  $arq = Join-Path $root 'web\js\supabase.js'
+  if (-not (Test-Path $arq)) { return $null }
+  $txt = Get-Content $arq -Raw
+  $u = [regex]::Match($txt, "SUPABASE_URL\s*=\s*'([^']+)'")
+  $k = [regex]::Match($txt, "SUPABASE_KEY\s*=\s*'([^']+)'")
+  if (-not ($u.Success -and $k.Success)) { return $null }
+  return @{ url = $u.Groups[1].Value; key = $k.Groups[1].Value }
+}
+
+# Comparacao por CONTEUDO, nao por texto: o arquivo no disco foi escrito pelo
+# navegador (JSON.stringify(...,2)) e este script serializa diferente. Sem
+# normalizar, todo build reescreveria os dois tabuleiros e sujaria o git a' toa.
+#
+# Ainda assim a PRIMEIRA sincronia reescreve tudo, e nao e' bug: `dados` e'
+# `jsonb`, que NAO preserva a ordem das chaves. O que volta do banco tem a
+# ordem normalizada do Postgres, diferente da que o navegador gravou - entao
+# os objetos "diferem" uma vez, o disco assume a ordem do banco, e dai' em
+# diante as comparacoes batem e nenhum build mexe nos arquivos.
+function MesmoJson($a, $b) {
+  try { return (($a | ConvertTo-Json -Depth 30 -Compress) -eq ($b | ConvertTo-Json -Depth 30 -Compress)) }
+  catch { return $false }
+}
+
+# Traz `tabuleiros` do banco para `boards/`. NUNCA apaga: tabuleiro que so'
+# existe no disco (feito offline, ainda nao publicado) fica onde esta'.
+# Falha de rede nao derruba o release - o pacote sai com o que ja' ha' no disco.
+function SincronizarTabuleiros {
+  $cfg = ConfigSupabase
+  if (-not $cfg) { Aviso 'nao li a config do Supabase (pulando a sincronia)'; return }
+
+  $destino = Join-Path $root 'boards'
+  if (-not (Test-Path $destino)) { New-Item -ItemType Directory -Path $destino -Force | Out-Null }
+
+  try {
+    $linhas = Invoke-RestMethod -Method Get -TimeoutSec 20 `
+      -Uri "$($cfg.url)/rest/v1/tabuleiros?select=nome,dados" `
+      -Headers @{ apikey = $cfg.key }
+  } catch {
+    Aviso "banco inacessivel ($($_.Exception.Message.Split([Environment]::NewLine)[0])) - usando so' o disco"
+    return
+  }
+
+  $novos = 0; $atualizados = 0
+  foreach ($linha in @($linhas)) {
+    if (-not $linha.nome -or -not $linha.dados) { continue }
+    $nome = Split-Path -Leaf $linha.nome           # nunca sair de boards/
+    if ($nome -notmatch '\.json$') { $nome = "$nome.json" }
+    $alvo = Join-Path $destino $nome
+
+    if (Test-Path $alvo) {
+      $atual = try { Get-Content $alvo -Raw | ConvertFrom-Json } catch { $null }
+      if ($atual -and (MesmoJson $atual $linha.dados)) { continue }
+      $atualizados++
+    } else { $novos++ }
+
+    $txt = $linha.dados | ConvertTo-Json -Depth 30
+    [System.IO.File]::WriteAllText($alvo, $txt, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "       <- $nome" -ForegroundColor DarkGray
+  }
+  if ($novos -or $atualizados) { Ok "banco: $novos novo(s), $atualizados atualizado(s)" }
+  else { Ok 'banco: nada novo (disco ja esta em dia)' }
+}
+
 function Sha256($caminho) {
   (Get-FileHash -Algorithm SHA256 -Path $caminho).Hash.ToLowerInvariant()
 }
@@ -112,6 +185,10 @@ Copiar (Join-Path $root 'ygo-data\src') (Join-Path $g 'ygo-data\src')
 # Sao conteudo do jogo, versionados de proposito (boards/README.md), e por isso
 # entram no pacote 'game' junto com o front - nao na semente: assim um tabuleiro
 # corrigido chega por atualizacao, sem exigir um exe novo.
+#
+# Antes de empacotar, o banco desce para o disco: e' o que faz um campo criado
+# DENTRO do jogo entrar no payload e no git sozinho.
+SincronizarTabuleiros
 $tabuleiros = Get-ChildItem (Join-Path $root 'boards') -Filter '*.json' -File -ErrorAction SilentlyContinue
 foreach ($b in $tabuleiros) { Copiar $b.FullName (Join-Path $g "boards\$($b.Name)") }
 Ok "$($tabuleiros.Count) tabuleiro(s)"

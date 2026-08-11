@@ -2286,9 +2286,32 @@ $('btn-desistir').onclick = async () => {
     $('btn-desistir').disabled = false;
   }
 };
-$('btn-home').onclick = () => (location.href = '/web/index.html');
+/**
+ * Avisa o servidor que esta tela está saindo, para ele soltar o duelo.
+ *
+ * Sem isto o duelo ficava vivo no servidor até alguém dar `/start` de novo —
+ * segurando o `cards.cdb` aberto e a sala ocupada. Voltar para a home no meio
+ * de um duelo deixava lixo para trás, e a partida seguinte começava sobre ele.
+ *
+ * `sendBeacon` porque `fetch` não sobrevive ao unload: o navegador cancela a
+ * requisição junto com a página. O beacon é entregue pelo próprio navegador
+ * depois que a página morre.
+ */
+function encerrarDueloNoServidor() {
+  try {
+    const corpo = new Blob([JSON.stringify({})], { type: 'application/json' });
+    if (!navigator.sendBeacon(`${SRV}/encerrar`, corpo)) {
+      fetch(`${SRV}/encerrar`, { method: 'POST', keepalive: true }).catch(() => {});
+    }
+  } catch { /* servidor fora: não há o que encerrar */ }
+}
+
+// Fecha tanto na navegação por botão quanto no X da aba.
+window.addEventListener('pagehide', encerrarDueloNoServidor);
+
+$('btn-home').onclick = () => { encerrarDueloNoServidor(); location.href = '/web/index.html'; };
 $('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
-$('end-home').onclick = () => (location.href = '/web/index.html');
+$('end-home').onclick = () => { encerrarDueloNoServidor(); location.href = '/web/index.html'; };
 $('end-again').onclick = () => { fecharFimDuelo(); start(); };
 $('deck-sel').onchange = start;                 // trocar de deck começa novo duelo
 $('gv-close').onclick = () => $('gv-back').classList.remove('show');

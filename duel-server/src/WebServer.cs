@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Text;
 using System.Text.Json;
 using YGO;
@@ -87,16 +89,35 @@ namespace DuelServer
             var listener = new HttpListener();
             listener.Prefixes.Add(url);
             if (extraUrl != null) listener.Prefixes.Add(extraUrl);
+
             try { listener.Start(); }
-            catch (HttpListenerException e)
+            catch (HttpListenerException)
             {
-                Log.Err($"Não consegui abrir {url}{(extraUrl != null ? " / " + extraUrl : "")}: {e.Message}");
-                Log.Err("Porta ocupada? Feche outra instância (duel-academy-stop.exe) e tente de novo.");
-                Log.Err("Se for acesso negado (comum com --lan): reserve a URL, como administrador.");
-                Log.Err($"  PowerShell: netsh http add urlacl url={url} user=$env:USERNAME");
-                Log.Err($"  cmd.exe:    netsh http add urlacl url={url} user=%USERNAME%");
-                return false;
+                // A porta esta ocupada. Antes de desistir, tenta recuperar de um
+                // ORFAO NOSSO: um duel-server que ficou vivo sem jogo aberto (o
+                // usuario matou a janela, o processo sobreviveu). Ele responde
+                // /__shutdown; qualquer outra coisa ignora e o erro segue.
+                //
+                // Isto e' a contencao que faltava: ate' agora o unico caminho era
+                // o usuario descobrir sozinho que havia um processo pendurado.
+                if (PedirParaSair(url) | PedirParaSair(extraUrl))
+                {
+                    Thread.Sleep(1200);
+                    try { listener.Start(); Log.Info("porta recuperada de uma instancia antiga."); }
+                    catch (HttpListenerException e2) { return NaoSubiu(url, extraUrl, e2); }
+                }
+                else
+                {
+                    try { listener.Start(); }
+                    catch (HttpListenerException e3) { return NaoSubiu(url, extraUrl, e3); }
+                }
             }
+
+            // Solta o registro do http.sys e a memoria nativa em QUALQUER forma de
+            // fechamento — X da janela, Ctrl+C, logoff. Sem isto, fechar no X
+            // deixava a porta reservada e o proximo boot reclamava de porta
+            // ocupada sem haver jogo nenhum aberto.
+            ArmarFechamentoLimpo(listener);
 
             Log.Info($"Servidor de duelo (treino W2) em {url}");
             if (_webRoot != null) Log.Info($"Servidor do front em {extraUrl}  (raiz: {_webRoot})");
@@ -114,19 +135,106 @@ namespace DuelServer
                 catch (Exception e) { Log.Err($"[web] {e.Message}"); try { ctx.Response.Abort(); } catch { } }
             }
 
-            // Encerramento limpo: libera a memoria nativa do ocgcore antes de sair.
-            // Um kill do processo pularia isto — funciona, mas deixa o duelo vivo
-            // ate o SO recolher, e nao e' o que queremos quando da' pra pedir bonito.
+            // Saida pelo caminho normal (/shutdown, Ctrl+C tratado). O
+            // `ArmarFechamentoLimpo` cobre os caminhos anormais — X da janela,
+            // logoff — e usa a mesma trava, entao soltar duas vezes nao acontece.
+            LiberarDuelos("encerrando");
+            try { listener.Stop(); listener.Close(); } catch { }
+            Interlocked.Exchange(ref _jaFechou, 1);
+            Log.Info("servidor de duelo encerrado. portas liberadas.");
+            return true;
+        }
+
+        /// <summary>
+        /// Pede educadamente para quem esta na porta encerrar. `true` se algo
+        /// respondeu — e' o nosso `/__shutdown`, entao era um duel-server orfao.
+        ///
+        /// Timeout curto de proposito: se quem atende nao for nosso, nao vale
+        /// segurar o boot do jogo esperando.
+        /// </summary>
+        static bool PedirParaSair(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            // "+" e' o coringa de bind do HttpListener, nao um host alcancavel.
+            string alvo = url.Replace("://+:", "://localhost:");
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                var r = http.PostAsync(alvo.TrimEnd('/') + "/__shutdown", null).GetAwaiter().GetResult();
+                if (!r.IsSuccessStatusCode) return false;
+                Log.Info($"havia uma instancia antiga em {alvo} — pedi para ela sair.");
+                return true;
+            }
+            catch { return false; }
+        }
+
+        static bool NaoSubiu(string url, string extraUrl, HttpListenerException e)
+        {
+            Log.Err($"Não consegui abrir {url}{(extraUrl != null ? " / " + extraUrl : "")}: {e.Message}");
+            Log.Err("Porta ocupada? Feche outra instância (duel-academy-stop.exe) e tente de novo.");
+            Log.Err("Se for acesso negado (comum com --lan): reserve a URL, como administrador.");
+            Log.Err($"  PowerShell: netsh http add urlacl url={url} user=$env:USERNAME");
+            Log.Err($"  cmd.exe:    netsh http add urlacl url={url} user=%USERNAME%");
+            return false;
+        }
+
+        // ------------------------------------------------------ fechar limpo
+
+        delegate bool HandlerDoConsole(uint tipo);
+        static HandlerDoConsole _handler;   // referencia viva: o GC nao pode levar
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetConsoleCtrlHandler(HandlerDoConsole handler, bool add);
+
+        static int _jaFechou;
+
+        /// <summary>
+        /// Garante que a porta e a memoria nativa sejam soltas em QUALQUER
+        /// fechamento.
+        ///
+        /// `ProcessExit` sozinho nao basta no Windows: fechar a janela no X
+        /// dispara CTRL_CLOSE_EVENT, e sem um handler o processo e' derrubado
+        /// sem rodar nada. O registro no http.sys ficava para tras e o boot
+        /// seguinte reclamava de porta ocupada — sem haver jogo aberto. Foi
+        /// exatamente o sintoma relatado.
+        /// </summary>
+        static void ArmarFechamentoLimpo(HttpListener listener)
+        {
+            void Soltar()
+            {
+                // Uma vez so': ProcessExit e o handler do console podem disparar
+                // os dois no mesmo fechamento.
+                if (Interlocked.Exchange(ref _jaFechou, 1) != 0) return;
+                _shutdown = true;
+                LiberarDuelos("fechamento");
+                try { listener.Stop(); listener.Close(); } catch { }
+                Log.Info("portas liberadas.");
+            }
+
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => Soltar();
+            Console.CancelKeyPress += (_, e) => { e.Cancel = true; Soltar(); Environment.Exit(0); };
+
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
+            _handler = tipo =>
+            {
+                // 0 CTRL_C · 1 CTRL_BREAK · 2 CTRL_CLOSE (o X) · 5 LOGOFF · 6 SHUTDOWN
+                Soltar();
+                return false;   // deixa o Windows seguir com o encerramento
+            };
+            try { SetConsoleCtrlHandler(_handler, true); }
+            catch (Exception e) { Log.Warn($"nao consegui armar o fechamento limpo: {e.Message}"); }
+        }
+
+        /// <summary>Descarta o ocgcore de todas as salas.</summary>
+        static void LiberarDuelos(string porque)
+        {
             foreach (var (id, s) in _salas)
                 lock (s.Trava)
                 {
                     if (s.Duel == null) continue;
-                    s.Duel.Dispose(); s.Duel = null;
-                    Log.Info($"duelo da sala {id} liberado.");
+                    s.Duel.Dispose(); s.Duel = null; s.Encerrado = true;
+                    Log.Info($"duelo da sala {id} liberado ({porque}).");
                 }
-            try { listener.Stop(); listener.Close(); } catch { }
-            Log.Info("servidor de duelo encerrado.");
-            return true;
         }
 
         static void Handle(HttpListenerContext ctx)
@@ -148,6 +256,29 @@ namespace DuelServer
             {
                 WriteText(res, "bye");
                 _shutdown = true;
+                return;
+            }
+
+            // Sair do duelo (voltar para a home, fechar a aba). Encerra a SESSAO,
+            // nao o servidor: solta o ocgcore daquela sala para a proxima partida
+            // comecar limpa. Sem isto o duelo ficava vivo ate' alguem dar /start
+            // de novo — e segurando o cards.cdb aberto.
+            //
+            // Chamado por sendBeacon no `beforeunload`, entao precisa aceitar
+            // POST sem corpo e responder rapido.
+            if (path == "/encerrar" && req.HttpMethod == "POST")
+            {
+                var body = ReadBody(req);
+                var sala = SalaDe(body);
+                lock (sala.Trava)
+                {
+                    if (sala.Duel != null)
+                    {
+                        sala.Duel.Dispose(); sala.Duel = null; sala.Encerrado = true;
+                        Log.Info("duelo encerrado a pedido do front (saiu da tela).");
+                    }
+                }
+                WriteJson(res, new { ok = true });
                 return;
             }
 

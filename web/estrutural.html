@@ -106,7 +106,7 @@
     <div class="sec-head">
       DECK · <span class="n" id="conta">0</span> / 40–60
       <span class="spacer"></span>
-      <span style="font-size:10px">clique numa carta para tirar uma cópia</span>
+      <span style="font-size:10px">clique = tirar uma cópia · segurar = ver o efeito</span>
     </div>
     <!-- Um bloco POR RARIDADE, como o Booster Builder: cabeçalho com a etiqueta,
          o nome por extenso e o contador daquela raridade. Clicar no cabeçalho
@@ -165,7 +165,11 @@
            recusado por `salvar_deck` na primeira reedição. -->
       <button id="f-clear">limpar</button>
     </div>
-    <div class="sec-head">POOL · <span class="n" id="conta-pool">—</span> cartas da Lista 1</div>
+    <div class="sec-head">
+      POOL · <span class="n" id="conta-pool">—</span> cartas da Lista 1
+      <span class="spacer"></span>
+      <span style="font-size:10px">clique = adicionar · segurar = ver o efeito</span>
+    </div>
     <div class="lista"><div class="grade" id="grade-pool"></div></div>
   </div>
 </div>
@@ -198,6 +202,11 @@ import {
   listarEstruturais, salvarEstrutural, apagarEstrutural,
   validarYdk, paraYdk, deYdk, travadaPorBooster,
 } from '/web/js/estruturais.js';
+// Segurar a carta abre o efeito dela — o mesmo gesto e a mesma janela do
+// Booster Builder e do Deck Builder. Sem isto, montar um estrutural obrigava a
+// decorar o que cada carta faz.
+import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
+import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -270,13 +279,19 @@ function pintarDeck() {
       for (const id of ids) {
         const el = document.createElement('div');
         el.className = 'carta tem';
-        el.title = `${nomeDe(id)} — clique para tirar uma cópia`;
-        el.innerHTML = `<img src="${ART(id)}" alt=""><span class="q">${quantidades[id]}</span>`;
+        el.title = `${nomeDe(id)}\nclique = tirar uma cópia · segurar = detalhes`;
+        el.innerHTML = `<img src="${ART(id)}" alt="" draggable="false">`
+                     + `<span class="q">${quantidades[id]}</span>`;
+        // `segurou()` consome o gesto: sem consultar isto, soltar o botão
+        // tiraria uma cópia logo depois de abrir os detalhes.
+        const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(id));
         el.onclick = () => {
+          if (segurou()) return;
           quantidades[id] -= 1;
           if (quantidades[id] <= 0) { delete quantidades[id]; delete raridades[id]; }
           pintarDeck(); pintarPool();
         };
+        el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(id); };
         grade.append(el);
       }
       bloco.append(grade);
@@ -369,10 +384,14 @@ function pintarPool() {
     const el = document.createElement('div');
     el.className = 'carta' + (q ? ' tem' : '');
     el.title = `${c.name}${q ? ` — ${q} no deck` : ''}`
-             + (trava ? ` · ${trava.rarity} em "${trava.booster}"` : '');
-    el.innerHTML = `<img src="${ART(c.id)}" alt="">`
+             + (trava ? ` · ${trava.rarity} em "${trava.booster}"` : '')
+             + `\nclique = adicionar em ${trava ? trava.rarity : raridadeAtiva} · segurar = detalhes`;
+    el.innerHTML = `<img src="${ART(c.id)}" alt="" draggable="false">`
       + (q ? `<span class="r ${r}">${r}</span><span class="q">${q}</span>` : '');
+    const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(c.id));
+    el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(c.id); };
     el.onclick = () => {
+      if (segurou()) return;
       // Teto de 3 aqui e no servidor. Aqui é conveniência; lá é a regra.
       if ((quantidades[c.id] ?? 0) >= 3) return void msg('máximo de 3 cópias', 'erro');
       quantidades[c.id] = (quantidades[c.id] ?? 0) + 1;
@@ -493,8 +512,13 @@ $('f-clear').onclick = () => {
 };
 
 // ---------------------------------------------------------------- boot
+injectHoldStyles();   // o anel de progresso do "segurar"
+
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });
+  // A janela de detalhes usa o índice já carregado; o `cards.json` completo
+  // (~14 MB, onde mora o texto do efeito) só é buscado no primeiro detalhe.
+  configureCardDetail({ db });
   await hydrateCardLists();   // o pool publicado, ANTES de filtrar por ele
 
   // Boosters ANTES de montar o pool: `annotateDb` escreve `tags` nas entradas

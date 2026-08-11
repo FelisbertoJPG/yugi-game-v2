@@ -61,8 +61,17 @@
   .zone-empty { font-size: 10px; color: var(--dim); padding: 6px 0; }
   .spacer { flex: 1; }
 
-  .filtros { display: flex; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
-  .filtros input { flex: 1; }
+  /* Mesmo bloco de filtros do Booster Builder (web/booster.html) — quem monta
+     um booster monta um estrutural, e um pool de 1158 cartas sem filtro só se
+     navega sabendo o nome de cor. */
+  .filtros {
+    display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .filtros input, .filtros select { padding: 4px 6px; font-size: 11px; }
+  .filtros input[type="text"] { flex: 1; min-width: 130px; }
+  .filtros input[type="number"] { width: 62px; }
+  .filtros select { max-width: 140px; }
 
   .rodape {
     display: flex; align-items: center; gap: 8px;
@@ -107,7 +116,54 @@
 
   <div class="col">
     <div class="filtros">
-      <input id="busca" placeholder="buscar carta pelo nome...">
+      <input type="text" id="f-name" placeholder="buscar por nome…" autocomplete="off">
+      <select id="f-mon" title="filtrar monstros por tipo">
+        <option value="">monstro…</option>
+        <option value="*">▸ todos os monstros</option>
+        <option value="Normal">Normal</option>
+        <option value="Effect">Efeito</option>
+        <option value="Ritual">Ritual</option>
+        <option value="Fusion">Fusão</option>
+        <option value="Synchro">Sincro</option>
+        <option value="Xyz">Xyz</option>
+        <option value="Link">Link</option>
+        <option value="Pendulum">Pêndulo</option>
+      </select>
+      <select id="f-spell" title="filtrar magias por tipo">
+        <option value="">magia…</option>
+        <option value="*">▸ todas as magias</option>
+        <option value="Normal">Normal</option>
+        <option value="Continuous">Contínua</option>
+        <option value="Equip">Equipamento</option>
+        <option value="Field">Campo</option>
+        <option value="Quick-Play">Rápida</option>
+        <option value="Ritual">Ritual</option>
+      </select>
+      <select id="f-trap" title="filtrar armadilhas por tipo">
+        <option value="">armadilha…</option>
+        <option value="*">▸ todas as armadilhas</option>
+        <option value="Normal">Normal</option>
+        <option value="Continuous">Contínua</option>
+        <option value="Counter">Counter</option>
+      </select>
+      <select id="f-attr"><option value="">atributo: todos</option></select>
+      <select id="f-race"><option value="">raça: todas</option></select>
+      <select id="f-arch"><option value="">arquétipo: todos</option></select>
+      <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
+      <select id="f-sort" title="ordenar as cartas">
+        <option value="">ordem: padrão</option>
+        <option value="atk">maior ATK</option>
+        <option value="def">maior DEF</option>
+        <option value="lv">maior nível</option>
+      </select>
+      <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
+      <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
+      <input type="number" id="f-atk" placeholder="ATK =" min="0" step="50" title="ATK exato (vazio = qualquer)">
+      <input type="number" id="f-def" placeholder="DEF =" min="0" step="50" title="DEF exato (vazio = qualquer)">
+      <!-- Não existe o checkbox "Lista 1" do Booster Builder: aqui o pool é
+           SEMPRE a Lista 1. Um estrutural fora dela seria vendido e depois
+           recusado por `salvar_deck` na primeira reedição. -->
+      <button id="f-clear">limpar</button>
     </div>
     <div class="sec-head">POOL · <span class="n" id="conta-pool">—</span> cartas da Lista 1</div>
     <div class="lista"><div class="grade" id="grade-pool"></div></div>
@@ -135,7 +191,9 @@
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { inLista1 } from '/web/js/lista1.js';
 import { hydrateCardLists } from '/web/js/cardlists.js';
-import { RARITIES, RARITY_LABEL, listBoosters, hydrateBoosters } from '/web/js/boosters.js';
+import {
+  RARITIES, RARITY_LABEL, listBoosters, hydrateBoosters, annotateDb, allBoosterTags,
+} from '/web/js/boosters.js';
 import {
   listarEstruturais, salvarEstrutural, apagarEstrutural,
   validarYdk, paraYdk, deYdk, travadaPorBooster,
@@ -228,13 +286,79 @@ function pintarDeck() {
   $('zonas').replaceChildren(wrap);
 }
 
-function pintarPool() {
-  const termo = $('busca').value.trim().toLowerCase();
-  const lista = (termo
-    ? pool.filter((c) => c.name.toLowerCase().includes(termo))
-    : pool).slice(0, MAX_POOL);
+// ---------------------------------------------------------------- filtros do pool
+// Portados do Booster Builder (`web/js/boosterbuilder.js`), com o mesmo
+// comportamento: os três seletores de TIPO são mutuamente exclusivos, o resto
+// combina livremente. A diferença é que aqui o `pool` já nasce restrito à
+// Lista 1, então o filtro roda por cima dele e não do banco inteiro.
 
-  $('conta-pool').textContent = `${lista.length}${lista.length === MAX_POOL ? '+' : ''}`;
+const TIPO_IDS = ['f-mon', 'f-spell', 'f-trap'];
+const FILTRO_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-sort',
+                    'f-lvmin', 'f-lvmax', 'f-atk', 'f-def'];
+
+function tipoAtivo() {
+  const mon = $('f-mon').value, sp = $('f-spell').value, tr = $('f-trap').value;
+  if (mon) return { cardType: 'M', sub: mon === '*' ? null : mon };
+  if (sp) return { cardType: 'S', sub: sp === '*' ? null : sp };
+  if (tr) return { cardType: 'T', sub: tr === '*' ? null : tr };
+  return { cardType: null, sub: null };
+}
+
+function casaSub(c, cardType, sub) {
+  const tl = c.tl || '';
+  if (cardType === 'M') {
+    if (sub === 'Normal') return /Normal/.test(tl);
+    if (sub === 'Effect') return /Effect/.test(tl) && !/Ritual|Fusion|Synchro|Xyz|Link/.test(tl);
+    return new RegExp(sub).test(tl);
+  }
+  return tl.startsWith(sub);
+}
+
+/** Ordena por maior ATK/DEF/nível (desc.); nulos por último. */
+function ordenar(lista, chave) {
+  if (!chave) return lista;
+  const val = (c) => (chave === 'atk' ? c.atk : chave === 'def' ? c.def : c.lv);
+  return [...lista].sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return vb - va;
+  });
+}
+
+/** O pool depois dos filtros, ANTES do corte de MAX_POOL. */
+function filtrado() {
+  const num = (id) => ($(id).value === '' ? null : Number($(id).value));
+  const { cardType, sub } = tipoAtivo();
+  let r = pool;
+
+  const nome = $('f-name').value.trim().toLowerCase();
+  if (nome) r = r.filter((c) => c.name.toLowerCase().includes(nome));
+  if (cardType) r = r.filter((c) => c.t === cardType);
+  if (sub) r = r.filter((c) => casaSub(c, cardType, sub));
+
+  const at = $('f-attr').value;   if (at) r = r.filter((c) => c.at === at);
+  const raca = $('f-race').value; if (raca) r = r.filter((c) => c.r === raca);
+  const arq = $('f-arch').value;  if (arq) r = r.filter((c) => (c.a ?? []).includes(arq));
+  const tag = $('f-tag').value;   if (tag) r = r.filter((c) => (c.tags ?? []).includes(tag));
+
+  const lvmin = num('f-lvmin'); if (lvmin != null) r = r.filter((c) => (c.lv ?? -1) >= lvmin);
+  const lvmax = num('f-lvmax'); if (lvmax != null) r = r.filter((c) => (c.lv ?? 99) <= lvmax);
+  const atk = num('f-atk');     if (atk != null) r = r.filter((c) => c.atk === atk);
+  const def = num('f-def');     if (def != null) r = r.filter((c) => c.def === def);
+
+  return ordenar(r, $('f-sort').value);
+}
+
+function pintarPool() {
+  const achadas = filtrado();
+  const lista = achadas.slice(0, MAX_POOL);
+
+  // Conta o TOTAL achado, não o que coube na tela: "240" quando havia 900 faz
+  // o filtro parecer mais estreito do que é.
+  $('conta-pool').textContent = achadas.length > MAX_POOL
+    ? `${achadas.length} (mostrando ${MAX_POOL})` : `${achadas.length}`;
 
   const frag = document.createDocumentFragment();
   for (const c of lista) {
@@ -352,17 +476,43 @@ $('btn-apagar').onclick = async () => {
 };
 
 $('btn-novo').onclick = limpar;
-$('busca').oninput = pintarPool;
 $('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+
+for (const id of FILTRO_IDS) $(id).addEventListener('input', pintarPool);
+for (const id of TIPO_IDS) {
+  // Um tipo por vez: escolher "magia" tem de apagar "monstro", senão o filtro
+  // vira uma interseção vazia e o pool some sem explicação.
+  $(id).addEventListener('change', () => {
+    if ($(id).value) for (const outro of TIPO_IDS) if (outro !== id) $(outro).value = '';
+    pintarPool();
+  });
+}
+$('f-clear').onclick = () => {
+  for (const id of [...FILTRO_IDS, ...TIPO_IDS]) $(id).value = '';
+  pintarPool();
+};
 
 // ---------------------------------------------------------------- boot
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });
   await hydrateCardLists();   // o pool publicado, ANTES de filtrar por ele
-  // `db.filter({})` é como o Deck Builder semeia o pool — não existe `all()`.
-  pool = db.filter({}).filter(inLista1).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Boosters ANTES de montar o pool: `annotateDb` escreve `tags` nas entradas
+  // do índice, e é dessas tags que vive o filtro de tag.
   await hydrateBoosters();
   boosters = listBoosters();
+  annotateDb(db);
+
+  // `db.filter({})` é como o Deck Builder semeia o pool — não existe `all()`.
+  pool = db.filter({}).filter(inLista1).sort((a, b) => a.name.localeCompare(b.name));
+
+  // As opções saem do POOL, não do banco inteiro: oferecer "Cyberse" numa lista
+  // que não tem nenhum só cria filtro que devolve zero.
+  const unicos = (fn) => [...new Set(pool.flatMap(fn).filter(Boolean))].sort();
+  $('f-attr').append(...unicos((c) => [c.at]).map((v) => new Option(v, v)));
+  $('f-race').append(...unicos((c) => [c.r]).map((v) => new Option(v, v)));
+  $('f-arch').append(...unicos((c) => c.a ?? []).map((v) => new Option(v, v)));
+  $('f-tag').append(...[...new Set(allBoosterTags())].sort().map((t) => new Option(t, t)));
 } catch (e) {
   msg('não consegui carregar o banco de cartas: ' + e.message, 'erro');
 }

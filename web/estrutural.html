@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck Estrutural — Duel Academy</title>
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; overflow: hidden; }
+
+  .topbar input, .topbar select {
+    background: var(--bg2); color: var(--ink);
+    border: 1px solid var(--line); font-size: 12px; padding: 3px 6px;
+  }
+  .topbar input.nome { width: 190px; color: var(--gold); }
+  .topbar input.preco { width: 70px; }
+
+  .workspace {
+    flex: 1; display: grid; grid-template-columns: minmax(340px, 40%) 1fr;
+    min-height: 0;
+  }
+  .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .col.deck { border-right: 2px solid var(--line); background: var(--bg2); }
+
+  .sec-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    font-size: 11px; letter-spacing: 1px; color: var(--dim);
+  }
+  .sec-head .n { color: var(--ink); }
+  .sec-head .n.ok { color: var(--gold); }
+  .sec-head .n.ruim { color: var(--red); }
+
+  .lista { flex: 1; overflow-y: auto; padding: 8px; }
+
+  .grade {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 6px;
+  }
+  .carta { position: relative; cursor: pointer; border: 1px solid var(--line); }
+  .carta img { width: 100%; display: block; aspect-ratio: 59/86; object-fit: cover; }
+  .carta .q {
+    position: absolute; right: 2px; bottom: 2px;
+    background: #000c; color: var(--gold); font-size: 11px; padding: 0 4px;
+    border: 1px solid var(--line);
+  }
+  .carta.tem { border-color: var(--gold); }
+  .carta .r {
+    position: absolute; left: 2px; top: 2px; font-size: 9px;
+    padding: 0 3px; border: 1px solid #0008; font-weight: bold;
+  }
+  .r.UR { background: #f5c542; color: #241c00; }
+  .r.SR { background: #b9a3ff; color: #17103a; }
+  .r.R  { background: #7fd0ff; color: #04222f; }
+  .r.N  { background: #8a8f98; color: #10131a; }
+
+  .raridades { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+  .raridades button {
+    font-size: 11px; padding: 3px 10px; letter-spacing: 1px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--dim);
+  }
+  .raridades button.on { border-color: var(--gold); color: var(--gold); background: var(--panel); }
+  .raridades .conta { margin-left: auto; font-size: 10px; color: var(--dim); align-self: center; }
+
+  .filtros { display: flex; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+  .filtros input { flex: 1; }
+
+  .rodape {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-top: 2px solid var(--line); background: var(--panel);
+  }
+  .rodape .msg { flex: 1; font-size: 11px; }
+  .rodape .msg.erro { color: var(--red); }
+  .rodape .msg.ok { color: var(--gold); }
+
+  .salvos { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 12px; }
+  .salvos button { font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <button id="btn-voltar">← Área de Teste</button>
+  <span style="flex:1"></span>
+  <label style="font-size:11px; color:var(--dim)">nome</label>
+  <input class="nome" id="nome" placeholder="Deck do Dragão Branco">
+  <label style="font-size:11px; color:var(--dim)">DP</label>
+  <input class="preco" id="preco" type="number" min="0" step="50" value="300">
+  <label style="font-size:11px; color:var(--dim)">
+    <input type="checkbox" id="na-loja" checked> na Loja
+  </label>
+  <button id="btn-salvar" class="btn-primary">publicar</button>
+</div>
+
+<div class="salvos" id="salvos"></div>
+
+<div class="workspace">
+  <div class="col deck">
+    <div class="sec-head">
+      DECK · <span class="n" id="conta">0</span> cartas
+      <span style="flex:1"></span>
+      <span style="font-size:10px">clique para tirar uma cópia</span>
+    </div>
+    <div class="lista"><div class="grade" id="grade-deck"></div></div>
+  </div>
+
+  <div class="col">
+    <!-- Mesma ideia do Booster Builder: a raridade ativa é onde a próxima carta
+         clicada entra. Carta já travada por um booster ignora isto e entra na
+         raridade dela — a raridade é da carta, não do pacote. -->
+    <div class="raridades" id="raridades"></div>
+    <div class="filtros">
+      <input id="busca" placeholder="buscar carta pelo nome...">
+    </div>
+    <div class="sec-head">POOL · <span class="n" id="conta-pool">—</span> cartas da Lista 1</div>
+    <div class="lista"><div class="grade" id="grade-pool"></div></div>
+  </div>
+</div>
+
+<div class="rodape">
+  <span class="msg" id="msg">carregando…</span>
+  <button id="btn-apagar">apagar este</button>
+  <button id="btn-novo">novo</button>
+</div>
+
+<script type="module">
+/**
+ * Builder do Deck Estrutural (Área de Teste).
+ *
+ * Publica no Supabase, não em disco: é a regra de toda ferramenta nova daqui —
+ * salvo em `store/*.json`, o que se cria aqui nunca chegaria em quem joga sem
+ * publicar um Release.
+ *
+ * O pool é a Lista 1, o mesmo do Deck Builder. Um estrutural fora dela seria
+ * vendido e depois recusado por `salvar_deck` na primeira reedição — pior que
+ * não deixar montar.
+ */
+import { YgoDB } from '/ygo-data/src/ygodb.js';
+import { inLista1 } from '/web/js/lista1.js';
+import { RARITIES, listBoosters, hydrateBoosters } from '/web/js/boosters.js';
+import {
+  listarEstruturais, salvarEstrutural, apagarEstrutural,
+  validarYdk, paraYdk, deYdk, travadaPorBooster,
+} from '/web/js/estruturais.js';
+
+const $ = (id) => document.getElementById(id);
+const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+const MAX_POOL = 240;   // mesma trava do Deck Builder: 13.728 miniaturas matam a página
+const MIN_DECK = 40;    // o deck é VENDIDO: menos que isto não dá para jogar
+
+let db = null;
+let pool = [];
+let boosters = [];      // para saber a raridade já travada de cada carta
+let quantidades = {};   // { id: n }
+let raridades = {};     // { id: 'UR'|'SR'|'R'|'N' }
+let raridadeAtiva = 'N';
+let idAtual = null;     // id do estrutural em edição (null = novo)
+
+const nomeDe = (id) => db?.brief(id)?.name ?? String(id);
+const total = () => Object.values(quantidades).reduce((a, b) => a + b, 0);
+
+function msg(texto, tipo = '') {
+  $('msg').textContent = texto;
+  $('msg').className = 'msg ' + tipo;
+}
+
+/** Raridade que ESTA carta deve ter: a travada por booster manda. */
+function raridadeDe(id) {
+  return travadaPorBooster(id, boosters)?.rarity ?? raridades[id] ?? 'N';
+}
+
+function pintarRaridades() {
+  const frag = document.createDocumentFragment();
+  for (const r of RARITIES) {
+    const b = document.createElement('button');
+    b.textContent = r;
+    if (r === raridadeAtiva) b.classList.add('on');
+    b.onclick = () => { raridadeAtiva = r; pintarRaridades(); pintarPool(); };
+    frag.append(b);
+  }
+  const conta = document.createElement('span');
+  conta.className = 'conta';
+  conta.textContent = RARITIES
+    .map((r) => `${r} ${Object.keys(quantidades).filter((id) => raridadeDe(id) === r).length}`)
+    .join(' · ');
+  frag.append(conta);
+  $('raridades').replaceChildren(frag);
+}
+
+function pintarDeck() {
+  const n = total();
+  $('conta').textContent = n;
+  $('conta').className = 'n ' + (n >= MIN_DECK && n <= 60 ? 'ok' : 'ruim');
+
+  // O deck é vendido: publicar com menos de 40 entregaria algo injogável.
+  $('btn-salvar').disabled = n < MIN_DECK || n > 60;
+
+  const frag = document.createDocumentFragment();
+  for (const [id, q] of Object.entries(quantidades)) {
+    const r = raridadeDe(id);
+    const el = document.createElement('div');
+    el.className = 'carta tem';
+    el.title = `${nomeDe(id)} · ${r} — clique para tirar uma`;
+    el.innerHTML = `<img src="${ART(id)}" alt="">`
+      + `<span class="r ${r}">${r}</span><span class="q">${q}</span>`;
+    el.onclick = () => {
+      quantidades[id] -= 1;
+      if (quantidades[id] <= 0) { delete quantidades[id]; delete raridades[id]; }
+      pintarDeck(); pintarPool(); pintarRaridades();
+    };
+    frag.append(el);
+  }
+  $('grade-deck').replaceChildren(frag);
+}
+
+function pintarPool() {
+  const termo = $('busca').value.trim().toLowerCase();
+  const lista = (termo
+    ? pool.filter((c) => c.name.toLowerCase().includes(termo))
+    : pool).slice(0, MAX_POOL);
+
+  $('conta-pool').textContent = `${lista.length}${lista.length === MAX_POOL ? '+' : ''}`;
+
+  const frag = document.createDocumentFragment();
+  for (const c of lista) {
+    const q = quantidades[c.id] ?? 0;
+    const trava = travadaPorBooster(c.id, boosters);
+    const r = q ? raridadeDe(c.id) : (trava?.rarity ?? raridadeAtiva);
+
+    const el = document.createElement('div');
+    el.className = 'carta' + (q ? ' tem' : '');
+    el.title = `${c.name}${q ? ` — ${q} no deck` : ''}`
+             + (trava ? ` · ${trava.rarity} em "${trava.booster}"` : '');
+    el.innerHTML = `<img src="${ART(c.id)}" alt="">`
+      + (q ? `<span class="r ${r}">${r}</span><span class="q">${q}</span>` : '');
+    el.onclick = () => {
+      // Teto de 3 aqui e no servidor. Aqui é conveniência; lá é a regra.
+      if ((quantidades[c.id] ?? 0) >= 3) return void msg('máximo de 3 cópias', 'erro');
+      quantidades[c.id] = (quantidades[c.id] ?? 0) + 1;
+
+      // Reprint entra na raridade em que a carta JÁ está — a raridade é da
+      // carta, não do pacote (mesma regra do Booster Builder).
+      if (trava) {
+        raridades[c.id] = trava.rarity;
+        if (trava.rarity !== raridadeAtiva)
+          msg(`${c.name} é ${trava.rarity} em "${trava.booster}" — entrou como ${trava.rarity}`);
+      } else {
+        raridades[c.id] = raridadeAtiva;
+      }
+      pintarDeck(); pintarPool(); pintarRaridades();
+    };
+    frag.append(el);
+  }
+  $('grade-pool').replaceChildren(frag);
+}
+
+async function pintarSalvos() {
+  const todos = await listarEstruturais();
+  const frag = document.createDocumentFragment();
+  for (const d of todos) {
+    const b = document.createElement('button');
+    b.textContent = `${d.nome} (${d.preco} DP)${d.na_loja ? '' : ' · fora da loja'}`;
+    if (d.id === idAtual) b.classList.add('btn-primary');
+    b.onclick = () => carregar(d);
+    frag.append(b);
+  }
+  const novo = document.createElement('button');
+  novo.textContent = '+ novo';
+  novo.onclick = limpar;
+  frag.append(novo);
+  $('salvos').replaceChildren(frag);
+}
+
+function carregar(d) {
+  idAtual = d.id;
+  $('nome').value = d.nome;
+  $('preco').value = d.preco;
+  $('na-loja').checked = d.na_loja !== false;
+  quantidades = deYdk(d.ydk);
+  raridades = { ...(d.raridades ?? {}) };
+  pintarDeck(); pintarPool(); pintarRaridades(); pintarSalvos();
+  msg(`editando "${d.nome}"`);
+}
+
+function limpar() {
+  idAtual = null;
+  $('nome').value = '';
+  $('preco').value = 300;
+  $('na-loja').checked = true;
+  quantidades = {};
+  raridades = {};
+  pintarDeck(); pintarPool(); pintarRaridades(); pintarSalvos();
+  msg('novo deck estrutural');
+}
+
+/** "Deck do Dragão Branco" -> "deck-do-dragao-branco" */
+function slug(s) {
+  return String(s).normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'estrutural';
+}
+
+$('btn-salvar').onclick = async () => {
+  const nome = $('nome').value.trim();
+  if (!nome) return void msg('dê um nome ao deck', 'erro');
+
+  const ydk = paraYdk(quantidades);
+
+  // Valida NO SERVIDOR, com a mesma função que a compra usa — validar só aqui
+  // deixaria a tela e o banco discordando justo na publicação.
+  const v = await validarYdk(ydk);
+  if (!v.ok) return void msg(`deck inválido: ${(v.problemas ?? []).join('; ')}`, 'erro');
+
+  // A capa é a carta mais frequente; empate resolve pela primeira. Serve só de
+  // arte na vitrine.
+  const capa = Object.entries(quantidades).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  const r = await salvarEstrutural({
+    id: idAtual ?? slug(nome),
+    nome, preco: $('preco').value, capa, ydk,
+    raridades: Object.fromEntries(Object.keys(quantidades).map((id) => [id, raridadeDe(id)])),
+    na_loja: $('na-loja').checked,
+  });
+  if (!r.ok) return void msg(r.error, 'erro');
+
+  idAtual = idAtual ?? slug(nome);
+  await pintarSalvos();
+  msg(`"${nome}" publicado — todo mundo recebe no próximo boot`, 'ok');
+};
+
+$('btn-apagar').onclick = async () => {
+  if (!idAtual) return void msg('nada para apagar', 'erro');
+  const r = await apagarEstrutural(idAtual);
+  if (!r.ok) return void msg(r.error ?? 'não consegui apagar', 'erro');
+  limpar();
+  await pintarSalvos();
+  msg('apagado', 'ok');
+};
+
+$('btn-novo').onclick = limpar;
+$('busca').oninput = pintarPool;
+$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+
+// ---------------------------------------------------------------- boot
+try {
+  db = await YgoDB.load('/ygo-data/data', { full: false });
+  // `db.filter({})` é como o Deck Builder semeia o pool — não existe `all()`.
+  pool = db.filter({}).filter(inLista1).sort((a, b) => a.name.localeCompare(b.name));
+  await hydrateBoosters();
+  boosters = listBoosters();
+} catch (e) {
+  msg('não consegui carregar o banco de cartas: ' + e.message, 'erro');
+}
+
+await pintarSalvos();
+limpar();
+pintarRaridades();
+pintarPool();
+</script>
+</body>
+</html>

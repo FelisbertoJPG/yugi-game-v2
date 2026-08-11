@@ -55,6 +55,11 @@
       <span>Booster Builder</span>
       <span class="why">montar boosters e pôr na Loja</span>
     </button>
+    <button id="btn-estrutural">
+      <span class="k">2</span>
+      <span>Deck Estrutural</span>
+      <span class="why">deck pronto na Loja — o jogador compra e já joga</span>
+    </button>
     <button id="btn-npcs">
       <span class="k">3</span>
       <span>Adversários (NPCs) — editor</span>
@@ -99,6 +104,7 @@ const renderDP = () => { $('dp').textContent = `${getDP()} DP`; };
 renderDP();
 $('btn-deck').onclick = () => (location.href = '/web/deck.html');
 $('btn-booster').onclick = () => (location.href = '/web/booster.html');
+$('btn-estrutural').onclick = () => (location.href = '/web/estrutural.html');
 $('btn-npcs').onclick = () => (location.href = '/web/npcs.html');
 $('btn-train').onclick = () => (location.href = '/web/duel.html');
 $('btn-cards').onclick = () => (location.href = '/ygo-data/examples/web-demo.html');

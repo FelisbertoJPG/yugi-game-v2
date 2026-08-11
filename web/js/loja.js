@@ -13,6 +13,7 @@ import {
   getDP, getPity, hydrateWallet, abrirPacote, getUrSpend,
 } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
+import { listarEstruturais, jaComprados, comprarEstrutural } from '/web/js/estruturais.js';
 
 const priceOf = (b) => (Number.isFinite(b.price) ? b.price : DEFAULT_PRICE);
 const pityKey = (b) => b.name;   // identidade do booster para o contador "a cada 10"
@@ -123,6 +124,56 @@ async function buy(booster) {
   showReveal(booster, pulls);
 }
 
+/**
+ * Vitrine dos Decks Estruturais.
+ *
+ * Ao contrário do booster, aqui não há revelação: o servidor cobra, credita as
+ * cartas na coleção, monta o deck e devolve o nome dele. O jogador sai da Loja
+ * com o deck escolhível no PvP e no PvE, sem passar pelo Deck Builder.
+ */
+async function renderEstruturais() {
+  const [lista, comprados] = await Promise.all([
+    listarEstruturais({ soLoja: true }),
+    jaComprados(),
+  ]);
+
+  $('titulo-estruturais').hidden = lista.length === 0;
+  const dp = getDP();
+  const frag = document.createDocumentFragment();
+
+  for (const d of lista) {
+    const tem = comprados.has(d.id);
+    const podeComprar = !tem && dp >= d.preco;
+
+    const el = document.createElement('div');
+    el.className = 'pack';
+    el.innerHTML =
+      `<div class="art" style="background-image:${d.capa ? `url('${ART(d.capa)}')` : 'none'}"></div>` +
+      `<div class="body">` +
+        `<span class="name">${escapeHtml(d.nome)}</span>` +
+        `<span class="meta">deck pronto · ${d.preco} DP</span>` +
+        `<span class="meta">${tem ? 'você já tem este deck' : 'entra montado nos seus decks'}</span>` +
+        `<button class="comprar btn-primary" ${podeComprar ? '' : 'disabled'}>` +
+          (tem ? 'adquirido' : `comprar (${d.preco} DP)`) +
+        `</button>` +
+      `</div>`;
+
+    if (podeComprar) {
+      el.querySelector('.comprar').onclick = async (e) => {
+        e.currentTarget.disabled = true;
+        const r = await comprarEstrutural(d.id);
+        if (!r.ok) { toast(r.error); e.target.disabled = false; return; }
+        toast(`"${r.deck}" foi para os seus decks — já dá para jogar com ele`);
+        renderDP();
+        renderShop();            // o DP mudou: os botões de booster acompanham
+        await renderEstruturais();
+      };
+    }
+    frag.append(el);
+  }
+  $('estruturais').replaceChildren(frag);
+}
+
 function showReveal(booster, pulls) {
   $('reveal-title').textContent = `${booster.name} — pacote aberto!`;
   $('reveal-sub').textContent = `${pulls.length} cartas foram para a sua Coleção · saldo: ${getDP()} DP`;
@@ -169,3 +220,4 @@ for (const c of listCustom()) if (c.art) customArt.set(c.id, c.art);
 
 renderDP();
 renderShop();
+await renderEstruturais();

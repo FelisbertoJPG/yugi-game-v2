@@ -127,7 +127,10 @@ por `hydrateCardLists()` no boot de quem filtra pelo pool (Deck Builder,
 Booster Builder, Deck Estrutural, Banlist).
 
 Editado em **`web/listas.html`** (Área de Teste), no mesmo molde de duas
-colunas da Banlist. Salvar grava as DUAS chaves de uma vez:
+colunas da Banlist — pool à direita com o filtro completo do Deck Builder
+(nome, tipo, atributo, raça, arquétipo, tag, raridade, nível, ATK/DEF,
+banlist) mais um de **pertinência** (dentro/avulsa/fora da lista
+selecionada). Salvar grava as DUAS chaves de uma vez:
 `conteudo/cardlists` (a fonte, espelhada em `store/cardlists.json`) e
 `conteudo/<id da lista>` (o **resultado resolvido** contra o banco de
 cartas). São duas porque `salvar_deck` roda no Postgres, que não tem o banco

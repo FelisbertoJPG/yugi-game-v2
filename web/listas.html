@@ -94,6 +94,17 @@
   .thumb .marca.avulsa { color: var(--gold); }
   .thumb.na-lista { outline: 2px solid var(--gold); outline-offset: -2px; }
 
+  /* selo de raridade (dos boosters) — mesma linguagem visual do Deck Builder */
+  .thumb .rarity {
+    position: absolute; top: 2px; right: 2px; z-index: 2;
+    font-size: 8px; line-height: 1; padding: 2px 3px; border-radius: 2px;
+    font-weight: bold; letter-spacing: .5px; background: #04121fcc;
+  }
+  .thumb .rarity.UR { color: #e8c46a; }
+  .thumb .rarity.SR { color: #cbb7ff; }
+  .thumb .rarity.R  { color: #7fd0ff; }
+  .thumb .rarity.N  { color: #cfd6de; }
+
   body.picking .pool-grid .thumb { cursor: copy; }
 </style>
 </head>
@@ -113,7 +124,10 @@
   (todo monstro Normal, toda Fusão vanilla… marcados nas caixinhas de cada
   lista) e as <b>cartas avulsas</b>, escolhidas uma a uma no pool à direita —
   é aqui que entra magia, armadilha, Sincro, Xyz. Clique numa lista pra
-  selecioná-la e depois nas cartas do pool. <b>Salvar</b> publica no Supabase
+  selecioná-la e depois nas cartas do pool; o pool tem os mesmos filtros do
+  Deck Builder (nome, tipo, atributo, raça, arquétipo, tag, raridade, nível,
+  ATK/DEF, banlist) mais um de <b>pertinência</b>, pra ver só o que já está na
+  lista — ou só o que ainda falta. <b>Salvar</b> publica no Supabase
   (fonte + resultado resolvido) — é o mesmo array que o servidor confere ao
   salvar um deck, então não precisa rodar mais nada nem publicar Release.
   Só admin publica.
@@ -167,6 +181,22 @@
       <select id="f-attr"><option value="">atributo: todos</option></select>
       <select id="f-race"><option value="">raça: todas</option></select>
       <select id="f-arch"><option value="">arquétipo: todos</option></select>
+      <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
+      <select id="f-rar" title="filtrar por raridade (dos boosters)">
+        <option value="">todas as raridades</option>
+        <option value="UR">UR</option>
+        <option value="SR">SR</option>
+        <option value="R">R</option>
+        <option value="N">N</option>
+      </select>
+      <select id="f-banlist" title="filtrar por regra de banlist (web/banlist.html)">
+        <option value="">banlist: todas</option>
+        <option value="limit1">Limitada (1)</option>
+        <option value="limit2">Semilimitada (2)</option>
+        <option value="points">com pontos</option>
+        <option value="group">lista compartilhada</option>
+        <option value="none">sem regra nenhuma</option>
+      </select>
       <select id="f-pert" title="filtrar pelo que já está na lista selecionada">
         <option value="">na lista: tanto faz</option>
         <option value="dentro">já está (regra ou avulsa)</option>
@@ -184,6 +214,8 @@
       </select>
       <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
       <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
+      <input type="number" id="f-atk" placeholder="ATK =" min="0" step="50" title="ATK exato (vazio = qualquer)">
+      <input type="number" id="f-def" placeholder="DEF =" min="0" step="50" title="DEF exato (vazio = qualquer)">
       <button id="f-clear">limpar</button>
     </div>
     <div class="sec-head">
@@ -204,6 +236,8 @@ import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
   hydrateCardLists, fonteDasListas, salvarListas, resolverLista, apagarListaPublicada,
 } from '/web/js/cardlists.js';
+import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
+import { hydrateBanlist, getBanlist } from '/web/js/banlist.js';
 import { perfilAtual } from '/web/js/supabase.js';
 
 const $ = (id) => document.getElementById(id);
@@ -220,6 +254,8 @@ function toast(msg) {
 
 let db = null;
 let todas = [];              // o índice inteiro, uma vez só
+let rarIdx = new Map();      // id -> {rarity, booster}
+let banlist = null;          // só para FILTRAR o pool; nada aqui edita banlist
 let tiposDeMonstro = [];     // [{tl, n}] — o que existe de verdade no banco
 let listas = [];             // a cópia de trabalho ({id, label, tipos, ids})
 let selecionada = null;      // id da lista que recebe o clique do pool
@@ -374,7 +410,8 @@ $('btn-new').onclick = () => {
 // ---------------------------------------------------------------- pool (direita)
 
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
-const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-pert', 'f-sort', 'f-lvmin', 'f-lvmax'];
+const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-rar', 'f-banlist', 'f-pert',
+                    'f-sort', 'f-lvmin', 'f-lvmax', 'f-atk', 'f-def'];
 
 function activeTypeFilter() {
   const mon = $('f-mon').value, sp = $('f-spell').value, tr = $('f-trap').value;
@@ -424,6 +461,27 @@ function aplicarFiltros() {
   });
   if (sub) poolResults = poolResults.filter((c) => matchesSub(c, cardType, sub));
 
+  const atk = num('f-atk');
+  if (atk != null) poolResults = poolResults.filter((c) => c.atk === atk);
+  const def = num('f-def');
+  if (def != null) poolResults = poolResults.filter((c) => c.def === def);
+  const tag = $('f-tag').value;
+  if (tag) poolResults = poolResults.filter((c) => (c.tags ?? []).includes(tag));
+  const rar = $('f-rar').value;
+  if (rar) poolResults = poolResults.filter((c) => rarIdx.get(c.id)?.rarity === rar);
+
+  // Regra de banlist já atribuída. Não é a mesma coisa que a lista (a banlist é
+  // uma camada POR CIMA dela), mas achar "o que já está limitado" ajuda a
+  // decidir o que entra no pool.
+  const bl = $('f-banlist').value;
+  const emp = (mapa, id) => (banlist?.[mapa]?.[String(id)] ?? 0);
+  if (bl === 'limit1') poolResults = poolResults.filter((c) => emp('cardLimits', c.id) === 1);
+  else if (bl === 'limit2') poolResults = poolResults.filter((c) => emp('cardLimits', c.id) === 2);
+  else if (bl === 'points') poolResults = poolResults.filter((c) => emp('cardPoints', c.id) > 0);
+  else if (bl === 'group') poolResults = poolResults.filter((c) => emp('cardGroups', c.id) > 0);
+  else if (bl === 'none') poolResults = poolResults.filter((c) =>
+    !emp('cardLimits', c.id) && !emp('cardPoints', c.id) && !emp('cardGroups', c.id));
+
   const lista = listaSel();
   const pert = $('f-pert').value;
   if (lista && pert === 'dentro') poolResults = poolResults.filter((c) => porRegra(lista, c) || avulsa(lista, c.id));
@@ -440,9 +498,11 @@ function renderPool() {
   for (const c of poolResults.slice(0, MAX_RENDER)) {
     const regra = lista && porRegra(lista, c);
     const solta = lista && avulsa(lista, c.id);
+    const rar = rarIdx.get(c.id)?.rarity;
     const el = document.createElement('div');
     el.className = 'thumb' + (regra || solta ? ' na-lista' : '');
     el.title = `${c.name}\n${c.tl}` +
+      (rar ? `\nraridade: ${rar} — ${rarIdx.get(c.id).boosters.join(', ')}` : '') +
       (regra ? `\njá entra por regra ("${c.tl}")` : '') +
       (solta ? '\nadicionada à mão — clique para tirar' : '') +
       (lista && !regra && !solta ? `\nclique: adicionar a ${lista.label}` : '') +
@@ -450,6 +510,7 @@ function renderPool() {
     el.innerHTML =
       (solta ? '<span class="marca avulsa">✚</span>'
         : regra ? '<span class="marca regra">regra</span>' : '') +
+      (rar ? `<span class="rarity ${rar}">${rar}</span>` : '') +
       `<img loading="lazy" src="${ART(c.id)}" alt="">`;
     el.onclick = () => {
       if (!lista) return void toast('selecione uma lista à esquerda primeiro');
@@ -524,6 +585,17 @@ try {
 
 await hydrateCardLists();
 listas = fonteDasListas();
+
+// Boosters ANTES de `db.filter({})`: `annotateDb` escreve `tags`/`rarity` nas
+// entradas do índice, e `todas` guarda as MESMAS referências — anotar depois
+// funcionaria, mas anotar antes é a ordem que o Deck Builder já usa.
+await hydrateBoosters();
+annotateDb(db);
+rarIdx = rarityIndex();
+
+await hydrateBanlist();
+banlist = getBanlist();
+
 todas = db.filter({});
 
 // Os tipos que EXISTEM no banco, do mais comum para o mais raro. Escrever a
@@ -538,6 +610,7 @@ const uniq = (fn) => [...new Set(todas.map(fn).filter(Boolean))].sort();
 $('f-attr').append(...uniq((c) => c.at).map((v) => new Option(v, v)));
 $('f-race').append(...uniq((c) => c.r).map((v) => new Option(v, v)));
 $('f-arch').append(...uniq((c) => c.a[0]).map((v) => new Option(v, v)));
+$('f-tag').append(...[...new Set(allBoosterTags())].sort().map((t) => new Option(t, t)));
 
 const perfil = await perfilAtual();
 $('quem').textContent = perfil

@@ -46,22 +46,20 @@
     border: 1px solid var(--line);
   }
   .carta.tem { border-color: var(--gold); }
-  .carta .r {
-    position: absolute; left: 2px; top: 2px; font-size: 9px;
-    padding: 0 3px; border: 1px solid #0008; font-weight: bold;
-  }
-  .r.UR { background: #f5c542; color: #241c00; }
-  .r.SR { background: #b9a3ff; color: #17103a; }
-  .r.R  { background: #7fd0ff; color: #04222f; }
-  .r.N  { background: #8a8f98; color: #10131a; }
 
-  .raridades { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
-  .raridades button {
-    font-size: 11px; padding: 3px 10px; letter-spacing: 1px;
-    background: var(--panel2); border: 1px solid var(--line); color: var(--dim);
-  }
-  .raridades button.on { border-color: var(--gold); color: var(--gold); background: var(--panel); }
-  .raridades .conta { margin-left: auto; font-size: 10px; color: var(--dim); align-self: center; }
+  /* Mesmas cores e mesmo vocabulário do Booster Builder — quem já usa um
+     reconhece o outro sem reaprender. */
+  .sec-head .rar { font-weight: bold; letter-spacing: 2px; }
+  .rar-UR { color: #e8c46a; }   /* dourado */
+  .rar-SR { color: #cbb7ff; }   /* prata/roxo */
+  .rar-R  { color: #7fd0ff; }   /* azul */
+  .rar-N  { color: var(--dim); }
+
+  .rar-block { padding: 0 12px 10px; }
+  .rar-block .sec-head { margin: 0 -12px 6px; cursor: pointer; }
+  .rar-block.ativa .sec-head { background: var(--panel2); box-shadow: inset 3px 0 0 var(--gold); }
+  .zone-empty { font-size: 10px; color: var(--dim); padding: 6px 0; }
+  .spacer { flex: 1; }
 
   .filtros { display: flex; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
   .filtros input { flex: 1; }
@@ -97,18 +95,17 @@
 <div class="workspace">
   <div class="col deck">
     <div class="sec-head">
-      DECK · <span class="n" id="conta">0</span> cartas
-      <span style="flex:1"></span>
-      <span style="font-size:10px">clique para tirar uma cópia</span>
+      DECK · <span class="n" id="conta">0</span> / 40–60
+      <span class="spacer"></span>
+      <span style="font-size:10px">clique numa carta para tirar uma cópia</span>
     </div>
-    <div class="lista"><div class="grade" id="grade-deck"></div></div>
+    <!-- Um bloco POR RARIDADE, como o Booster Builder: cabeçalho com a etiqueta,
+         o nome por extenso e o contador daquela raridade. Clicar no cabeçalho
+         torna a raridade ativa — é onde a próxima carta do pool entra. -->
+    <div class="lista" id="zonas"></div>
   </div>
 
   <div class="col">
-    <!-- Mesma ideia do Booster Builder: a raridade ativa é onde a próxima carta
-         clicada entra. Carta já travada por um booster ignora isto e entra na
-         raridade dela — a raridade é da carta, não do pacote. -->
-    <div class="raridades" id="raridades"></div>
     <div class="filtros">
       <input id="busca" placeholder="buscar carta pelo nome...">
     </div>
@@ -137,7 +134,7 @@
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { inLista1 } from '/web/js/lista1.js';
-import { RARITIES, listBoosters, hydrateBoosters } from '/web/js/boosters.js';
+import { RARITIES, RARITY_LABEL, listBoosters, hydrateBoosters } from '/web/js/boosters.js';
 import {
   listarEstruturais, salvarEstrutural, apagarEstrutural,
   validarYdk, paraYdk, deYdk, travadaPorBooster,
@@ -169,48 +166,65 @@ function raridadeDe(id) {
   return travadaPorBooster(id, boosters)?.rarity ?? raridades[id] ?? 'N';
 }
 
-function pintarRaridades() {
-  const frag = document.createDocumentFragment();
-  for (const r of RARITIES) {
-    const b = document.createElement('button');
-    b.textContent = r;
-    if (r === raridadeAtiva) b.classList.add('on');
-    b.onclick = () => { raridadeAtiva = r; pintarRaridades(); pintarPool(); };
-    frag.append(b);
-  }
-  const conta = document.createElement('span');
-  conta.className = 'conta';
-  conta.textContent = RARITIES
-    .map((r) => `${r} ${Object.keys(quantidades).filter((id) => raridadeDe(id) === r).length}`)
-    .join(' · ');
-  frag.append(conta);
-  $('raridades').replaceChildren(frag);
-}
+/** Ids do deck que estão nesta raridade. */
+const daRaridade = (r) => Object.keys(quantidades).filter((id) => raridadeDe(id) === r);
 
+/**
+ * Desenha o deck em QUATRO BLOCOS, um por raridade — o mesmo formato do
+ * Booster Builder (`booster-zones`). A separação é o ponto: numa grade única
+ * não dá para ver de relance quantas UR o deck tem, que é justamente o que se
+ * está balanceando.
+ */
 function pintarDeck() {
   const n = total();
   $('conta').textContent = n;
   $('conta').className = 'n ' + (n >= MIN_DECK && n <= 60 ? 'ok' : 'ruim');
 
-  // O deck é vendido: publicar com menos de 40 entregaria algo injogável.
+  // O deck é VENDIDO: publicar com menos de 40 entregaria algo injogável.
   $('btn-salvar').disabled = n < MIN_DECK || n > 60;
 
-  const frag = document.createDocumentFragment();
-  for (const [id, q] of Object.entries(quantidades)) {
-    const r = raridadeDe(id);
-    const el = document.createElement('div');
-    el.className = 'carta tem';
-    el.title = `${nomeDe(id)} · ${r} — clique para tirar uma`;
-    el.innerHTML = `<img src="${ART(id)}" alt="">`
-      + `<span class="r ${r}">${r}</span><span class="q">${q}</span>`;
-    el.onclick = () => {
-      quantidades[id] -= 1;
-      if (quantidades[id] <= 0) { delete quantidades[id]; delete raridades[id]; }
-      pintarDeck(); pintarPool(); pintarRaridades();
-    };
-    frag.append(el);
+  const wrap = document.createDocumentFragment();
+  for (const r of RARITIES) {
+    const ids = daRaridade(r);
+
+    const bloco = document.createElement('div');
+    bloco.className = 'rar-block' + (r === raridadeAtiva ? ' ativa' : '');
+
+    const head = document.createElement('div');
+    head.className = 'sec-head';
+    head.innerHTML = `<span class="rar rar-${r}">${r}</span>`
+      + `<span style="color:var(--dim)">${RARITY_LABEL[r]}</span>`
+      + `<span class="n">${ids.reduce((s, id) => s + quantidades[id], 0)}</span>`
+      + `<span class="spacer"></span>`
+      + `<span style="font-size:10px">${r === raridadeAtiva ? 'recebendo' : ''}</span>`;
+    head.onclick = () => { raridadeAtiva = r; pintarDeck(); pintarPool(); };
+    bloco.append(head);
+
+    if (!ids.length) {
+      const vazio = document.createElement('div');
+      vazio.className = 'zone-empty';
+      vazio.textContent = `Nenhuma carta em ${r}.`;
+      bloco.append(vazio);
+    } else {
+      const grade = document.createElement('div');
+      grade.className = 'grade';
+      for (const id of ids) {
+        const el = document.createElement('div');
+        el.className = 'carta tem';
+        el.title = `${nomeDe(id)} — clique para tirar uma cópia`;
+        el.innerHTML = `<img src="${ART(id)}" alt=""><span class="q">${quantidades[id]}</span>`;
+        el.onclick = () => {
+          quantidades[id] -= 1;
+          if (quantidades[id] <= 0) { delete quantidades[id]; delete raridades[id]; }
+          pintarDeck(); pintarPool();
+        };
+        grade.append(el);
+      }
+      bloco.append(grade);
+    }
+    wrap.append(bloco);
   }
-  $('grade-deck').replaceChildren(frag);
+  $('zonas').replaceChildren(wrap);
 }
 
 function pintarPool() {
@@ -247,7 +261,7 @@ function pintarPool() {
       } else {
         raridades[c.id] = raridadeAtiva;
       }
-      pintarDeck(); pintarPool(); pintarRaridades();
+      pintarDeck(); pintarPool();
     };
     frag.append(el);
   }
@@ -278,7 +292,7 @@ function carregar(d) {
   $('na-loja').checked = d.na_loja !== false;
   quantidades = deYdk(d.ydk);
   raridades = { ...(d.raridades ?? {}) };
-  pintarDeck(); pintarPool(); pintarRaridades(); pintarSalvos();
+  pintarDeck(); pintarPool(); pintarSalvos();
   msg(`editando "${d.nome}"`);
 }
 
@@ -289,7 +303,7 @@ function limpar() {
   $('na-loja').checked = true;
   quantidades = {};
   raridades = {};
-  pintarDeck(); pintarPool(); pintarRaridades(); pintarSalvos();
+  pintarDeck(); pintarPool(); pintarSalvos();
   msg('novo deck estrutural');
 }
 
@@ -353,7 +367,6 @@ try {
 
 await pintarSalvos();
 limpar();
-pintarRaridades();
 pintarPool();
 </script>
 </body>

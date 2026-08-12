@@ -37,11 +37,18 @@
               background:var(--panel); border:1px solid var(--line); padding:10px 14px">
     <span>Seu saldo: <b id="dp" style="color:var(--gold)">— DP</b></span>
     <span style="flex:1"></span>
-    <!-- O "+ Adicionar DP" saiu daqui. O saldo passou a ser decidido pelo
-         servidor (migration 0004), então um botão que credita do lado do
-         cliente não teria efeito nenhum — e um botão que não faz nada é pior
-         que botão nenhum. Para testar com saldo alto, credite pelo SQL Editor. -->
-    <span style="font-size:10px; color:var(--dim)">DP só pela Loja e por vencer Adversários</span>
+    <!-- O "+ Adicionar DP" voltou, mas agora quem credita é o SERVIDOR
+         (`creditar_dp`, migration 0022) e só para admin. O botão do cliente
+         que a migration 0004 tirou não tinha efeito nenhum; este tem, porque a
+         conta é feita lá. Some para quem não é admin — botão que só dá erro é
+         pior que botão nenhum. -->
+    <span id="admin-dp" hidden style="display:flex; align-items:center; gap:6px">
+      <input type="number" id="dp-valor" value="5000" step="500"
+             style="width:92px; background:var(--bg2); color:var(--ink);
+                    border:1px solid var(--line); font-size:12px; padding:3px 6px">
+      <button id="btn-dp" class="btn-primary" style="font-size:11px">+ creditar DP</button>
+    </span>
+    <span id="dp-nota" style="font-size:10px; color:var(--dim)">DP só pela Loja e por vencer Adversários</span>
   </div>
 
   <div class="menu">
@@ -101,12 +108,32 @@
 </div>
 
 <script type="module">
-import { getDP, hydrateWallet } from '/web/js/wallet.js';
+import { getDP, hydrateWallet, creditarDP } from '/web/js/wallet.js';
+import { perfilAtual } from '/web/js/supabase.js';
 const $ = (id) => document.getElementById(id);
 
 await hydrateWallet();
 const renderDP = () => { $('dp').textContent = `${getDP()} DP`; };
 renderDP();
+
+// O controle de DP é só do admin. A trava de verdade é a RLS no servidor; isto
+// aqui é só não mostrar um botão que ia recusar.
+const perfil = await perfilAtual().catch(() => null);
+if (perfil?.admin) {
+  $('admin-dp').hidden = false;
+  $('dp-nota').textContent = `admin (${perfil.usuario ?? ''}) — pode creditar direto`;
+  $('btn-dp').onclick = async () => {
+    const valor = Number($('dp-valor').value);
+    if (!valor) return void ($('dp-nota').textContent = 'informe um valor diferente de zero');
+    $('btn-dp').disabled = true;
+    const r = await creditarDP(valor);
+    $('btn-dp').disabled = false;
+    renderDP();
+    $('dp-nota').textContent = r.ok
+      ? `${r.antes} → ${r.depois} DP`
+      : `não creditou: ${r.error}`;
+  };
+}
 $('btn-deck').onclick = () => (location.href = '/web/deck.html');
 $('btn-booster').onclick = () => (location.href = '/web/booster.html');
 $('btn-estrutural').onclick = () => (location.href = '/web/estrutural.html');

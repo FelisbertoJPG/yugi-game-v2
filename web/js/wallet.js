@@ -177,29 +177,24 @@ export async function removeCards(ids) {
  * *quanto*.
  */
 /**
- * Registra o DESFECHO do duelo — `vitoria`, `derrota`, `empate` ou `abandonado`.
+ * Credita (ou debita, com valor negativo) DP — **só admin**.
  *
- * Antes só a vitória deixava rastro (era o que pagava). Perder e empatar não
- * gravavam nada, e o banco ficava com duelos eternamente "em aberto" — sem base
- * para estatística, nem para ver um padrão estranho.
- *
- * Vitória paga junto, pelo mesmo caminho de sempre. Se o prêmio for recusado (um
- * duelo curto demais, por exemplo), o RESULTADO fica registrado mesmo assim:
- * perder o dado permanente por causa do efeito colateral seria a troca errada.
- *
- * Isto NÃO prova a vitória — quem diz "venci" continua sendo o cliente. Só a
- * arena resolve, e é outro projeto.
+ * É a exceção deliberada à regra da migration 0004 ("DP só pela Loja e por
+ * vencer Adversário"): quem administra o jogo precisa de saldo para testar
+ * Loja, booster e estrutural, e mandar abrir o SQL Editor a cada teste é
+ * atrito. Quem barra é a RLS no servidor (`eh_admin()`), não esta função —
+ * jogador comum leva a recusa mesmo chamando na mão pelo console.
  */
-export async function encerrarDuelo(dueloId, resultado) {
-  if (!dueloId) return { ok: false, error: 'sem duelo registrado' };
-  const r = await req('rpc/encerrar_duelo', {
+export async function creditarDP(valor) {
+  const r = await req('rpc/creditar_dp', {
     method: 'POST',
-    body: { p_duelo: dueloId, p_resultado: resultado },
+    body: { p_valor: Math.trunc(Number(valor) || 0) },
   });
-  if (!r.ok) return { ok: false, error: r.error };
-  const d = r.dados ?? {};
-  return { ok: true, resultado: d.resultado, premio: d.premio?.premio ?? null,
-           carta: d.premio?.carta ?? null, recusado: d.premio_recusado ?? null };
+  if (!r.ok) return { ok: false, error: motivo(r, 'nao consegui creditar') };
+  // Relê a carteira: o RPC devolve só os números, e o cache guarda o objeto
+  // inteiro (coleção, pity). Sem isto o saldo na tela ficaria velho.
+  await hydrateWallet();
+  return { ok: true, antes: r.dados?.antes ?? 0, depois: r.dados?.depois ?? 0 };
 }
 
 export async function premiarVitoria(dueloId) {

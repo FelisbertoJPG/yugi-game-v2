@@ -311,6 +311,9 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-weevil-npc") >= 0)
                 return TestWeevilNpc.Run(streamingAssets);
 
+            if (Array.IndexOf(args, "--test-armory") >= 0)
+                return TestArmory.Run(streamingAssets);
+
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)
             {

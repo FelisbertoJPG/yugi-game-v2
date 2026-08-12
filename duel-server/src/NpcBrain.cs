@@ -50,7 +50,7 @@ namespace DuelServer
             48579379, // Perfectly Ultimate Great Moth
         };
 
-        const byte HAND = 0x2, MZONE = 0x4, SZONE = 0x8, GRAVE = 0x10;
+        const byte DECK = 0x1, HAND = 0x2, MZONE = 0x4, SZONE = 0x8, GRAVE = 0x10;
         const uint TYPE_SPELL = 0x2, TYPE_TRAP = 0x4, TYPE_RITUAL = 0x80;
 
         // ---------------- armadilhas de contra (negação) ----------------
@@ -324,6 +324,74 @@ namespace DuelServer
             91842653, // Toon Summoned Skull — tributa 1
             90960358, // Toon Dark Magician Girl — tributa 1
             53183600, // Blue-Eyes Toon Dragon — tributa 2
+        };
+
+        // ------------------------------------------------------------ equipamentos
+        const uint ARMORY_CALL = 38960450;
+
+        /// <summary>
+        /// O que um equipamento da Lista 1 DÁ e a quem ele serve.
+        ///
+        /// Só isto precisa de tabela: a exigência ("só em Dragão") e o bônus
+        /// moram no Lua e no texto da carta, não no `cards.cdb`. De quem RECEBE,
+        /// o banco responde — `Stats(code).Race` / `.Attribute` — então nenhuma
+        /// raça de monstro é chumbada aqui.
+        ///
+        /// `Raca`/`Atributo` em 0 = serve em qualquer monstro. Bônus 0 = não é
+        /// carta de reforço e o NPC não a escolhe para pumpar: Ring of
+        /// Magnetism, Paralyzing Potion e Germ Infection existem para atrapalhar
+        /// o monstro do OUTRO, e Premature Burial é um revive disfarçado de
+        /// equipamento (o Armory Call até a busca, mas ela não equipa em nada
+        /// que já esteja no campo).
+        /// </summary>
+        readonly record struct Equipamento(int Bonus, uint Raca, uint Atributo);
+
+        const uint R_WARRIOR = 0x1, R_SPELLCASTER = 0x2, R_FAIRY = 0x4, R_FIEND = 0x8,
+                   R_ZOMBIE = 0x10, R_MACHINE = 0x20, R_AQUA = 0x40, R_WINGEDBEAST = 0x200,
+                   R_PLANT = 0x400, R_INSECT = 0x800, R_THUNDER = 0x1000, R_DRAGON = 0x2000,
+                   R_BEAST = 0x4000, R_BEASTWARRIOR = 0x8000, R_DINOSAUR = 0x10000;
+        const uint A_EARTH = 0x1, A_WATER = 0x2, A_FIRE = 0x4, A_WIND = 0x8,
+                   A_LIGHT = 0x10, A_DARK = 0x20;
+
+        static readonly Dictionary<uint, Equipamento> EQUIPAMENTOS = new()
+        {
+            // +300 ATK/DEF por TIPO — o ciclo clássico, um por raça.
+            [1435851]  = new(300, R_DRAGON, 0),        // Dragon Treasure
+            [91595718] = new(300, R_SPELLCASTER, 0),   // Book of Secret Arts
+            [61854111] = new(300, R_WARRIOR, 0),       // Legendary Sword
+            [46009906] = new(300, R_BEAST, 0),         // Beast Fangs
+            [25769732] = new(300, R_MACHINE, 0),       // Machine Conversion Factory
+            [77007920] = new(300, R_INSECT, 0),        // Laser Cannon Armor
+            [77027445] = new(300, R_AQUA, 0),          // Power of Kaishin
+            [51267887] = new(300, R_DINOSAUR, 0),      // Raise Body Heat
+            [39774685] = new(300, R_PLANT, 0),         // Vile Germs
+            [15052462] = new(300, R_ZOMBIE, 0),        // Violet Crystal
+            [1557499]  = new(300, R_FAIRY, 0),         // Silver Bow and Arrow
+            [4614116]  = new(300, R_FIEND, 0),         // Dark Energy
+            [37820550] = new(300, R_THUNDER, 0),       // Electro-Whip
+            [98252586] = new(300, R_WINGEDBEAST, 0),   // Follow Wind
+            [36607978] = new(300, R_BEASTWARRIOR, 0),  // Mystical Moon
+
+            // +400 ATK / −200 DEF por ATRIBUTO. Valem mais em ATK que os de tipo,
+            // e o NPC ataca — por isso ganham deles no desempate.
+            [37120512] = new(400, 0, A_DARK),          // Sword of Dark Destruction
+            [2370081]  = new(400, 0, A_WATER),         // Steel Shell
+            [18937875] = new(400, 0, A_FIRE),          // Burning Spear
+            [39897277] = new(400, 0, A_LIGHT),         // Elf's Light
+            [55321970] = new(400, 0, A_WIND),          // Gust Fan
+            [98374133] = new(400, 0, A_EARTH),         // Invigoration
+
+            // Os grandes.
+            [32268901] = new(700, 0, A_FIRE),          // Salamandra
+            [3492538]  = new(700, R_INSECT, 0),        // Insect Armor with Laser Cannon
+            [83225447] = new(700, 0, 0),               // Stim-Pack — perde 200 por Standby sua
+            [98495314] = new(500, 0, 0),               // Sword of Deep-Seated
+
+            // Reforço nenhum (ver o comentário acima).
+            [20436034] = new(0, 0, 0),                 // Ring of Magnetism
+            [50152549] = new(0, 0, 0),                 // Paralyzing Potion
+            [24668830] = new(0, 0, 0),                 // Germ Infection
+            [70828912] = new(0, 0, 0),                 // Premature Burial
         };
 
         readonly DatabaseManager _cards;
@@ -653,6 +721,32 @@ namespace DuelServer
                 return new Play("activate", IdxAtivavel(q, INSECT_ARMOR_LASER),
                     "Insect Armor with Laser Cannon: +700 ATK no melhor atacante");
 
+            // 5.35 ARMORY CALL — busca 1 equipamento do deck e JÁ equipa.
+            //
+            //   Só sai com monstro meu com a face para cima. Sem alvo o motor
+            //   nem chega a perguntar se quero equipar (o `eqfilter` do Lua exige
+            //   `IsFaceup()`), e a armadilha viraria uma busca seca — a carta é
+            //   1x por turno e vale muito mais como reforço imediato.
+            //
+            //   O motor oferece TODO equipamento do deck (`thfilter` só pede
+            //   TYPE_EQUIP), inclusive os que não podem equipar em nada que eu
+            //   controlo. Quem separa o útil do inútil é o `DecideSelect` logo
+            //   abaixo, avisado por `_proximoEquipDoDeck`.
+            //   O que existe no deck só aparece na hora da seleção — aqui a
+            //   condição é a que dá para saber: tenho alvo?
+            if (Ativavel(q, ARMORY_CALL))
+            {
+                int alvos = MonstrosFaceUp(me).Count;
+                if (alvos > 0)
+                {
+                    _proximoEquipDoDeck = true;
+                    return new Play("activate", IdxAtivavel(q, ARMORY_CALL),
+                        $"Armory Call: busca equipamento do deck e ja equipa ({alvos} alvo(s) em campo)");
+                }
+                _log("guarda Armory Call: nenhum monstro meu com a face para cima " +
+                     "para receber o equipamento");
+            }
+
             // 5.4 Insect Imitation — tributa 1 inseto (o DecideSelect já sacrifica
             //     o de menor ATK) para trazer um Inseto de nível +1 do PRÓPRIO
             //     deck. Sempre vale: troca o inseto mais fraco por um mais forte.
@@ -867,6 +961,23 @@ namespace DuelServer
                 }
             }
 
+            // Equipamento vindo do DECK (Armory Call). O motor oferece todos os
+            // equipamentos do deck, inclusive os que não podem equipar em nada
+            // que eu controlo — pelo critério genérico (maior ATK) todos empatam
+            // em 0 e ele levaria o primeiro da lista, que dá na mesma que sortear.
+            if (_proximoEquipDoDeck && q.choices[0].location == DECK)
+            {
+                _proximoEquipDoDeck = false;
+                var escolha = MelhorEquipEntre(q.choices, me);
+                if (escolha.index >= 0)
+                {
+                    _log($"Armory Call: escolhe {escolha.code} (+{escolha.ganho} ATK em {escolha.alvo})");
+                    return new List<int> { escolha.index };
+                }
+                _log("Armory Call: nenhum equipamento do deck serve ao meu campo — " +
+                     "leva o de maior bonus mesmo assim");
+            }
+
             // Busca (ex.: Toon Table of Contents): se Toon World está entre as
             // opções e o NPC ainda não o tem nem na mão nem em campo, ele vem
             // em primeiro — sem ele nenhum outro Toon funciona por completo.
@@ -902,6 +1013,47 @@ namespace DuelServer
                 picks.Add(c.index);
             }
             return picks;
+        }
+
+        /// <summary>Monstros meus com a face para cima — os únicos que o Lua do
+        /// Armory Call aceita como alvo (`eqfilter` exige `IsFaceup()`).</summary>
+        List<uint> MonstrosFaceUp(int me) =>
+            _fieldOf(me).Where(c => _cards.Stats(c).IsMonster).ToList();
+
+        /// <summary>
+        /// Entre os equipamentos que o motor ofereceu, o que rende mais ATK num
+        /// monstro que eu realmente controlo.
+        ///
+        /// O casamento é sempre banco × tabela: a exigência sai de
+        /// `EQUIPAMENTOS` (mora no Lua, não há de onde ler) e a raça/atributo de
+        /// quem recebe sai do `cards.cdb`. Equipamento desconhecido é ignorado —
+        /// o silêncio da tabela significa "não sei o que faz", e levar uma carta
+        /// que não reforça nada é pior que levar a segunda melhor.
+        /// </summary>
+        (int index, uint code, int ganho, uint alvo) MelhorEquipEntre(
+            IReadOnlyList<InteractiveDuel.Sel> opcoes, int me)
+        {
+            var meus = MonstrosFaceUp(me).Select(c => (code: c, st: _cards.Stats(c))).ToList();
+            (int index, uint code, int ganho, uint alvo) melhor = (-1, 0, 0, 0);
+
+            foreach (var o in opcoes)
+            {
+                if (!EQUIPAMENTOS.TryGetValue(o.code, out var e) || e.Bonus <= 0) continue;
+
+                foreach (var m in meus)
+                {
+                    bool serve = (e.Raca == 0 || (m.st.Race & e.Raca) != 0)
+                              && (e.Atributo == 0 || (m.st.Attribute & e.Atributo) != 0);
+                    if (!serve) continue;
+                    // Empate no bônus: reforça o MAIOR ATK. É ele que ataca, e
+                    // +400 num 1800 vira 2200 — passa por cima de mais coisa que
+                    // os mesmos +400 num 1200.
+                    if (e.Bonus > melhor.ganho ||
+                        (e.Bonus == melhor.ganho && m.st.AtkValue > _cards.Stats(melhor.alvo).AtkValue))
+                        melhor = (o.index, o.code, e.Bonus, m.code);
+                }
+            }
+            return melhor;
         }
 
         /// <summary>Prioridade de DESCARTE: o monstro de maior nível/ATK primeiro
@@ -1210,6 +1362,15 @@ namespace DuelServer
         /// `DecideSelect` usa.
         /// </summary>
         bool _proximoAlvoEquipFraco;
+
+        /// <summary>
+        /// A próxima seleção vinda do DECK é a busca do Armory Call — escolher
+        /// pelo critério genérico (maior ATK) daria empate em 0 entre todos os
+        /// equipamentos e levaria o primeiro da lista. Mesmo padrão do
+        /// `_proximoAlvoEquipFraco`: quem sabe é a regra, quem responde é a
+        /// chamada seguinte. Consumido na primeira seleção de deck que chegar.
+        /// </summary>
+        bool _proximoEquipDoDeck;
 
         /// <summary>
         /// A magia/armadilha do oponente que a próxima remoção deve mirar —

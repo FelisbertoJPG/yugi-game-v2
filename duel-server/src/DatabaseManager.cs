@@ -89,8 +89,23 @@ public class DatabaseManager : IDisposable
     {
         public readonly uint Code, Type, RawLevel;
         public readonly int Atk, Def;
-        public CardStats(uint code, uint type, uint rawLevel, int atk, int def)
-        { Code = code; Type = type; RawLevel = rawLevel; Atk = atk; Def = def; }
+        /// <summary>
+        /// Raça (RACE_*) e atributo (ATTRIBUTE_*) do monstro, direto do
+        /// `cards.cdb`. Magia/armadilha vem 0 nos dois — a restrição de um
+        /// equipamento ("só em Dragão") mora no Lua dele, não no banco.
+        ///
+        /// Existem para o `NpcBrain` casar equipamento com alvo sem chumbar a
+        /// raça de cada monstro do jogo: só a exigência do EQUIPAMENTO precisa
+        /// de tabela; de quem recebe, o banco responde.
+        /// </summary>
+        public readonly uint Race, Attribute;
+
+        public CardStats(uint code, uint type, uint rawLevel, int atk, int def,
+                         uint race = 0, uint attribute = 0)
+        {
+            Code = code; Type = type; RawLevel = rawLevel; Atk = atk; Def = def;
+            Race = race; Attribute = attribute;
+        }
 
         public bool IsMonster => (Type & 0x1) != 0;
         public bool IsSpell => (Type & 0x2) != 0;
@@ -111,7 +126,7 @@ public class DatabaseManager : IDisposable
         var s = new CardStats(code, 0, 0, 0, 0);
         if (db != IntPtr.Zero)
         {
-            string query = $"SELECT type, level, atk, def FROM datas WHERE id = {code}";
+            string query = $"SELECT type, level, atk, def, race, attribute FROM datas WHERE id = {code}";
             if (sqlite3_prepare_v2(db, query, -1, out IntPtr stmt, IntPtr.Zero) == 0)
             {
                 if (sqlite3_step(stmt) == 100)
@@ -121,7 +136,9 @@ public class DatabaseManager : IDisposable
                         (uint)sqlite3_column_int(stmt, 0),
                         (uint)sqlite3_column_int(stmt, 1),
                         sqlite3_column_int(stmt, 2),
-                        sqlite3_column_int(stmt, 3));
+                        sqlite3_column_int(stmt, 3),
+                        (uint)sqlite3_column_int(stmt, 4),
+                        (uint)sqlite3_column_int(stmt, 5));
                 }
                 sqlite3_finalize(stmt);
             }

@@ -176,6 +176,32 @@ export async function removeCards(ids) {
  * que a única coisa sob controle do cliente passou a ser *qual* adversário, não
  * *quanto*.
  */
+/**
+ * Registra o DESFECHO do duelo — `vitoria`, `derrota`, `empate` ou `abandonado`.
+ *
+ * Antes só a vitória deixava rastro (era o que pagava). Perder e empatar não
+ * gravavam nada, e o banco ficava com duelos eternamente "em aberto" — sem base
+ * para estatística, nem para ver um padrão estranho.
+ *
+ * Vitória paga junto, pelo mesmo caminho de sempre. Se o prêmio for recusado (um
+ * duelo curto demais, por exemplo), o RESULTADO fica registrado mesmo assim:
+ * perder o dado permanente por causa do efeito colateral seria a troca errada.
+ *
+ * Isto NÃO prova a vitória — quem diz "venci" continua sendo o cliente. Só a
+ * arena resolve, e é outro projeto.
+ */
+export async function encerrarDuelo(dueloId, resultado) {
+  if (!dueloId) return { ok: false, error: 'sem duelo registrado' };
+  const r = await req('rpc/encerrar_duelo', {
+    method: 'POST',
+    body: { p_duelo: dueloId, p_resultado: resultado },
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  const d = r.dados ?? {};
+  return { ok: true, resultado: d.resultado, premio: d.premio?.premio ?? null,
+           carta: d.premio?.carta ?? null, recusado: d.premio_recusado ?? null };
+}
+
 export async function premiarVitoria(dueloId) {
   const r = await req('rpc/premiar_vitoria', {
     method: 'POST',

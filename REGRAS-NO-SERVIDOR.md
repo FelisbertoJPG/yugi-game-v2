@@ -57,10 +57,20 @@ você querer usar.
 
 ### 2. `premiar_vitoria` não prova a vitória
 
-Conhecido e documentado. O duelo roda no `ocgcore` da máquina do jogador e o
-servidor não o vê. As travas de hoje — duelo registrado, uma cobrança por duelo,
-mínimo de 30 s, teto de 60/hora — transformam laço de console em trabalho; não
-impedem alguém determinado. **Só a arena resolve**, e é outro projeto.
+Conhecido e aceito. O duelo roda no `ocgcore` da máquina do jogador e o servidor
+não o vê — quem diz "venci" é o cliente.
+
+As travas de hoje transformam laço de console em trabalho: duelo registrado, uma
+cobrança por duelo, mínimo de 30 s, teto de 60/hora, e (desde a `0018`) **um
+duelo vivo por vez** — abrir um novo abandona o anterior, então não dá mais para
+enfileirar 60 e premiar todos.
+
+O que a `0018` acrescentou não é prova, é **rastro**: todo desfecho fica gravado,
+inclusive derrota e abandono. Isso não impede a trapaça, mas a torna *visível* —
+um jogador com 40 vitórias, nenhuma derrota e 31 segundos de média aparece numa
+consulta. Antes não havia o que consultar.
+
+**Só a arena resolve de verdade**, e é outro projeto.
 
 ### 3. `openPack` é resquício
 
@@ -93,9 +103,24 @@ alguém replugá-lo achando que é por ali.
   - [ ] Remover de `boosters.js`, ou deixar explícito que é simulação do Booster
         Builder e não o caminho de compra.
 
-- [ ] **3. `premiar_vitoria` — decidir o rumo**
-  - [ ] Enquanto não houver arena, documentar como limitação aceita.
-  - [ ] Quando houver, mover o resultado para o servidor autoritativo.
+- [x] **3. O desfecho do duelo mora no banco** ✅ 12/08 (migration `0018`)
+  - [x] `duelos` ganhou `resultado` (vitoria/derrota/empate/abandonado),
+        `encerrado_em` e `deck`. Antes só a vitória deixava rastro — os 5 duelos
+        que existiam estavam todos "em aberto", sem saber se foram derrotas ou
+        abas fechadas.
+  - [x] `encerrar_duelo(id, resultado)` registra e, na vitória, paga junto: o fim
+        do duelo é UMA chamada. Idempotente, então duplo-clique não conta duas
+        vezes. Prêmio recusado **não apaga** o resultado.
+  - [x] Fechou uma brecha: dava para abrir 60 duelos e premiar os 60 em
+        sequência. Agora começar um duelo abandona o anterior — que é o que
+        acontece de fato.
+  - [ ] **Continua sem prova de vitória.** Quem diz "venci" é o cliente. Só a
+        arena resolve — ver abaixo.
+
+- [ ] **3b. Arena: o motor no servidor**
+  - [ ] É o único jeito de o resultado ser provado. `b0a023b1` (salas
+        concorrentes) é a base. Quando existir, ela grava na MESMA coluna
+        `duelos.resultado` — sem migração nova.
 
 - [ ] **4. Varredura periódica**
   - [ ] A cada regra nova, perguntar: "isto existe no servidor?". O erro é sempre

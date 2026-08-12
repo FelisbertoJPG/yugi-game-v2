@@ -462,7 +462,7 @@
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, listDecks, getActiveIndex, hydrateDecks } from '/web/js/storage.js';
 import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
-import { premiarVitoria, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
+import { encerrarDuelo, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/boards.js';
@@ -1469,7 +1469,7 @@ async function handle(ev) {
         catch (e) { console.warn('[ponte] nao consegui encerrar a partida:', e.message); }
       }
 
-      const premio = await concederRecompensa(venci);
+      const premio = await concederRecompensa(venci, empate);
       mostrarFimDuelo(venci, empate, premio);
       break;
     }
@@ -2234,18 +2234,23 @@ window.addEventListener('unhandledrejection', (e) => warn('ERRO async: ' + ((e.r
  * Recompensa do modo Adversário: só se for adversário (tem `advNpc`), se venceu,
  * e uma vez por duelo. Dá +100 DP e a carta-assinatura do NPC na Coleção.
  */
-async function concederRecompensa(venci) {
-  if (!advNpc || !venci || rewardGiven || !dueloId) return null;
+async function concederRecompensa(venci, empate = false) {
+  if (!advNpc || rewardGiven || !dueloId) return null;
   rewardGiven = true;
 
+  // TODO desfecho é registrado, não só a vitória. Antes, perder ou empatar não
+  // gravava nada e o duelo ficava "em aberto" para sempre no banco — sem base
+  // para estatística nem para ver um padrão estranho.
+  //
   // O QUANTO e QUAL carta saem do servidor, a partir do registro do NPC —
   // `advReward`/`advSignature` continuam existindo só para a tela poder
   // antecipar o texto. Enquanto o crédito era feito aqui, o valor vinha do
   // objeto carregado no navegador: o jogador escolhia o próprio prêmio.
   //
   // O `dueloId` é o que autoriza: cada duelo registrado paga uma vez só.
-  const r = await premiarVitoria(dueloId);
-  if (!r.ok) return null;
+  const r = await encerrarDuelo(dueloId, empate ? 'empate' : venci ? 'vitoria' : 'derrota');
+  if (!r.ok || !venci) return null;
+  if (r.recusado) { log(`prêmio recusado pelo servidor: ${r.recusado}`); return null; }
   return { dp: r.premio, cardId: r.carta };
 }
 

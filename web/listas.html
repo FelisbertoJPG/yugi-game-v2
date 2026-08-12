@@ -221,7 +221,7 @@
     <div class="sec-head">
       <span id="pool-count">—</span>
       <span class="spacer"></span>
-      <span id="pool-hint">selecione uma lista à esquerda, depois clique nas cartas aqui</span>
+      <span id="pool-hint">selecione uma lista à esquerda, depois clique nas cartas aqui · segurar = ver o efeito</span>
     </div>
     <div class="pool-scroll">
       <div class="pool-grid" id="pool-grid"></div>
@@ -239,6 +239,11 @@ import {
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { hydrateBanlist, getBanlist } from '/web/js/banlist.js';
 import { perfilAtual } from '/web/js/supabase.js';
+// Segurar a carta abre o efeito dela — mesmo gesto e mesma janela do Deck
+// Builder, do Booster Builder e do Deck Estrutural. Aqui faz ainda mais falta:
+// decidir se uma carta entra no pool permitido é ler o que ela faz.
+import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
+import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -342,10 +347,15 @@ function renderListas() {
         const c = brief(id);
         const el = document.createElement('div');
         el.className = 'thumb';
-        el.title = `${c?.name ?? id}\nclique para tirar desta lista`;
-        el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="">`;
+        el.title = `${c?.name ?? id}\nclique = tirar desta lista · segurar = ver o efeito`;
+        el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">`;
+        // `segurou()` consome o gesto: sem consultar isto, soltar o botão
+        // tiraria a carta da lista logo depois de abrir os detalhes.
+        const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(id));
+        el.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showCardDetail(id); };
         el.onclick = (e) => {
           e.stopPropagation();
+          if (segurou()) return;
           lista.ids = lista.ids.filter((x) => x !== id);
           markDirty();
           renderListas();
@@ -506,13 +516,19 @@ function renderPool() {
       (regra ? `\njá entra por regra ("${c.tl}")` : '') +
       (solta ? '\nadicionada à mão — clique para tirar' : '') +
       (lista && !regra && !solta ? `\nclique: adicionar a ${lista.label}` : '') +
-      (!lista ? '\nselecione uma lista primeiro' : '');
+      (!lista ? '\nselecione uma lista primeiro' : '') +
+      '\nsegurar = ver o efeito';
     el.innerHTML =
       (solta ? '<span class="marca avulsa">✚</span>'
         : regra ? '<span class="marca regra">regra</span>' : '') +
       (rar ? `<span class="rarity ${rar}">${rar}</span>` : '') +
-      `<img loading="lazy" src="${ART(c.id)}" alt="">`;
+      `<img loading="lazy" src="${ART(c.id)}" alt="" draggable="false">`;
+    const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(c.id));
+    el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(c.id); };
     el.onclick = () => {
+      // Ver o efeito vale mesmo sem lista selecionada — é o caso de quem está
+      // só folheando o pool para decidir o que entra.
+      if (segurou()) return;
       if (!lista) return void toast('selecione uma lista à esquerda primeiro');
       if (solta) {
         lista.ids = lista.ids.filter((x) => x !== c.id);
@@ -536,9 +552,10 @@ function renderPool() {
   $('pool-count').textContent = poolResults.length > MAX_RENDER
     ? `${poolResults.length} carta${s} (mostrando ${MAX_RENDER})`
     : `${poolResults.length} carta${s}`;
-  $('pool-hint').textContent = lista
+  $('pool-hint').textContent = (lista
     ? `lista selecionada: ${lista.label} — clique numa carta para adicionar ou tirar`
-    : 'selecione uma lista à esquerda, depois clique nas cartas aqui';
+    : 'selecione uma lista à esquerda, depois clique nas cartas aqui')
+    + ' · segurar = ver o efeito';
 }
 
 for (const id of FILTER_IDS) $(id).addEventListener('input', aplicarFiltros);
@@ -576,8 +593,13 @@ window.addEventListener('beforeunload', (e) => {
 
 // ---------------------------------------------------------------- boot
 
+injectHoldStyles();   // o anel de progresso do "segurar"
+
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });
+  // A janela de detalhes usa este índice; o `cards.json` completo (~14 MB, onde
+  // mora o texto do efeito) só é buscado no primeiro detalhe aberto.
+  configureCardDetail({ db });
 } catch (e) {
   $('pool-grid').textContent = 'Não consegui carregar o banco. Rode `npm run dev` a partir da raiz do projeto.';
   throw e;

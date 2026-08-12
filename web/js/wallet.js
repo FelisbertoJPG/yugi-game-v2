@@ -2,7 +2,7 @@
  * Carteira do jogador: DP (moeda) e Coleção (cartas que ele possui).
  *
  * O DADO MORA NO SUPABASE, não em disco. Antes isto era um `store/wallet.json`
- * no PC do jogador — abrir num editor e trocar `"dp": 2000` por `"dp": 999999`
+ * no PC do jogador — abrir num editor e trocar `"dp"` por `"dp": 999999`
  * era todo o trabalho. Agora a carteira é uma linha em `carteiras`, o dono só
  * tem permissão de LER, e toda mudança passa por uma função no banco que aplica
  * a regra do jogo (migration `0004_economia_no_servidor.sql`).
@@ -20,7 +20,9 @@ import { req, sessao } from '/web/js/supabase.js';
 
 const KEY_CACHE = 'ygo:wallet-cache';
 
-export const START_DP = 2000;
+/** Espelha `start_dp` do `eco_const()` (500 desde a migration 0023). Só o banco
+ *  decide o saldo de verdade — aqui é para exibir, nunca para creditar. */
+export const START_DP = 500;
 export const BOOSTER_PRICE = 100;
 export const WIN_REWARD = 100;
 

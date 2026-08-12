@@ -112,7 +112,8 @@
     <input type="number" id="budget" min="0" step="1" placeholder="0 = sem teto">
   </label>
   <span class="spacer"></span>
-  <button id="btn-save" class="btn-primary">salvar</button>
+  <span id="save-state" style="font-size:10px; color:var(--dim); margin-right:8px"></span>
+  <button id="btn-save" class="btn-primary" title="publica agora, sem esperar">publicar</button>
   <button id="btn-home">← Área de Teste</button>
 </div>
 
@@ -237,6 +238,7 @@ import {
   hydrateBanlist, getBanlist, saveBanlist,
   addRule, removeRule, assignCardToRule, unassignCard, cardsInRule,
 } from '/web/js/banlist.js';
+import { aoGravar } from '/web/js/projectstore.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -262,7 +264,39 @@ function brief(id) {
   return briefCache.get(id);
 }
 
-function markDirty() { dirty = true; }
+/**
+ * Marca a mudança e AGENDA a publicação.
+ *
+ * Todas as edições da tela passam por aqui — criar campo, atribuir carta, tirar
+ * carta, excluir campo, mexer no orçamento, trocar a lista. Por isso o autosave
+ * mora neste ponto e não em cada um deles: é a diferença entre um lugar para
+ * lembrar e seis para esquecer.
+ *
+ * O atraso existe porque `$('budget').oninput` dispara a cada tecla — sem ele,
+ * digitar "1000" no orçamento seriam quatro publicações, e a última poderia
+ * chegar fora de ordem.
+ */
+let autosaveTimer = null;
+function markDirty() {
+  dirty = true;
+  mostrarEstado('salvando…');
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(publicar, 700);
+}
+
+function publicar() {
+  clearTimeout(autosaveTimer);
+  if (!saveBanlist(banlist)) { mostrarEstado('falha ao gravar aqui', true); return; }
+  // `dirty` só cai quando o BANCO confirmar (ver `aoGravar` no boot): gravar no
+  // navegador não é ter publicado, e é o banco que os outros jogadores leem.
+}
+
+function mostrarEstado(texto, erro = false) {
+  const el = $('save-state');
+  if (!el) return;
+  el.textContent = texto;
+  el.style.color = erro ? 'var(--red)' : 'var(--dim)';
+}
 
 function ruleLabel(rule) {
   if (rule.type === 'points') return `${rule.value} ponto${rule.value === 1 ? '' : 's'}`;
@@ -528,13 +562,12 @@ $('budget').oninput = () => {
   markDirty();
 };
 
-$('btn-save').onclick = () => {
-  const ok = saveBanlist(banlist);
-  dirty = false;
-  toast(ok ? 'banlist salva' : 'falha ao salvar');
-};
+// O botão continua, agora como "publicar AGORA" — quem não quer esperar os
+// 700 ms do autosave, ou quem viu uma falha e quer tentar de novo.
+$('btn-save').onclick = () => { publicar(); toast('publicando…'); };
+
 $('btn-home').onclick = () => {
-  if (dirty && !confirm('Sair sem salvar? As últimas mudanças serão perdidas.')) return;
+  if (dirty && !confirm('Há mudanças que ainda não chegaram ao servidor. Sair mesmo assim?')) return;
   location.href = '/web/teste.html';
 };
 window.addEventListener('beforeunload', (e) => {
@@ -542,6 +575,18 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 // ---------------------------------------------------------------- boot
+// O veredito de cada publicação. É o banco que os OUTROS jogadores leem, então
+// é ele que decide se a mudança saiu daqui — gravar no navegador não conta.
+aoGravar('banlist', ({ banco, disco }) => {
+  if (banco.ok) { dirty = false; mostrarEstado('publicado'); return; }
+  dirty = true;
+  mostrarEstado(
+    banco.erro === 'sem sessão' ? 'não publicado — entre com a conta de admin'
+    : /permission|denied|403/i.test(banco.erro ?? '') ? 'não publicado — só admin pode'
+    : `não publicado — ${banco.erro ?? 'erro'}${disco.ok ? ' (gravado só no disco)' : ''}`,
+    true);
+});
+
 await hydrateBanlist();
 await hydrateCardLists();   // as listas publicadas, antes de montar o select
 banlist = getBanlist();

@@ -88,35 +88,71 @@ const pendente = new Map();  // name -> último payload aguardando
  */
 async function enviar(name, data) {
   const cabecalho = await cabecalhoAuth();
+  let banco = { ok: false, erro: 'sem sessão' };
 
   if (cabecalho.authorization) {
-    req('conteudo?on_conflict=chave', {
+    // Esperar em vez de disparar e esquecer. Antes era `.catch(() => {})`: o
+    // 403 de quem não é admin, a rede caída e a RLS recusando davam todos no
+    // mesmo silêncio — o disco gravava, o banco não, e a tela dizia "salvo".
+    // Quem edita conteúdo precisa saber se ele SAIU daqui.
+    const r = await req('conteudo?on_conflict=chave', {
       method: 'POST',
       body: { chave: name, dados: data },
       prefer: 'resolution=merge-duplicates,return=minimal',
-    }).catch(() => {});
+    });
+    banco = r.ok ? { ok: true, erro: null } : { ok: false, erro: r.error };
   }
 
-  return fetch(`/__store/${name}.json`, {
+  const disco = await fetch(`/__store/${name}.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...cabecalho },
     body: JSON.stringify(data),
-  }).catch(() => {});
+  }).then((r) => ({ ok: r.ok }), () => ({ ok: false }));
+
+  return { banco, disco };
+}
+
+/** Quem quer saber como terminou cada gravação. `name -> callback`. */
+const ouvintes = new Map();
+
+function avisar(name, r) {
+  const cb = ouvintes.get(name);
+  if (cb) { try { cb(r); } catch { /* a tela não pode derrubar a gravação */ } }
 }
 
 function drenar(name) {
   if (!pendente.has(name)) { emVoo.delete(name); return; }
   const proximo = pendente.get(name);
   pendente.delete(name);
-  emVoo.set(name, enviar(name, proximo).finally(() => drenar(name)));
+  emVoo.set(name, enviar(name, proximo)
+    .then((r) => { avisar(name, r); return r; })
+    .finally(() => drenar(name)));
 }
 
-/** Grava `store/<name>.json` (fire-and-forget: falha silenciosa sem server). */
+/**
+ * Grava `store/<name>.json` no disco E a chave `<name>` no banco.
+ *
+ * Continua sem `await` para quem chama — as telas gravam a cada tecla e não
+ * podem esperar a rede. Mas o RESULTADO deixou de se perder: registre um
+ * ouvinte com {@link aoGravar} para saber se o banco aceitou.
+ */
 export function pushFile(name, data) {
   try {
     if (emVoo.has(name)) { pendente.set(name, data); return; }
-    emVoo.set(name, enviar(name, data).finally(() => drenar(name)));
+    emVoo.set(name, enviar(name, data)
+      .then((r) => { avisar(name, r); return r; })
+      .finally(() => drenar(name)));
   } catch { /* sem servidor: só o localStorage guarda */ }
+}
+
+/**
+ * Escuta o fim de cada `pushFile` desta chave.
+ *
+ * `cb({ banco: {ok, erro}, disco: {ok} })`. Um só ouvinte por chave — quem
+ * registra depois substitui, o que basta: é a tela aberta que quer saber.
+ */
+export function aoGravar(name, cb) {
+  if (cb) ouvintes.set(name, cb); else ouvintes.delete(name);
 }
 
 /**

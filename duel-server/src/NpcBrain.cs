@@ -306,6 +306,11 @@ namespace DuelServer
             // Toon Table of Contents — busca 1 carta "Toon" (qual, o DecideSelect
             // decide: Toon World primeiro, se ainda não estiver na mão/campo).
             89997728,
+            // Toon Bookmark — busca o PRÓPRIO Toon World (ou algo que o cite).
+            // Cai na mesma regra do Table of Contents e reaproveita a preferência
+            // por Toon World que já existe no `DecideSelect`: sem ele nenhum
+            // outro Toon do deck do Pegasus funciona.
+            91500017,
         };
 
         /// <summary>
@@ -324,6 +329,25 @@ namespace DuelServer
             91842653, // Toon Summoned Skull — tributa 1
             90960358, // Toon Dark Magician Girl — tributa 1
             53183600, // Blue-Eyes Toon Dragon — tributa 2
+            // Manga Ryu-Ran (2200/2600) — tributa 2, e "não pode atacar no turno
+            // em que foi Invocado por Invocação-Especial". O motor só oferece o
+            // `spSummonable` quando os tributos existem, e o `DecideSelect` já
+            // sacrifica os mais fracos, então nada além disto é preciso.
+            38369349,
+        };
+
+        // ------------------------------------------------------------------ Pegasus
+        // O "roubo": as três cartas do deck dele que tiram o monstro do OUTRO em
+        // vez de somar um monstro seu. Todas pedem alvo no campo do oponente, e
+        // o alvo certo é sempre o MAIOR — que é justamente o default do
+        // `DecideSelect` (maior ATK), então nenhuma delas precisa de flag.
+        const uint COMIC_HAND = 33453260;             // equipa no monstro do oponente e TOMA o controle
+        const uint RELINQUISHED = 64631466;           // Ritual 0/0: absorve 1 monstro do oponente
+        const uint THOUSAND_EYES_RESTRICT = 63519819; // Fusão 0/0: absorve, e trava o campo todo
+
+        static readonly HashSet<uint> ROUBO_DO_OPONENTE = new()
+        {
+            COMIC_HAND, RELINQUISHED, THOUSAND_EYES_RESTRICT,
         };
 
         // ------------------------------------------------------------ equipamentos
@@ -720,6 +744,26 @@ namespace DuelServer
             if (Ativavel(q, INSECT_ARMOR_LASER))
                 return new Play("activate", IdxAtivavel(q, INSECT_ARMOR_LASER),
                     "Insect Armor with Laser Cannon: +700 ATK no melhor atacante");
+
+            // 5.34 ROUBAR O MONSTRO DO OPONENTE (Comic Hand, Relinquished,
+            //      Thousand-Eyes Restrict — o deck do Pegasus).
+            //
+            //      Vem ANTES de qualquer reforço: tirar o maior monstro do outro
+            //      lado é uma troca de 2 — o campo dele encolhe e o meu cresce na
+            //      mesma carta —, enquanto um equipamento só soma ATK. Contra um
+            //      corpo que o NPC não supera, é a única resposta do deck.
+            //
+            //      Alvo: o `DecideSelect` já escolhe o de MAIOR ATK entre o que o
+            //      motor oferecer, e como as três só aceitam monstro do oponente,
+            //      a lista que chega já vem filtrada pelo Lua. Nada de flag.
+            //
+            //      O motor também guarda as condições (Toon World em campo para a
+            //      Comic Hand, "uma vez por turno" para as duas absorções), então
+            //      estar em `activatable` já significa que dá para usar.
+            var roubo = AtivavelSe(q, ROUBO_DO_OPONENTE.Contains);
+            if (roubo.code != 0 && QtdMonstros(foe) >= 1)
+                return new Play("activate", roubo.index,
+                    $"rouba o maior monstro do oponente ({roubo.code}) — tira dele e poe do meu lado");
 
             // 5.35 ARMORY CALL — busca 1 equipamento do deck e JÁ equipa.
             //

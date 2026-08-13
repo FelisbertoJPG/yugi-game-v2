@@ -7,5 +7,15 @@
     "custom": true,
     "campaign": "Reino dos Duelistas",
     "board": "oficial_copia.json"
+  },
+  {
+    "id": "pegasus",
+    "name": "Pegasus",
+    "theme": "Mundo da Fantasia",
+    "signatureId": null,
+    "custom": true,
+    "level": "avancado",
+    "campaign": "Reino dos Duelistas",
+    "board": "oficial_copia_2.json"
   }
 ]

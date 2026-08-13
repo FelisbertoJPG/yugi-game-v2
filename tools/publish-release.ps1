@@ -114,6 +114,56 @@ function SincronizarTabuleiros {
   else { Ok 'banco: nada novo (disco ja esta em dia)' }
 }
 
+# Mesma historia dos tabuleiros: um deck de adversario montado DENTRO do jogo
+# grava em %LOCALAPPDATA%\DuelAcademy\game\decks\npc\, nao no repositorio. Sem
+# descer o banco antes de empacotar, o deck do Pegasus (por exemplo) chegava aos
+# jogadores pelo `decks_npc` mas nunca entrava no git nem numa instalacao nova.
+#
+# NUNCA apaga: deck que so' existe no disco (feito offline, ainda nao publicado)
+# fica onde esta'. Falha de rede tambem nao derruba o release.
+function SincronizarDecksNpc {
+  $cfg = ConfigSupabase
+  if (-not $cfg) { Aviso 'nao li a config do Supabase (pulando os decks de NPC)'; return }
+
+  try {
+    $linhas = Invoke-RestMethod -Method Get -TimeoutSec 20 `
+      -Uri "$($cfg.url)/rest/v1/decks_npc?select=npc,nome,ydk" `
+      -Headers @{ apikey = $cfg.key }
+  } catch {
+    Aviso "banco inacessivel ($($_.Exception.Message.Split([Environment]::NewLine)[0])) - usando so' o disco"
+    return
+  }
+
+  $novos = 0; $atualizados = 0
+  foreach ($linha in @($linhas)) {
+    if (-not $linha.npc -or -not $linha.nome -or -not $linha.ydk) { continue }
+    # `Split-Path -Leaf` nos dois: a chave vem do banco e nao pode virar `..\`.
+    $pasta = Join-Path (Join-Path $root 'decks\npc') (Split-Path -Leaf $linha.npc)
+    if (-not (Test-Path $pasta)) { New-Item -ItemType Directory -Path $pasta -Force | Out-Null }
+    $alvo = Join-Path $pasta ((Split-Path -Leaf $linha.nome) + '.ydk')
+
+    # Compara SEM as quebras de linha E sem o branco do fim: o .ydk viaja com
+    # \n no banco, o disco pode ter \r\n, e o arquivo pode ou nao terminar em
+    # nova linha. Sem normalizar os tres, todo build reescreveria os mesmos
+    # arquivos e o git nunca ficaria limpo (medido: "2 atualizados" a cada run).
+    $novo = ($linha.ydk -replace "`r`n", "`n").TrimEnd()
+    if (Test-Path $alvo) {
+      # `-Encoding utf8` nao e' zelo: sem ele o PS 5.1 le' em ANSI, o "É" de
+      # "É o Mundo Toon!!!" vira outro byte, a comparacao NUNCA casa e o build
+      # reescreve os mesmos arquivos para sempre (medido: "2 atualizados" a
+      # cada run, com o conteudo identico conferido por fora).
+      $atual = ((Get-Content $alvo -Raw -Encoding utf8) -replace "`r`n", "`n").TrimEnd()
+      if ($atual -eq $novo) { continue }
+      $atualizados++
+    } else { $novos++ }
+
+    [System.IO.File]::WriteAllText($alvo, $novo + "`n", (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "       <- $($linha.npc)/$($linha.nome).ydk" -ForegroundColor DarkGray
+  }
+  if ($novos -or $atualizados) { Ok "decks de NPC: $novos novo(s), $atualizados atualizado(s)" }
+  else { Ok 'decks de NPC: nada novo (disco ja esta em dia)' }
+}
+
 function Sha256($caminho) {
   (Get-FileHash -Algorithm SHA256 -Path $caminho).Hash.ToLowerInvariant()
 }
@@ -189,6 +239,11 @@ Copiar (Join-Path $root 'ygo-data\src') (Join-Path $g 'ygo-data\src')
 # Antes de empacotar, o banco desce para o disco: e' o que faz um campo criado
 # DENTRO do jogo entrar no payload e no git sozinho.
 SincronizarTabuleiros
+# Os decks de NPC nao entram no game.zip (eles viajam na semente do pack), mas
+# a sincronia mora aqui do mesmo jeito: e' o unico passo que roda antes de
+# empacotar e ve' o banco, e e' o que mantem o git em dia com o que foi montado
+# dentro do jogo.
+SincronizarDecksNpc
 $tabuleiros = Get-ChildItem (Join-Path $root 'boards') -Filter '*.json' -File -ErrorAction SilentlyContinue
 foreach ($b in $tabuleiros) { Copiar $b.FullName (Join-Path $g "boards\$($b.Name)") }
 Ok "$($tabuleiros.Count) tabuleiro(s)"

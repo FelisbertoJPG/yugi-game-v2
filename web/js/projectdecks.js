@@ -72,6 +72,7 @@ export async function canWrite() {
  */
 export async function listProjectDecks() {
   const out = [];
+  const npcPorCaminho = new Map();   // disco primeiro, banco por cima
 
   // 1. conteúdo do jogo (npc/…), do disco.
   try {
@@ -81,7 +82,7 @@ export async function listProjectDecks() {
     serverOk = true;
     for (const { path, content, meta } of decks) {
       if (ehDoJogador(path)) continue;          // os seus vêm do banco, abaixo
-      out.push({
+      npcPorCaminho.set(path, {
         path,
         meta: meta ?? {},
         deck: Deck.fromYdk(content, meta?.name || path.split('/').pop().replace(/\.ydk$/i, '')),
@@ -90,6 +91,26 @@ export async function listProjectDecks() {
   } catch {
     serverOk = false;
   }
+
+  // 1b. os decks de NPC PUBLICADOS. Mesma regra dos tabuleiros: o banco vence o
+  //     disco (é ele que recebe o deck montado em outra máquina), e um deck que
+  //     só existe no disco continua na lista — sumir seria pior que duplicar.
+  //     A leitura é aberta, então funciona até sem login.
+  {
+    const r = await req('decks_npc?select=npc,nome,ydk&order=npc,nome');
+    if (r.ok && Array.isArray(r.dados)) {
+      for (const { npc, nome, ydk } of r.dados) {
+        const path = `npc/${npc}/${nome}.ydk`;
+        const meta = metaDoYdk(ydk);
+        npcPorCaminho.set(path, {
+          path,
+          meta: { ...meta, name: meta.name || nome },
+          deck: Deck.fromYdk(ydk, meta.name || nome),
+        });
+      }
+    }
+  }
+  out.push(...npcPorCaminho.values());
 
   // 2. os seus, do Supabase. Falha aqui não derruba a lista de NPCs: sem rede o
   //    Deck Builder ainda serve para montar deck de adversário.
@@ -136,6 +157,12 @@ export async function saveProjectDeck(path, deck, meta = {}) {
     };
   }
 
+  // Deck de NPC: salvar É publicar, como os tabuleiros. Ele nasce dentro do
+  // jogo (que grava em %LOCALAPPDATA%, não no repositório), então sem o banco
+  // um adversário montado aqui não chegava em mais ninguém — foi o que
+  // aconteceu com o deck do Pegasus, que precisou ser inserido na mão.
+  const remoto = await publicarDeckNpc(path, content);
+
   try {
     const r = await fetch(`${API}/save`, {
       method: 'POST',
@@ -145,12 +172,66 @@ export async function saveProjectDeck(path, deck, meta = {}) {
     const j = await r.json();
     if (!r.ok || !j.ok) throw new Error(j.error || String(r.status));
     serverOk = true;
-    return { ok: true, path: j.path };
+    return { ok: true, path: j.path, publicado: remoto.ok, erroRemoto: remoto.error };
   } catch (e) {
     serverOk = false;
+    // Publicou mas não achou o disco: o deck NÃO está perdido — ele já chega
+    // em quem joga. Baixar por cima disso só confundiria.
+    if (remoto.ok) return { ok: true, path, publicado: true, semDisco: true };
     download(path.split('/').pop(), content);
     return { ok: false, downloaded: true, error: String(e.message ?? e) };
   }
+}
+
+/**
+ * Os `#chave valor` do topo de um .ydk (`#name`, `#signature`, `#cover`,
+ * `#reward`). O dev-server já devolve isto pronto no `/list`; para o deck que
+ * vem do BANCO só existe o texto, e sem parsear aqui o adversário perderia
+ * capa, assinatura e prêmio ao ser lido de lá.
+ *
+ * `#created by ...` fica de fora: é a linha padrão do formato ygopro, não
+ * metadado nosso.
+ */
+function metaDoYdk(ydk) {
+  const meta = {};
+  for (const cru of String(ydk ?? '').split(/\r?\n/)) {
+    const l = cru.trim();
+    if (!l.startsWith('#') || l.startsWith('#main') || l.startsWith('#extra')) continue;
+    const m = /^#(\w+)\s+(.*)$/.exec(l);
+    if (!m || m[1] === 'created') continue;
+    const n = Number(m[2]);
+    meta[m[1]] = Number.isFinite(n) && /^\d+$/.test(m[2].trim()) ? n : m[2].trim();
+  }
+  return meta;
+}
+
+/** `npc/<id>/<nome>.ydk` -> `{npc, nome}`, que é a chave de `decks_npc`. */
+function partesDoNpc(path) {
+  const p = String(path).split('/');
+  if (p[0] !== 'npc' || p.length < 3) return null;
+  return { npc: p[1], nome: p[2].replace(/\.ydk$/i, '') };
+}
+
+/** Upsert em `decks_npc`. Sem sessão de admin devolve `{ok:false}` e segue. */
+async function publicarDeckNpc(path, ydk) {
+  const alvo = partesDoNpc(path);
+  if (!alvo) return { ok: false, error: 'nao e deck de npc' };
+
+  const cabecalho = await cabecalhoAuth();
+  if (!cabecalho.authorization) return { ok: false, error: 'sem sessão' };
+
+  const r = await req('decks_npc?on_conflict=npc,nome', {
+    method: 'POST',
+    body: { npc: alvo.npc, nome: alvo.nome, ydk },
+    prefer: 'resolution=merge-duplicates,return=minimal',
+  });
+  if (r.ok) return { ok: true };
+  return {
+    ok: false,
+    error: /row-level security|permission/i.test(r.error ?? '')
+      ? 'só um admin publica deck de adversário'
+      : (r.error || 'não consegui publicar'),
+  };
 }
 
 export async function deleteProjectDeck(path) {
@@ -162,6 +243,14 @@ export async function deleteProjectDeck(path) {
     return { ok: r.ok && !!r.dados?.ok, error: r.error };
   }
 
+  // Apaga nos DOIS: deixar a linha no banco faria o deck ressuscitar na
+  // leitura seguinte, já que o banco vence o disco.
+  const alvo = partesDoNpc(path);
+  const remoto = alvo
+    ? await req(`decks_npc?npc=eq.${encodeURIComponent(alvo.npc)}` +
+                `&nome=eq.${encodeURIComponent(alvo.nome)}`, { method: 'DELETE' })
+    : { ok: false };
+
   try {
     const r = await fetch(`${API}/delete`, {
       method: 'POST',
@@ -169,9 +258,9 @@ export async function deleteProjectDeck(path) {
       body: JSON.stringify({ path }),
     });
     const j = await r.json();
-    return { ok: r.ok && j.ok, error: j.error };
+    return { ok: r.ok && j.ok, error: j.error, apagadoNoBanco: remoto.ok };
   } catch (e) {
-    return { ok: false, error: String(e.message ?? e) };
+    return { ok: remoto.ok, error: remoto.ok ? null : String(e.message ?? e) };
   }
 }
 

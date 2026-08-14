@@ -58,20 +58,24 @@ o `.bat`, esperar um PID morrer, copiar por cima, apagar o `.new`, o `.bat` se a
 `.bat` roda de verdade. Um sha256 errado não troca nada (senão o jogador fica sem NENHUMA
 versão que abre, e sem log, porque o processo que escreveria o log é o que não sobe).
 
-**O que continua faltando, e não dá para testar localmente.** No manifesto publicado hoje
-`"installer": null` — o `publish-release.ps1` só sobe o exe com `-ComExe`, que nunca foi
-usada. Então `InstaladorDesatualizado` é sempre `false` e o caminho, em produção, segue
-morto. E o caso que mais interessa é justamente o que uma cópia local não reproduz: **baixar
-o exe pelo navegador**, para ele vir com a Marca da Web de verdade. É esse cenário que produz
-o erro 1223, e copiar o arquivo localmente não o produz.
+**Os passos 1 e 2 foram feitos em 14/08/2026** (`release-20260814-1028`, `InstallerVersion`
+`0.1.0` → `0.2.0`): é o primeiro Release da história do projeto com `"installer"` preenchido
+em vez de `null`. Os 11 anteriores subiram só `game.zip`/`cards.zip`.
 
-**Como fechar.**
+**E isso não era só uma pendência de instalador — era um buraco de entrega.** O
+`duel-server` (motor, `NpcBrain`, `InteractiveDuel`) viaja **só dentro do exe**. Sem
+`-ComExe`, publicar um Release entrega o front e **descarta em silêncio toda mudança em
+C#**. Descoberto do jeito ruim: a varredura de ATK/DEF que faz a magia de campo aparecer na
+tela foi publicada, os testes passavam, e o jogador continuou vendo o Umi sem efeito —
+porque o `duel.html` novo conversava com um motor antigo. Toda mudança em C# agora exige
+`npm run pack` antes de publicar (registrado no `CLAUDE.md`).
 
-1. Bump da `InstallerVersion` em `duel-server/src/update/BuildConfig.cs` (hoje `0.1.0`);
-2. `npm run release:build`, depois `npm run pack`, depois `npm run release:build` de novo
-   (para o manifesto pegar o exe recém-empacotado), depois publicar com `-ComExe`;
-3. rodar um exe **da versão anterior** e ver a troca acontecer;
-4. baixar o exe pelo navegador e confirmar que reabre.
+**O que continua faltando, e não dá para testar localmente.**
+
+1. rodar um exe **da versão 0.1.0** e ver a troca para a 0.2.0 acontecer de verdade;
+2. baixar o exe **pelo navegador** e confirmar que reabre — é o único jeito de ele vir com a
+   Marca da Web de verdade, que é o que produz o erro 1223. Copiar o arquivo localmente não
+   reproduz o cenário.
 
 ---
 

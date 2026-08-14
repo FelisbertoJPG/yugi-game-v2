@@ -38,6 +38,9 @@ npm run release:test         # instala esses artefatos numa raiz descartável e 
 npm run release:publish      # sobe o Release para o repo privado de distribuição
                              # -- -PodarReleases 5 apaga as tags antigas (opt-in)
                              # --test-remote (na mão) baixa o Release publicado e instala
+npm run release:publish -- -ComExe   # o MESMO, subindo o exe junto (auto-update do
+                             # próprio executável). Precisa de `npm run pack` antes
+                             # e do bump da InstallerVersion em BuildConfig.cs
 
 cd duel-server && dotnet run -- --app --lan   # o mesmo --app, mas alcançável de outro
                                                 # aparelho na rede (app mobile) — ver mobile/README.md
@@ -100,6 +103,15 @@ As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-bat
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
 `--test-summons`; as outras suítes precisam ser chamadas na mão (ver
 `package.json`).
+
+> **Mexeu em C#? O Release comum NÃO leva a sua mudança.** `game.zip` é front +
+> índices; `cards.zip` é banco + Lua. O `duel-server` (o motor, o `NpcBrain`, o
+> `InteractiveDuel`) viaja **só dentro do `DuelAcademy.exe`**. Então a sequência
+> depois de qualquer mudança no C# é `npm run release:build` → `npm run pack` →
+> `npm run release:publish -- -ComExe`; sem o `pack`, o `dist/DuelAcademy.exe`
+> que você distribui continua sendo o de antes. Foi assim que a varredura de
+> ATK/DEF (magia de campo) saiu publicada no front e ausente no motor: na tela do
+> jogador o Umi seguia sem efeito nenhum, e os testes todos passavam aqui.
 
 > **Compile sempre com o servidor parado.** O `.exe` fica travado enquanto roda,
 > o `dotnet build` falha *e o teste seguinte roda o binário antigo* — parece que a

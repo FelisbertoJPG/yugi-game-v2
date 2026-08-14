@@ -27,7 +27,14 @@ namespace DuelServer.Update
         /// Versão DESTE executável. É o que o auto-update compara com
         /// `manifest.installer.version`. Suba a cada Release que troque o exe.
         /// </summary>
-        public const string InstallerVersion = "0.1.0";
+        // 0.2.0 (14/08/2026): o PRIMEIRO Release a subir o exe (`-ComExe`). Até
+        // aqui o manifesto saía com `"installer": null` e o auto-update do próprio
+        // executável nunca rodou em produção — o que significa que TODA mudança no
+        // duel-server (C#) só chegava ao jogador por um exe entregue na mão. Foi
+        // assim que a varredura de ATK/DEF ficou publicada no front e ausente no
+        // motor: a magia de campo continuava sem efeito visível na tela de quem
+        // jogava com o exe antigo.
+        public const string InstallerVersion = "0.2.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

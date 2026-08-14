@@ -27,6 +27,17 @@ export const LISTA1_SPELLTRAP = [
   70828912, // Premature Burial
   13048472, // Pre-Preparation of Rites
 
+  // --- o pacote "Normal grande" ---
+  //
+  // As duas andam juntas: a Art acha o corpo no deck, as Regras o põem em campo
+  // SEM tributo e sem gastar a Invocação Normal do turno. Separadas valem pouco.
+  //
+  // Elas são o que faz um deck vanilla competir nesta Lista, que é feita de
+  // monstros Normais: sem uma forma de baixar um Nv7 de graça, todo Normal
+  // grande é carta morta na mão esperando dois tributos.
+  10667321, // Ancient Rules — Invocação Especial de 1 Normal Nv5+ da mão
+  79816536, // Summoner's Art — busca 1 Normal Nv5+ do deck
+
   // --- armadilhas ---
   4206964,  // Trap Hole
   62279055, // Magic Cylinder

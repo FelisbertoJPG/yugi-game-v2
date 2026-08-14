@@ -58,11 +58,13 @@ t('carta avulsa entra mesmo não sendo monstro', () => {
 });
 
 console.log('\n=== resolução contra o índice (o que o servidor recebe) ===');
-t('a Lista 1 resolvida bate com o total publicado (1158)', () => {
+t('a Lista 1 resolvida bate com o total publicado (1160)', () => {
   padrao();
   // Se este número mudar sem ninguém ter mexido na lista, foi um
   // `npm run data:build` — e aí o `conteudo/lista1` no banco está velho.
-  assert.equal(resolverLista(fonteDasListas()[0], CARTAS).length, 1158);
+  // 1158 -> 1160 em 14/08/2026: entraram Ancient Rules (10667321) e
+  // Summoner's Art (79816536), o pacote "Normal grande" do deck do Pegasus.
+  assert.equal(resolverLista(fonteDasListas()[0], CARTAS).length, 1160);
 });
 t('resolver = exatamente quem passa no filtro', () => {
   padrao();

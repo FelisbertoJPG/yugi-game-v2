@@ -271,6 +271,18 @@ extra é quantos tributos a carta vale), **14** no SELECT_CARD de alvo de ataque
 sum_param(4)`). **Deduza o tamanho pelo comprimento da mensagem** em vez de
 assumir — ele varia com o contexto, como a lista acima mostra.
 
+> **O byte 10 só é "release" no SELECT_TRIBUTE.** Nas entradas de 14 bytes do
+> SELECT_CARD o mesmo byte é a **posição** (deck = `0x8`, mão = `0xa`, campo
+> aberto = `0x1`/`0x4`) — e ela nunca é zero. Ler os dois do mesmo jeito
+> (`entry >= 11 ? d[p+10] : 1`, que foi o que `ParseSelectCards` fez até
+> 14/08/2026) faz **toda** seleção de carta chegar ao `NpcBrain` parecendo um
+> tributo, e num tributo ele sacrifica o mais FRACO. O sintoma é exatamente o
+> da armadilha do começo desta seção: nenhum erro, nenhum log, só a jogada
+> errada — o Summoner's Art buscava o Parrot Dragon (2000) em vez do Ryu-Ran
+> (2200) enquanto o log dizia 2200, e as prioridades de busca do Toon World e
+> do Cocoon nunca rodavam num duelo de verdade (o ramo do tributo vinha antes
+> delas). Guarda de regressão: `--test-pegasus`.
+
 **SELECT_UNSELECT_CARD (26):** o seletor incremental do core novo — é ele que o
 tributo usa de fato. Escolhe-se UMA carta por vez e o motor repergunta.
 Mensagem: `type(1) player(1) finishable(1) cancelable(1) min(4) max(4)` +

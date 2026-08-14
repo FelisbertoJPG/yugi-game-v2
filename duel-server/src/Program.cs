@@ -311,6 +311,12 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-weevil-npc") >= 0)
                 return TestWeevilNpc.Run(streamingAssets);
 
+            // Teste de aceitacao do pacote "Normal grande" do deck do Pegasus:
+            // o NpcBrain busca (Summoner's Art) e Invoca Especialmente
+            // (Ancient Rules) um Normal Nv5+ sozinho, escolhendo o de maior ATK.
+            if (Array.IndexOf(args, "--test-pegasus") >= 0)
+                return TestPegasus.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-armory") >= 0)
                 return TestArmory.Run(streamingAssets);
 

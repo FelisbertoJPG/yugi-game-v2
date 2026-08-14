@@ -87,7 +87,12 @@ cima; equipa o casulo no inseto certo sem desperdiçar uma segunda cópia no
 mesmo alvo, o que reseta a contagem de turnos; e chega a Invocar
 Especialmente uma mariposa de verdade — `--test-weevil` já provava que as
 cartas rodam certo quando ALGUÉM manda ativar, este prova que o NPC decide
-sozinho).
+sozinho), `--test-pegasus` (o pacote "Normal grande" do deck do Pegasus:
+Summoner's Art busca 1 Normal Nv5+ do deck e Ancient Rules o Invoca
+Especialmente da mão — o NPC ativa as duas sozinho, na ordem que fecha o combo
+no MESMO turno, escolhe sempre o de maior ATK entre os oferecidos e guarda as
+Regras quando não há alvo Nv5+ na mão; o duelo real prova que o corpo chega ao
+campo, e que quem chega é o Ryu-Ran de 2200, não o Parrot Dragon de 2000).
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +

@@ -1442,7 +1442,20 @@ namespace DuelServer
                         controller = cc,
                         location = cl,
                         sequence = cseq,
-                        release = entry >= 11 ? d[p + 10] : (byte)1,
+                        // `release` (quantos tributos a carta vale) só existe no
+                        // MSG_SELECT_TRIBUTE. No MSG_SELECT_CARD o byte em p+10 é
+                        // a POSIÇÃO (deck = 0x8, mão = 0xa, campo aberto = 0x1/0x4),
+                        // e ela nunca é zero — então TODA seleção de carta chegava
+                        // ao NpcBrain parecendo um tributo, e num tributo ele
+                        // sacrifica o mais FRACO. Sintoma: a busca do Summoner's Art
+                        // trazia o Parrot Dragon (2000) em vez do Ryu-Ran (2200), e a
+                        // prioridade do Toon World na busca nunca rodava num duelo de
+                        // verdade — nenhum erro, nenhum log, só a jogada errada.
+                        // É a armadilha do DUEL-TRAINING-HANDOFF: campo/tamanho
+                        // errado no parse não falha, só muda a decisão.
+                        release = kind == "selecttribute"
+                            ? (entry >= 11 ? d[p + 10] : (byte)1)
+                            : (byte)0,
                     });
                 }
             }

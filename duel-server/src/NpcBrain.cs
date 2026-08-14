@@ -353,6 +353,26 @@ namespace DuelServer
         // ------------------------------------------------------------ equipamentos
         const uint ARMORY_CALL = 38960450;
 
+        // ------------------------------------------------- o pacote "Normal grande"
+        //
+        // As duas andam JUNTAS e é por isso que estão lado a lado: a Art acha o
+        // corpo no deck, as Regras o põem em campo sem tributo. Separadas, cada
+        // uma vale pouco; juntas, tiram um 2200 do nada no primeiro turno.
+        //
+        // Só valem para monstro NORMAL de nível 5+ — o texto das duas exige, e é
+        // essa exigência que faz um deck vanilla (Pegasus, e a Lista 1 inteira)
+        // competir com deck de efeito.
+        const uint ANCIENT_RULES = 10667321;   // Invoca Especialmente 1 Normal Nv5+ da MÃO
+        const uint SUMMONERS_ART = 79816536;   // busca 1 Normal Nv5+ do DECK
+
+        /// <summary>Monstro Normal de nível 5 ou mais — o que as duas cartas acima aceitam.</summary>
+        const uint TYPE_NORMAL = 0x10;
+        bool EhNormalGrande(uint code)
+        {
+            var st = _cards.Stats(code);
+            return st.IsMonster && (st.Type & TYPE_NORMAL) != 0 && st.Level >= 5;
+        }
+
         /// <summary>
         /// O que um equipamento da Lista 1 DÁ e a quem ele serve.
         ///
@@ -791,6 +811,49 @@ namespace DuelServer
                      "para receber o equipamento");
             }
 
+            // 5.36 SUMMONER'S ART — busca 1 Normal Nv5+ do deck.
+            //
+            //   Vem ANTES do Ancient Rules de propósito: as duas são Magias
+            //   Normais sem limite por turno, então buscar o corpo e invocá-lo no
+            //   MESMO turno é uma jogada só, dividida em duas passadas do cérebro.
+            //   Na ordem inversa o NPC invocaria o que já tinha e deixaria a busca
+            //   para depois — perdendo o combo.
+            //
+            //   Vale mesmo sem as Regras na mão: é carta a mais, e o alvo buscado
+            //   ainda pode entrar por tributo normal. Mas o log distingue os dois
+            //   casos, porque um é combo e o outro é só reposição.
+            if (Ativavel(q, SUMMONERS_ART))
+            {
+                bool combo = NaMao(me, ANCIENT_RULES);
+                return new Play("activate", IdxAtivavel(q, SUMMONERS_ART),
+                    combo ? "Summoner's Art: busca o corpo Nv5+ para as Regras Antigas invocarem ja"
+                          : "Summoner's Art: busca um Normal Nv5+ do deck");
+            }
+
+            // 5.37 ANCIENT RULES — Invocação Especial de um Normal Nv5+ da MÃO.
+            //
+            //   O grande ganho é NÃO gastar a Invocação Normal do turno: o corpo
+            //   grande entra de graça e a invocação normal fica livre para um
+            //   segundo monstro. Por isso vem antes do beatdown (6), que é quem
+            //   gastaria o tributo.
+            //
+            //   A conferência da mão é a mesma cautela do Armory Call: o Lua já
+            //   exige o alvo, mas quando dá para saber, se sabe — e o log explica
+            //   a recusa em vez de deixar a carta parada sem motivo aparente.
+            if (Ativavel(q, ANCIENT_RULES))
+            {
+                var corpo = _handOf(me).Where(EhNormalGrande)
+                    .OrderByDescending(c => _cards.Stats(c).AtkValue).FirstOrDefault();
+                if (corpo != 0)
+                {
+                    var st = _cards.Stats(corpo);
+                    return new Play("activate", IdxAtivavel(q, ANCIENT_RULES),
+                        $"Ancient Rules: poe {st.AtkValue} de ATK (Nv{st.Level}) em campo " +
+                        "sem gastar a invocacao normal");
+                }
+                _log("guarda Ancient Rules: nenhum monstro Normal Nv5+ na mao para invocar");
+            }
+
             // 5.4 Insect Imitation — tributa 1 inseto (o DecideSelect já sacrifica
             //     o de menor ATK) para trazer um Inseto de nível +1 do PRÓPRIO
             //     deck. Sempre vale: troca o inseto mais fraco por um mais forte.
@@ -1020,6 +1083,28 @@ namespace DuelServer
                 }
                 _log("Armory Call: nenhum equipamento do deck serve ao meu campo — " +
                      "leva o de maior bonus mesmo assim");
+            }
+
+            // NORMAL Nv5+ (Summoner's Art buscando no deck, Ancient Rules
+            // invocando da mão): entre os oferecidos, o de maior ATK.
+            //
+            // Sem isto o critério genérico decidiria — e ele empata tudo que não
+            // reconhece, levando o primeiro da lista. Num deck com Ryu-Ran (2200)
+            // e Parrot Dragon (2000) isso é a diferença entre a melhor e a
+            // segunda melhor carta, toda vez.
+            //
+            // Vale para as duas porque a pergunta é a mesma ("qual Normal Nv5+?"),
+            // só muda de onde: o filtro por `EhNormalGrande` cobre os dois casos
+            // sem precisar saber qual carta abriu a janela.
+            byte deOnde = q.choices[0].location;
+            var normaisGrandes = q.choices.Where(c => EhNormalGrande(c.code)).ToList();
+            if (normaisGrandes.Count > 1 && (deOnde == DECK || deOnde == HAND))
+            {
+                var melhor = normaisGrandes
+                    .OrderByDescending(c => _cards.Stats(c.code).AtkValue).First();
+                _log($"Normal Nv5+: escolhe {melhor.code} " +
+                     $"({_cards.Stats(melhor.code).AtkValue} ATK, o maior dos {normaisGrandes.Count} oferecidos)");
+                return new List<int> { melhor.index };
             }
 
             // Busca (ex.: Toon Table of Contents): se Toon World está entre as

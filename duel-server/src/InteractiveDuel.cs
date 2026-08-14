@@ -39,6 +39,12 @@ namespace DuelServer
         // Alimentado pelo MSG_MOVE — é o que a IA do NPC usa para "ver" a mesa.
         readonly Dictionary<(int player, int seq), (uint code, int pos)> _board = new();
 
+        // A última linha de ATK/DEF que o front já recebeu, por zona de monstro.
+        // O código entra na comparação porque a zona é reaproveitada: sem ele, um
+        // monstro novo com o mesmo ATK do anterior herdaria o "isso eu já contei".
+        readonly Dictionary<(int player, int seq),
+            (uint code, int pos, int atk, int baseAtk, int def, int baseDef)> _statsDitos = new();
+
         // Mão de cada jogador e quantas zonas de magia/armadilha (SZONE) estão
         // ocupadas — a IA usa para achar o Reborn na mão e não afogar as magias
         // com armadilhas setadas. Alimentados pelo MSG_DRAW e pelo MSG_MOVE.
@@ -501,7 +507,13 @@ namespace DuelServer
             for (int guard = 0; guard < 5000; guard++)
             {
                 int status = YgoCoreAPI.OCG_DuelProcess(_s.Handle);
+                int antes = r.events.Count;
                 DrainInto(r.events);
+                // Só varre quando o motor de fato disse alguma coisa: ATK/DEF não
+                // mudam sozinhos, e a varredura custa duas consultas nativas por
+                // monstro em campo. Sem esta guarda ela rodaria a cada volta do laço,
+                // inclusive nas milhares que não trazem mensagem nenhuma.
+                if (r.events.Count != antes) VarrerStats(r.events);
 
                 // O ocgcore avisa o fim pelo MSG_WIN (não por um status de END quando
                 // o LP zera no meio da fase). Ao vê-lo, o host TEM de parar — senão o
@@ -922,32 +934,10 @@ namespace DuelServer
                     // com dois humanos a mesma jogada tem duas leituras.
                     ev.Add(new { type = "move", code, hidden = false, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
 
-                    // Monstro chegando na zona já com bônus de campo em vigor (Forest
-                    // etc. injetada pelo editor de tabuleiro, ou qualquer contínua já
-                    // ativa) — o mesmo evento `stats` do MSG_EQUIP, só que disparado
-                    // aqui em vez de esperar um equipamento. `duel.html` já sabe
-                    // desenhar isso (destaca ATK e DEF, igual ao equip); sem isto o
-                    // bônus só aparecia consultando manualmente, nunca na tela.
-                    //
-                    // Monstro VIRADO também emite — mas com o `pos` junto, para a
-                    // projeção poder descartar o evento de quem não é o dono.
-                    // Revelar o ATK/DEF de uma carta setada entrega o que o jogo não
-                    // mostra; escondê-lo do PRÓPRIO dono seria igualmente errado, e
-                    // é por isso que a decisão não cabe mais aqui.
-                    if (cl == LOCATION_MZONE && cc <= 1)
-                    {
-                        var (mAtk, mBase) = QueryAtk(cc, cs);
-                        var (mDef, mBaseDef) = QueryDef(cc, cs);
-                        bool atkMudou = mAtk != null && mBase != null && mAtk != mBase;
-                        bool defMudou = mDef != null && mBaseDef != null && mDef != mBaseDef;
-                        if (atkMudou || defMudou)
-                        {
-                            ev.Add(new { type = "stats", controller = cc, loc = cl, seq = cs,
-                                         pos = cpo,
-                                         atk = mAtk ?? 0, baseAtk = mBase ?? mAtk ?? 0,
-                                         def = mDef ?? 0, baseDef = mBaseDef ?? mDef ?? 0 });
-                        }
-                    }
+                    // O ATK/DEF de quem acabou de chegar NÃO é emitido aqui. Quem
+                    // emite é a `VarrerStats`, que roda logo depois desta leva de
+                    // mensagens e olha o campo inteiro — inclusive este monstro,
+                    // com o `_board` já atualizado logo abaixo. Um lugar só.
 
                     // Mantém o modelo de campo em dia (com o código REAL) para a IA.
                     if (pl == LOCATION_MZONE) _board.Remove((pc, ps));
@@ -1105,15 +1095,80 @@ namespace DuelServer
             int sequence = BitConverter.ToInt32(d, target + 2);
             if (location != LOCATION_MZONE || controller > 1) return;
 
+            // Só o registro no log. O evento `stats` sai da `VarrerStats`, que roda
+            // depois desta leva e enxerga o campo todo: um equipamento pode mexer em
+            // mais de um monstro (o que perde o vínculo, por exemplo), e este ponto
+            // só conhece o alvo.
             var (atk, baseAtk) = QueryAtk(controller, sequence);
             var (def, baseDef) = QueryDef(controller, sequence);
             if (atk != null)
-            {
                 Log.Info($"[equip] alvo P{controller} M{sequence}: ATK {baseAtk ?? atk.Value} -> {atk.Value}" +
                          (def != null ? $", DEF {baseDef ?? def.Value} -> {def.Value}" : ""));
-                ev.Add(new { type = "stats", controller, loc = location, seq = sequence,
-                             atk = atk.Value, baseAtk = baseAtk ?? atk.Value,
-                             def = def ?? 0, baseDef = baseDef ?? def ?? 0 });
+        }
+
+        /// <summary>
+        /// Pergunta ao motor o ATK/DEF de cada monstro em campo e emite `stats`
+        /// para quem MUDOU desde a última vez.
+        ///
+        /// É o ÚNICO lugar que emite `stats`, e é esse o ponto. Antes havia dois, os
+        /// dois presos a um evento específico: o MSG_EQUIP (equipou alguma coisa) e o
+        /// MSG_MOVE (entrou em campo já com bônus em vigor). Os dois respondem "o que
+        /// mudou nesta carta"; nenhum responde "o que mudou no CAMPO". Então ativar
+        /// uma magia de campo — Umi, Forest — com monstros já em jogo não mexia em
+        /// nada na tela: o core aplicava o bônus de verdade, ninguém perguntava por
+        /// ele, e a carta seguia mostrando o valor de antes. Pelo mesmo buraco, o
+        /// bônus também não SUMIA da tela quando a magia de campo saía de campo.
+        ///
+        /// E havia um segundo bug embutido no primeiro: monstro sem modificador
+        /// nenhum não recebia `stats` nunca — e `duel.html` só desenha o rótulo de
+        /// ATK quando o valor existe (`Number.isFinite(cell.atk)`). Ou seja, o
+        /// tabuleiro não mostrava ATK/DEF de ninguém, exceto de quem tinha
+        /// equipamento. Varrendo todo mundo, todo monstro passa a exibir os seus.
+        ///
+        /// Nada é inferido de Lua nem de texto de carta: quem responde é o core, que
+        /// já resolveu equipamento, campo, contínuas e reduções. É a regra da casa —
+        /// as regras do Yu-Gi-Oh! são o ocgcore, não este arquivo.
+        ///
+        /// A varredura é por ZONA OCUPADA (`_board`), não pelas 14 zonas possíveis:
+        /// consultar zona vazia faz o `QueryAtk` despejar um aviso por zona, por
+        /// varredura.
+        /// </summary>
+        void VarrerStats(List<object> ev)
+        {
+            // Zona que esvaziou sai do cache. Sem isto, o próximo monstro a ocupá-la
+            // seria comparado com os números do anterior.
+            foreach (var k in _statsDitos.Keys.Where(k => !_board.ContainsKey(k)).ToList())
+                _statsDitos.Remove(k);
+
+            foreach (var (zona, carta) in _board.ToList())
+            {
+                if (zona.player > 1) continue;
+                var (atk, baseAtk) = QueryAtk(zona.player, zona.seq);
+                if (atk == null) continue;          // o core não vê nada aqui
+                var (def, baseDef) = QueryDef(zona.player, zona.seq);
+
+                // A POSIÇÃO entra na comparação, e não é detalhe: o evento de um
+                // monstro VIRADO é descartado na projeção para quem não o controla.
+                // Se ele desvira sem mudar de ATK, os números continuam os mesmos e
+                // sem isto nada seria reemitido — o oponente veria a carta abrir e
+                // seguiria sem rótulo de ATK nenhum nela.
+                var agora = (carta.code, carta.pos, atk.Value, baseAtk ?? atk.Value,
+                             def ?? 0, baseDef ?? def ?? 0);
+                if (_statsDitos.TryGetValue(zona, out var antes) && antes.Equals(agora)) continue;
+                _statsDitos[zona] = agora;
+
+                // `pos` vai junto para a projeção poder descartar o evento de quem
+                // não controla a carta: revelar o ATK de um monstro setado entrega
+                // o que o jogo não mostra. Esconder do PRÓPRIO dono seria igualmente
+                // errado, e é por isso que a decisão não é tomada aqui.
+                ev.Add(new
+                {
+                    type = "stats",
+                    controller = zona.player, loc = (int)LOCATION_MZONE, seq = zona.seq,
+                    pos = carta.pos,
+                    atk = agora.Item3, baseAtk = agora.Item4,
+                    def = agora.Item5, baseDef = agora.Item6,
+                });
             }
         }
 

@@ -1381,11 +1381,20 @@ async function handle(ev) {
         alvo.atk = ev.atk; alvo.baseAtk = ev.baseAtk;
         alvo.def = ev.def; alvo.baseDef = ev.baseDef;
       }
-      const nome = alvo?.code ? nameOf(alvo.code) : 'monstro';
-      const partes = [];
-      if (Number.isFinite(ev.atk)) partes.push(`ATK ${ev.atk}`);
-      if (Number.isFinite(ev.def)) partes.push(`DEF ${ev.def}`);
-      log(`${nome}: ${partes.join(' / ')}`, true);
+      // O servidor manda `stats` de TODO monstro em campo, não só de quem levou
+      // bônus — é o que faz o rótulo de ATK aparecer na carta (ele só é desenhado
+      // quando o valor existe). Anunciar todos no log encheria a tela de linhas
+      // repetindo o que já está escrito na própria carta, então só entra no log o
+      // que é notícia: um valor diferente do impresso na carta.
+      const mudou = (Number.isFinite(ev.atk) && ev.atk !== ev.baseAtk)
+                 || (Number.isFinite(ev.def) && ev.def !== ev.baseDef);
+      if (mudou) {
+        const nome = alvo?.code ? nameOf(alvo.code) : 'monstro';
+        const partes = [];
+        if (Number.isFinite(ev.atk)) partes.push(`ATK ${ev.baseAtk} → ${ev.atk}`);
+        if (Number.isFinite(ev.def)) partes.push(`DEF ${ev.baseDef} → ${ev.def}`);
+        log(`${nome}: ${partes.join(' / ')}`, true);
+      }
       break;
     }
     case 'move': {

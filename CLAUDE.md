@@ -70,7 +70,9 @@ contexto o NPC não nega nada e nenhuma regra acusa),
 `--test-fieldbonus` (Bônus de Campo do editor de tabuleiro: Forest injetada
 ativa dá +200 de ATK de verdade a um Inseto, consultado no motor E o evento
 `stats` que acende o destaque de ATK em `duel.html` chega sozinho ao entrar
-em campo, sem precisar de equipamento), `--test-toon`
+em campo, sem precisar de equipamento; e a Umi ativada DA MÃO alcança quem JÁ
+estava em campo — 7 Colored Fish 1800→2000, Mechanicalchaser 1850→1650, o
+bônus e a penalidade lidos do Lua da própria carta), `--test-toon`
 (NpcBrain ativa Toon World e invoca especialmente — `spsummon` — os Toons
 "clássicos" da mão, ex.: Toon Mermaid/Toon Summoned Skull), `--test-weevil`
 (as cartas COM EFEITO que o deck do Weevil trouxe pra Lista 1: Cocoon of

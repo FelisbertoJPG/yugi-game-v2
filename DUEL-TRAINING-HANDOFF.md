@@ -37,6 +37,33 @@ campo**. É o que faz o NPC setar um Aqua Madoor (1200/2000) contra um 1100 em v
 de invocá-lo em ataque — ele venceria a batalha, mas 2000 de defesa segura muito
 mais do que 1200 de ataque.
 
+**3.5. O campo à vista pode desmentir o statline** (`BaterRendeMaisQueAParede`).
+O statline sozinho é cego: ele mandava SETAR um Ryu-Ran (2200/2600) recém-
+invocado por tributo diante de dois monstros que ele atropelava — e esses dois
+corpos viravam, no turno seguinte, o tributo/material de ritual de algo maior
+que ele. A regra é uma troca, medida na mesma moeda dos dois lados:
+
+- **ganho de bater** = o dano que passa (`ATK − valor do alvo`) mais **metade**
+  do corpo que sai do campo dele (metade porque o corpo não vira meu: o que eu
+  levo é o campo dele mais vazio, um tributo a menos). Campo vazio: o ataque
+  direto inteiro.
+- **perda de bater** = `DEF − ATK`, a defesa de que se abre mão ficando de pé.
+
+Bate quando `ganho >= perda` — e **nunca** antes da segurança: se algo com a
+face para cima do lado dele supera meu ATK, a parede ganha sempre. É esse peso
+que separa os dois casos sem `if` para nenhum: o Aqua Madoor continua setando
+(650 de ganho contra 800 de defesa aberta) e o Ryu-Ran bate.
+
+Com **leitura** entra a segunda metade: se o corpo em campo dele já é o tributo
+de um monstro na mão que quebra a minha DEF (`MaterialQueQuebraAParede`), deitar
+não adia nada — derrubar o corpo agora é um tributo a menos. Sem leitura a mão
+dele vem vazia e a regra some sozinha.
+
+Vale nos **dois** caminhos, porque o furo entrava pelos dois: a invocação normal
+(`Escolher`) e o `MSG_SELECT_POSITION` das Invocações Especiais (`DecidePosicao`,
+que por isso recebe quem está invocando) — sem o segundo, o mesmo Ryu-Ran que
+chega pelas Regras Antigas nasceria deitado.
+
 Detalhes que importam:
 - **"Pôr em defesa" = Set.** Pelas regras oficiais a Invocação Normal é sempre em
   ataque com a face para cima; a única forma legal de pôr um monstro em defesa no
@@ -62,10 +89,12 @@ Detalhes que importam:
 - `POST /start {"npc": false}` volta ao oponente desligado (auto-passa), que é o
   modo de treinar sozinho.
 
-Teste: `npm run duel:test` (ou `duel-server.exe --test-npc`) — 15 checagens, sendo
-11 da decisão isolada (cada regra em situação controlada, incluindo o caso da
-parede que venceria atacando) e 4 de um duelo real onde o NPC usa os Potes,
-invoca por ATK, faz invocação com tributo e seta em defesa quando ameaçado.
+Teste: `npm run duel:test` (ou `duel-server.exe --test-npc`) — 63 checagens, a
+maioria de decisão isolada (cada regra em situação controlada, incluindo o caso
+da parede que venceria atacando, o Ryu-Ran que atropela o campo e os controles
+que mantêm o Aqua Madoor e a Mystical Elf deitados) mais um duelo real onde o
+NPC usa os Potes, invoca por ATK, faz invocação com tributo e seta em defesa
+quando ameaçado.
 
 ### Leitura (o NPC vê a mão e as cartas baixadas) — e o NÍVEL
 

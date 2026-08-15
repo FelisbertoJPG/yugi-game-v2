@@ -25,6 +25,7 @@ import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js'
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
+import { perfilAtual } from '/web/js/supabase.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
@@ -72,6 +73,17 @@ let ownedMode = new URLSearchParams(location.search).get('owned') === '1';
 // Raridade das cartas (dos boosters). Estável durante a sessão do builder, então
 // calculo uma vez no boot.
 let rarIdx = new Map();
+
+/**
+ * Gravar no banco SEM a conferência de Coleção (`p_livre` de `salvar_deck`).
+ * Só liga na Área de Teste (fora do modo Coleção e fora do modo NPC) e só
+ * para admin — é a mesma trava do "+ creditar DP" da `teste.html`: quem
+ * recusa de verdade é o servidor, isto aqui só evita pedir o que seria
+ * negado. Sem ele, o deck montado com o banco inteiro nunca chegava ao
+ * banco: ficava só no localStorage, e o alerta era "cartas que você não
+ * possui" — num builder que existe justamente para ignorar a Coleção.
+ */
+let gravarLivre = false;
 
 /**
  * Quantas cópias desta carta o jogador pode usar no deck.
@@ -704,11 +716,13 @@ $('btn-save').onclick = () => {
     alert(`O deck ficou salvo só neste navegador.\n\n${erro}\n\n`
         + 'Ajuste o deck e salve de novo — assim ele vale em qualquer máquina '
         + 'e nos duelos online.');
-  });
+  }, { livre: gravarLivre });
   setActiveIndex(deckIndex);
   markDirty(false);
   refreshDeckSelect();
-  toast('deck salvo');
+  // O texto diferente não é enfeite: é como se sabe, olhando a tela, se o
+  // deck foi pelo caminho normal ou pelo de admin.
+  toast(gravarLivre ? 'deck salvo no banco (admin — sem conferir a Coleção)' : 'deck salvo');
 };
 
 $('btn-new').onclick = () => {
@@ -1122,6 +1136,13 @@ const npcId = params.get('npc');
 if (!npcId) {
   const username = await requireLogin();
   if (!username) throw new Error('redirecionando para login');
+}
+
+// Admin na Área de Teste grava direto no banco (ver `gravarLivre`). Falha de
+// rede aqui não é erro: sem perfil, salva pelo caminho normal de sempre.
+if (!npcId && !ownedMode) {
+  const perfil = await perfilAtual().catch(() => null);
+  gravarLivre = !!perfil?.admin;
 }
 
 // injeta as cartas customizadas salvas (localStorage) antes de tudo que usa

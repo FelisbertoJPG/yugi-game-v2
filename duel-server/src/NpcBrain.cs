@@ -451,6 +451,12 @@ namespace DuelServer
         // que o motor usa para identificar quem muda de posição).
         readonly Func<int, IReadOnlyList<(uint code, int pos, int seq)>> _todoFieldPosOf;
         readonly Func<int, IReadOnlyList<uint>> _setStOf;    // magias/armadilhas VIRADAS
+        /// <summary>
+        /// ATK/DEF ATUAIS de um monstro (jogador, sequência da zona), perguntados
+        /// ao motor. Ver <see cref="EmCampo"/> — é o conserto do NPC que atacava
+        /// pelo statline impresso e ignorava equipamento e magia de campo.
+        /// </summary>
+        readonly Func<int, int, (int atk, int def)?> _statsEmCampo;
         readonly Action<string> _log;
 
         const int POS_ATAQUE = 0x1, POS_DEFESA = 0x4, POS_DEFESA_VIRADA = 0x8;
@@ -465,7 +471,8 @@ namespace DuelServer
                         Func<int, IReadOnlyList<uint>> faceUpStOf = null,
                         Func<int, int> lpOf = null,
                         Func<int, IReadOnlyList<(uint code, int pos, int seq)>> todoFieldPosOf = null,
-                        Func<int, IReadOnlyList<uint>> setStOf = null)
+                        Func<int, IReadOnlyList<uint>> setStOf = null,
+                        Func<int, int, (int atk, int def)?> statsEmCampoOf = null)
         {
             _cards = cards;
             _fieldOf = fieldOf;
@@ -491,6 +498,37 @@ namespace DuelServer
             // anterior, e mantém os testes que montam campo só com códigos.
             _fieldPosOf = fieldPosOf
                 ?? (p => _fieldOf(p).Select(c => (c, POS_ATAQUE)).ToList());
+            // Sem quem responda, cai no statline IMPRESSO da carta (`EmCampo`).
+            // É o comportamento de antes, e é o que os testes de decisão isolada
+            // usam — eles montam campo com códigos, sem motor por trás.
+            _statsEmCampo = statsEmCampoOf ?? ((_, _) => null);
+        }
+
+        /// <summary>
+        /// **O ATK/DEF que valem AGORA** para um monstro em campo.
+        ///
+        /// Pergunta ao motor (que já resolveu Equip Spell, magia de campo e
+        /// qualquer efeito contínuo) e só cai no statline IMPRESSO da carta
+        /// quando não há motor do outro lado — os testes de decisão isolada, que
+        /// montam campo com códigos e `seq = -1`.
+        ///
+        /// Esta função existe por um bug de verdade: o cérebro inteiro lia
+        /// `_cards.Stats(code)`, que é o número gravado no `cards.cdb`. Um
+        /// monstro do jogador com +700 de equipamento, ou de pé numa Umi, seguia
+        /// valendo o número impresso na conta do NPC — que então atacava um
+        /// corpo maior que o dele achando que ganhava, e perdia o monstro. A
+        /// tela mostrava o ATK certo (o evento `stats` já vinha do motor); só
+        /// quem decide o ataque é que não via.
+        ///
+        /// Vale para os DOIS lados: subestimar o próprio monstro equipado fazia
+        /// o NPC recusar um ataque que ele ganharia.
+        /// </summary>
+        (int atk, int def) EmCampo(uint code, int player, int seq)
+        {
+            var vivo = _statsEmCampo(player, seq);
+            if (vivo != null) return vivo.Value;
+            var st = _cards.Stats(code);
+            return (st.AtkValue, st.DefValue);
         }
 
         /// <summary>
@@ -499,14 +537,31 @@ namespace DuelServer
         /// sempre pela ATK fazia o NPC atacar uma parede 800/2000 achando que
         /// enfrentava 800.
         /// </summary>
-        int ValorNaBatalha((uint code, int pos) m)
+        int ValorNaBatalha(uint code, int pos, int player, int seq)
         {
-            var st = _cards.Stats(m.code);
+            var (atk, def) = EmCampo(code, player, seq);
             // 0x4 é defesa aberta, 0x8 é defesa VIRADA — o setado do oponente cai
             // nesta segunda, e é exatamente ele que o NPC só passou a enxergar
             // com a leitura de campo.
-            return (m.pos & (POS_DEFESA | POS_DEFESA_VIRADA)) != 0 ? st.DefValue : st.AtkValue;
+            return (pos & (POS_DEFESA | POS_DEFESA_VIRADA)) != 0 ? def : atk;
         }
+
+        /// <summary>
+        /// ATK atual de um monstro do JOGADOR indicado, na zona indicada. Atalho
+        /// de leitura para as regras que só comparam ataque.
+        /// </summary>
+        int AtkEmCampo(uint code, int player, int seq) => EmCampo(code, player, seq).atk;
+
+        /// <summary>
+        /// Os monstros de um jogador que estão com a FACE PARA CIMA, com a
+        /// sequência da zona — que é o que permite perguntar o ATK atual deles ao
+        /// motor. Mesmo conjunto que o `_fieldOf` de sempre devolve; a diferença
+        /// é só carregar a zona junto.
+        /// </summary>
+        List<(uint code, int pos, int seq)> AbertosDe(int player) =>
+            _todoFieldPosOf(player)
+                .Where(m => (m.pos & (POS_ATAQUE | POS_DEFESA)) != 0 && _cards.Stats(m.code).IsMonster)
+                .ToList();
 
         // ---- leitura: o que o oponente tem guardado ----
 
@@ -517,7 +572,7 @@ namespace DuelServer
         List<(uint code, int valor)> MonstrosDele(int foe) =>
             _todoFieldPosOf(foe)
                 .Where(m => _cards.Stats(m.code).IsMonster)
-                .Select(m => (m.code, valor: ValorNaBatalha((m.code, m.pos))))
+                .Select(m => (m.code, valor: ValorNaBatalha(m.code, m.pos, foe, m.seq)))
                 .ToList();
 
         /// <summary>A carta mais ameaçadora na mão do jogador, na escala do
@@ -990,13 +1045,13 @@ namespace DuelServer
             var jogadaAlta = Escolher(
                 altasQueCompensam,
                 setsQueCompensam,
-                ameaca, "nivel maior");
+                ameaca, "nivel maior", me);
             if (jogadaAlta.HasValue) return jogadaAlta.Value;
 
             var jogadaBaixa = Escolher(
                 invocaveis.Where(c => c.St.Level <= 4).ToList(),
                 setaveis.Where(c => c.St.Level <= 4).ToList(),
-                ameaca, "nivel 1-4");
+                ameaca, "nivel 1-4", me);
             if (jogadaBaixa.HasValue) return jogadaBaixa.Value;
 
             // 7. Burst Stream of Destruction — só quando limpa 2+ monstros do oponente.
@@ -1236,10 +1291,10 @@ namespace DuelServer
             var diretos = q.attackers.Where(a => a.canDirect).ToList();
             if (diretos.Count > 0)
             {
-                var a = Atacante(diretos, punidora != 0, 0);
+                var a = Atacante(diretos, punidora != 0, 0, me);
                 return new BattlePlay(true, a.index,
                     $"campo do oponente vazio — ataque direto com {a.code} " +
-                    $"(ATK {_cards.Stats(a.code).AtkValue})" +
+                    $"(ATK {AtkEmCampo(a.code, me, a.sequence)})" +
                     (punidora != 0 ? $" [o mais barato: ele tem {punidora} baixada]" : ""));
             }
 
@@ -1253,15 +1308,15 @@ namespace DuelServer
             // parede de 2000 setada sem ter como saber; agora ele sabe.
             var doOponente = MonstrosDele(foe);
 
-            var maisForte = q.attackers.OrderByDescending(x => _cards.Stats(x.code).AtkValue).First();
+            var maisForte = q.attackers.OrderByDescending(x => AtkEmCampo(x.code, me, x.sequence)).First();
             if (doOponente.Count == 0)
                 return new BattlePlay(true, maisForte.index,
                     $"campo do oponente sem monstro — ataca com {maisForte.code}");
 
             // Basta UM alvo que eu vença: o motor pergunta o alvo em seguida.
             var maisFraco = doOponente.OrderBy(m => m.valor).First();
-            var escolhido = Atacante(q.attackers, punidora != 0, maisFraco.valor);
-            int meuAtk = _cards.Stats(escolhido.code).AtkValue;
+            var escolhido = Atacante(q.attackers, punidora != 0, maisFraco.valor, me);
+            int meuAtk = AtkEmCampo(escolhido.code, me, escolhido.sequence);
 
             if (meuAtk > maisFraco.valor)
                 return new BattlePlay(true, escolhido.index,
@@ -1270,7 +1325,7 @@ namespace DuelServer
                     (punidora != 0 ? $" [o mais barato que ainda vence: ele tem {punidora} baixada]" : ""));
 
             return new BattlePlay(false, 0,
-                $"meu melhor ATK ({_cards.Stats(maisForte.code).AtkValue}) nao vence nem o alvo mais fraco " +
+                $"meu melhor ATK ({AtkEmCampo(maisForte.code, me, maisForte.sequence)}) nao vence nem o alvo mais fraco " +
                 $"({maisFraco.code} vale {maisFraco.valor}) — encerra o combate");
         }
 
@@ -1335,13 +1390,13 @@ namespace DuelServer
             var alvo = q.repositionable
                 .Where(a => a.location == MZONE
                             && emDefesa.Any(m => m.seq == a.sequence)
-                            && _cards.Stats(a.code).AtkValue > ameaca)
-                .OrderByDescending(a => _cards.Stats(a.code).AtkValue)
+                            && AtkEmCampo(a.code, me, a.sequence) > ameaca)
+                .OrderByDescending(a => AtkEmCampo(a.code, me, a.sequence))
                 .FirstOrDefault();
             if (alvo.code == 0) return null;
 
             return new Play("reposition", alvo.index,
-                $"levanta {alvo.code} (ATK {_cards.Stats(alvo.code).AtkValue}) para atacar — " +
+                $"levanta {alvo.code} (ATK {AtkEmCampo(alvo.code, me, alvo.sequence)}) para atacar — " +
                 (ameaca > 0 ? $"supera a maior ameaca ({ameaca})" : "o campo dele esta vazio"));
         }
 
@@ -1357,8 +1412,8 @@ namespace DuelServer
 
             int alvoMaisFraco = MonstrosDele(foe).Select(m => m.valor).DefaultIfEmpty(0).Min();
             var isca = emAtaque
-                .Where(m => _cards.Stats(m.code).AtkValue > alvoMaisFraco)
-                .OrderBy(m => _cards.Stats(m.code).AtkValue)
+                .Where(m => AtkEmCampo(m.code, me, m.seq) > alvoMaisFraco)
+                .OrderBy(m => AtkEmCampo(m.code, me, m.seq))
                 .FirstOrDefault();
             if (isca.code == 0)   // nenhum vence: não há isca, então deita todo mundo
                 isca = (0, 0, -1);
@@ -1370,13 +1425,13 @@ namespace DuelServer
                 .Where(a => a.location == MZONE
                             && a.sequence != isca.seq
                             && emAtaque.Any(m => m.seq == a.sequence))
-                .OrderByDescending(a => _cards.Stats(a.code).AtkValue)
+                .OrderByDescending(a => AtkEmCampo(a.code, me, a.sequence))
                 .FirstOrDefault();
             if (alvo.code == 0) return null;
 
             return new Play("reposition", alvo.index,
                 $"formacao de isca: ele tem {varredora} baixada — deita {alvo.code} " +
-                $"(ATK {_cards.Stats(alvo.code).AtkValue}) e ataca so' com " +
+                $"(ATK {AtkEmCampo(alvo.code, me, alvo.sequence)}) e ataca so' com " +
                 (isca.code != 0 ? $"{isca.code}" : "ninguem, se nenhum vencer"));
         }
 
@@ -1386,38 +1441,166 @@ namespace DuelServer
         /// (`precisaSuperar`). Sem candidato barato o suficiente, volta ao de
         /// maior ATK, que é quem tem chance de resolver alguma coisa.
         /// </summary>
-        InteractiveDuel.Act Atacante(List<InteractiveDuel.Act> candidatos, bool temPunidora, int precisaSuperar)
+        InteractiveDuel.Act Atacante(List<InteractiveDuel.Act> candidatos, bool temPunidora,
+                                     int precisaSuperar, int me)
         {
             if (temPunidora)
             {
                 var barato = candidatos
-                    .Where(a => _cards.Stats(a.code).AtkValue > precisaSuperar)
-                    .OrderBy(a => _cards.Stats(a.code).AtkValue)
+                    .Where(a => AtkEmCampo(a.code, me, a.sequence) > precisaSuperar)
+                    .OrderBy(a => AtkEmCampo(a.code, me, a.sequence))
                     .FirstOrDefault();
                 if (barato.code != 0) return barato;
             }
-            return candidatos.OrderByDescending(a => _cards.Stats(a.code).AtkValue).First();
+            return candidatos.OrderByDescending(a => AtkEmCampo(a.code, me, a.sequence)).First();
         }
 
         /// <summary>
-        /// O coração da decisão, em duas etapas — nesta ordem:
+        /// **A parede só rende enquanto ela é parede.**
+        ///
+        /// O statline sozinho (DEF &gt; ATK ⇒ deita) é cego para o campo. Foi ele
+        /// que mandou SETAR um Ryu-Ran (2200/2600) recém-invocado por tributo
+        /// diante de um campo que ele atropelava inteiro: o NPC pagou dois corpos
+        /// por uma parede e deixou de pé, do outro lado, exatamente os monstros
+        /// que no turno seguinte viraram tributo/material de ritual de algo maior
+        /// que ele. Este é o relato que originou esta função.
+        ///
+        /// A conta é uma troca, medida na mesma moeda dos dois lados:
+        ///   • **ganho de bater** = o dano que passa (`ATK − valor do alvo`) mais
+        ///     METADE do corpo que sai do campo dele. Metade, e não o valor
+        ///     inteiro, porque o corpo não vira meu: o que eu levo é o campo dele
+        ///     mais vazio (um tributo a menos). Com o campo dele vazio, o ganho é
+        ///     o ataque direto inteiro.
+        ///   • **perda de bater** = `DEF − ATK`, a defesa de que abro mão ao
+        ///     ficar de pé.
+        ///
+        /// É esse peso que separa, sem `if` para nenhum caso, os dois que o
+        /// jogador descreveu: o Aqua Madoor (1200/2000) NÃO abre uma parede de
+        /// 2000 para tirar 100 de dano de um 1100, e o Ryu-Ran (2200/2600) bate
+        /// num campo de 1800, porque aí o ganho é enorme perto dos 400 de defesa
+        /// que ele deixaria na mesa.
+        ///
+        /// Antes de tudo isso vem a segurança: se algo com a face para cima do
+        /// lado dele supera meu ATK, ficar de pé é entregar o corpo — nesse caso
+        /// a parede ganha sempre.
+        /// </summary>
+        (bool bate, string porque) BaterRendeMaisQueAParede(int atk, int def, int foe)
+        {
+            int ameaca = MaiorAtkEmCampo(foe);
+            if (atk <= ameaca)
+                return (false, $"ATK {atk} nao supera a maior ameaca aberta ({ameaca}) — de pe eu seria atropelado");
+
+            var dele = MonstrosDele(foe);
+            var alvo = dele
+                .Where(m => m.valor < atk)
+                .OrderByDescending(m => m.valor)
+                .FirstOrDefault();
+            if (dele.Count > 0 && alvo.code == 0)
+                return (false, $"nao derrubo nenhum dos {dele.Count} corpos dele — de pe eu nao resolvo nada");
+
+            int ganho = (atk - alvo.valor) + alvo.valor / 2;
+            int perda = def - atk;
+
+            if (ganho >= perda)
+                return (true, dele.Count == 0
+                    ? $"campo dele vazio: ATK {atk} passa direto (ganho {ganho} >= os {perda} de defesa que eu abro mao)"
+                    : $"derrubo {alvo.code} (vale {alvo.valor}) e ainda passo {atk - alvo.valor} de dano — " +
+                      $"ganho {ganho} >= os {perda} de defesa de que abro mao");
+
+            // LEITURA: a parede não segura o que ele já pode montar. Quando o
+            // corpo grande dele está a um tributo de distância, deitar não adia
+            // nada — e cada monstro que eu derrubo agora é material que ele
+            // deixa de ter. Foi a segunda metade do relato: o NPC deitou e
+            // deixou dois corpos de pé que viraram o tributo do turno seguinte.
+            uint quebra = MaterialQueQuebraAParede(foe, def);
+            if (quebra != 0 && alvo.code != 0)
+                return (true, $"a parede nao segura o que ele monta ({quebra} na mao dele, com material em campo) — " +
+                              $"derrubo {alvo.code} agora, que e' um tributo a menos");
+
+            return (false, $"ganho {ganho} < os {perda} de defesa de que eu abriria mao — rende mais de parede");
+        }
+
+        /// <summary>
+        /// **O que ele já pode montar contra a minha parede.** Só existe com
+        /// leitura de mão — sem ela `_handOf(foe)` vem vazio e a regra some
+        /// sozinha, que é o comportamento certo do NPC iniciante.
+        ///
+        /// Uma parede só compra tempo enquanto ninguém a quebra: se o oponente
+        /// tem na mão um corpo com ATK maior que a minha DEF e já tem em campo
+        /// os tributos para invocá-lo, deitar não adia nada.
+        ///
+        /// Ritual entra pela mesma porta, com a folga que ele tem de verdade: os
+        /// tributos de um ritual somam NÍVEL (e podem sair da própria mão), então
+        /// basta ele ter a magia de ritual na mão e algum corpo em campo para a
+        /// ameaça ser real. Devolve a carta (ou 0).
+        /// </summary>
+        uint MaterialQueQuebraAParede(int foe, int minhaDef)
+        {
+            int corpos = _todoFieldPosOf(foe).Count(m => _cards.Stats(m.code).IsMonster);
+            if (corpos == 0) return 0;    // sem material em campo, nada sobe por tributo
+
+            bool temMagiaDeRitual = _handOf(foe).Any(EhRitual);
+            foreach (uint c in _handOf(foe))
+            {
+                var st = _cards.Stats(c);
+                if (!st.IsMonster || st.AtkValue <= minhaDef) continue;
+                if ((st.Type & TYPE_RITUAL) != 0)
+                {
+                    if (temMagiaDeRitual) return c;
+                    continue;
+                }
+                if (TributosPara(st.Level) <= corpos) return c;
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// O coração da decisão, em três etapas — nesta ordem:
         ///
         ///   1. **Statline da própria carta.** Só entra em ataque quem tem
         ///      ATK &gt; DEF. Um 1200/2000 é uma parede: mesmo podendo vencer o
         ///      que está em campo, rende mais setado do que atacando.
+        ///   1.5 **O campo à vista pode desmentir o statline** — a conta de
+        ///      <see cref="BaterRendeMaisQueAParede"/>. É o que impede o NPC de
+        ///      setar um corpo que atropela o campo inteiro do outro lado.
         ///   2. **Situação do campo.** Se a ameaça do oponente supera o melhor
         ///      atacante disponível, seta o de maior DEF em vez de entregar o
         ///      monstro.
         ///
         /// Devolve null quando não há monstro nenhum nesta faixa de nível.
         /// </summary>
-        Play? Escolher(List<Cand> invocaveis, List<Cand> setaveis, int ameaca, string tag)
+        Play? Escolher(List<Cand> invocaveis, List<Cand> setaveis, int ameaca, string tag, int me)
         {
+            int foe = 1 - me;
+
             // etapa 1: só é atacante quem tem o statline para isso
             var atacante = invocaveis
                 .Where(c => c.Ofensivo)
                 .OrderByDescending(c => c.St.AtkValue)
                 .FirstOrDefault();
+            string porqueAtaca = atacante.Ok
+                ? $"ATK {atacante.St.AtkValue} > DEF {atacante.St.DefValue}, vale atacar"
+                : null;
+
+            // etapa 1.5: a maior parede da mão pode render mais de pé. Só entra
+            // na disputa se o ATK dela superar o do atacante por statline —
+            // abaixo disso não há nada a ganhar abrindo a defesa dela.
+            var parede = invocaveis
+                .Where(c => !c.Ofensivo)
+                .OrderByDescending(c => c.St.AtkValue)
+                .FirstOrDefault();
+            if (parede.Ok && parede.St.AtkValue > (atacante.Ok ? atacante.St.AtkValue : -1))
+            {
+                var (bate, porque) = BaterRendeMaisQueAParede(
+                    parede.St.AtkValue, parede.St.DefValue, foe);
+                _log($"{parede.Act.code} ({parede.St.AtkValue}/{parede.St.DefValue}): " +
+                     (bate ? "ATAQUE" : "parede") + $" — {porque}");
+                if (bate)
+                {
+                    atacante = parede;
+                    porqueAtaca = porque;
+                }
+            }
 
             var defensor = setaveis
                 .OrderByDescending(c => c.St.DefValue)
@@ -1439,7 +1622,7 @@ namespace DuelServer
             if (atacante.Ok)
             {
                 return new Play("summon", atacante.Act.index,
-                    $"ATK {atacante.St.AtkValue} > DEF {atacante.St.DefValue}, vale atacar" +
+                    porqueAtaca +
                     (ameaca >= 0 ? $" (campo tem {ameaca})" : "") +
                     $" — {atacante.Act.code} [{tag}]");
             }
@@ -1459,15 +1642,18 @@ namespace DuelServer
         /// Em que posição pôr um monstro que o motor deixa escolher (ritual e
         /// invocações especiais em geral).
         ///
-        /// Usa o MESMO critério da invocação normal (`Cand.Ofensivo`): só vai
-        /// para ataque quem tem ATK &gt; DEF. Um ritual 1200/2000 rende mais
-        /// deitado — e agora ele PODE ficar deitado com a face para cima, que é
-        /// diferente de setar.
+        /// Usa o MESMO critério da invocação normal: statline primeiro (ATK &gt;
+        /// DEF vai para ataque) e, quando ele diz "parede", a mesma conta de
+        /// campo da <see cref="BaterRendeMaisQueAParede"/> — senão o Ryu-Ran
+        /// (2200/2600) que chega pelas Regras Antigas nasce DEITADO diante de um
+        /// campo que ele atropela inteiro, que é o mesmo furo da invocação
+        /// normal entrando pela porta da Invocação Especial.
         ///
         /// `mask` é o que o motor aceita (0x1 ataque, 0x4 defesa com a face para
         /// cima). Se a defesa não estiver na máscara, não há escolha a fazer.
+        /// `me` é quem está invocando — sem ele não há de que lado olhar o campo.
         /// </summary>
-        public int DecidePosicao(uint code, byte mask)
+        public int DecidePosicao(uint code, byte mask, int me = 1)
         {
             const int FACEUP_DEFESA = 0x4;
             bool podeDefesa = (mask & FACEUP_DEFESA) != 0;
@@ -1476,10 +1662,16 @@ namespace DuelServer
             if (!podeAtaque) return FACEUP_DEFESA;
 
             var st = _cards.Stats(code);
-            bool ofensivo = st.AtkValue > st.DefValue;
+            if (st.AtkValue > st.DefValue)
+            {
+                _log($"posicao de {code} ({st.AtkValue}/{st.DefValue}): ataque (ATK > DEF)");
+                return POS_ATAQUE;
+            }
+
+            var (bate, porque) = BaterRendeMaisQueAParede(st.AtkValue, st.DefValue, 1 - me);
             _log($"posicao de {code} ({st.AtkValue}/{st.DefValue}): " +
-                 (ofensivo ? "ataque" : "defesa (DEF >= ATK)"));
-            return ofensivo ? POS_ATAQUE : FACEUP_DEFESA;
+                 (bate ? "ataque" : "defesa") + $" — {porque}");
+            return bate ? POS_ATAQUE : FACEUP_DEFESA;
         }
 
         /// <summary>
@@ -1845,10 +2037,11 @@ namespace DuelServer
                 return (false, "o oponente nao tem monstro — cara nao destroi nada");
 
             // "Campo bom" também é ter algo grande, mesmo que a ameaça seja maior:
-            // o monstro grande costuma ser o que a coroa levaria embora.
-            int meuMaiorCorpo = _fieldPosOf(me)
-                .Where(m => _cards.Stats(m.code).IsMonster)
-                .Select(m => _cards.Stats(m.code).AtkValue)
+            // o monstro grande costuma ser o que a coroa levaria embora. Pelo ATK
+            // de AGORA — um 1200 com dois equipamentos em cima é um corpo grande,
+            // e é justamente o que não se quer perder numa moeda.
+            int meuMaiorCorpo = AbertosDe(me)
+                .Select(m => AtkEmCampo(m.code, me, m.seq))
                 .DefaultIfEmpty(-1).Max();
 
             if (meuMelhor >= ameaca && meuMelhor >= 0)
@@ -1904,28 +2097,42 @@ namespace DuelServer
             int n = TributosPara(entra.Level);
             if (n == 0) return true;                       // Nv1-4: não custa nada
 
-            var sacrificados = _fieldOf(me)
-                .Select(c => _cards.Stats(c))
-                .Where(s => s.IsMonster)
-                .OrderBy(s => s.AtkValue)                  // os mais fracos vão primeiro
+            // Pelo ATK de AGORA: tributar o monstro que está segurando o
+            // equipamento custa o valor COM o bônus, não o impresso na carta.
+            var sacrificados = AbertosDe(me)
+                .Select(m => AtkEmCampo(m.code, me, m.seq))
+                .OrderBy(atk => atk)                       // os mais fracos vão primeiro
                 .Take(n)
                 .ToList();
 
             if (sacrificados.Count == 0) return true;      // nada visível a perder
 
-            int maiorPerdido = sacrificados.Max(s => s.AtkValue);
+            int maiorPerdido = sacrificados.Max();
             int ganho = setando ? entra.DefValue : entra.AtkValue;
             return ganho > maiorPerdido;
         }
 
-        /// <summary>Maior ATK entre os monstros do jogador indicado.</summary>
+        /// <summary>
+        /// Maior ATK entre os monstros ABERTOS do jogador indicado — pelo valor
+        /// de AGORA, não pelo impresso na carta (ver <see cref="EmCampo"/>).
+        ///
+        /// É a "ameaça" que decide meia dúzia de regras da Main Phase (invocar ou
+        /// setar, arriscar a moeda, gastar remoção). Lendo o statline impresso, o
+        /// NPC invocava um 1700 de peito aberto contra um 1500 do jogador que na
+        /// verdade estava com +700 de equipamento em campo.
+        ///
+        /// Continua contando só quem está com a FACE PARA CIMA: monstro deitado
+        /// não ataca ninguém, e contá-lo como ameaça deixaria o NPC medroso à
+        /// toa. Quem mede o risco de ATACAR é a `MonstrosDele`, que inclui os
+        /// virados.
+        /// </summary>
         int MaiorAtkEmCampo(int player)
         {
             int max = -1;
-            foreach (uint code in _fieldOf(player))
+            foreach (var m in AbertosDe(player))
             {
-                var st = _cards.Stats(code);
-                if (st.IsMonster && st.AtkValue > max) max = st.AtkValue;
+                int atk = AtkEmCampo(m.code, player, m.seq);
+                if (atk > max) max = atk;
             }
             return max;
         }

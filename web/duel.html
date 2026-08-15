@@ -533,6 +533,10 @@ function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: n
 // Sem tabuleiro ativo (o caso comum), nenhuma destas variáveis é usada e o
 // layout continua exatamente o flexbox de sempre — este bloco é só aditivo.
 let activeBoard = null;   // { name, canvas, zones } ou null
+// O tabuleiro ativo veio do ADVERSÁRIO? É o que decide de quem é o Bônus de
+// Campo dele (ver o /start). O tabuleiro que VOCÊ ativou no editor continua
+// sendo seu — no Treino o campo é o seu laboratório, não o de ninguém.
+let boardDoNpc = false;
 
 // O tabuleiro é desenhado num canvas fixo (1600x900) e a tela quase nunca tem
 // essa proporção. Antes havia UMA escala, `min(sx, sy)` (contain), e o
@@ -683,6 +687,7 @@ async function loadActiveBoard() {
   // NPC pode ter seu campo específico (estilo "campo de Floresta do Weevil").
   const path = advNpc?.board || getActiveBoard();
   if (!path) return;
+  boardDoNpc = !!advNpc?.board && path === advNpc.board;
   try {
     const list = await listProjectBoards();
     const entry = list.find((b) => b.path === path);
@@ -793,7 +798,17 @@ async function start() {
     if (advNpc) body.npcLevel = npcLevel(advNpc);
     // Bônus de Campo do tabuleiro ativo (editor de campo): a magia de campo
     // já nasce ativada, antes de qualquer jogada — ver `boards.js`.
-    if (activeBoard?.fieldSpell) body.fieldSpell = activeBoard.fieldSpell;
+    //
+    // E ela é DE QUEM É O TABULEIRO. Quando o campo veio do adversário
+    // (`advNpc.board`), a carta entra do lado DELE: é o campo dele que você
+    // está visitando. Antes nascia sempre do seu lado, o que virava o efeito
+    // do avesso — o "campo de Floresta do Weevil" buffava quem entrava nele,
+    // ocupava a SUA zona de campo, e bastava você ativar qualquer magia de
+    // campo por cima para o campo especial dele sumir de graça.
+    if (activeBoard?.fieldSpell) {
+      body.fieldSpell = activeBoard.fieldSpell;
+      body.fieldSpellOwner = boardDoNpc ? 'npc' : 'player';
+    }
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
 

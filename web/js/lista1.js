@@ -38,6 +38,17 @@ export const LISTA1_SPELLTRAP = [
   10667321, // Ancient Rules — Invocação Especial de 1 Normal Nv5+ da mão
   79816536, // Summoner's Art — busca 1 Normal Nv5+ do deck
 
+  // --- a volta do Normal pelo cemitério ---
+  //
+  // O outro lado do mesmo problema que o pacote acima resolve: numa Lista
+  // feita de monstros Normais, o Monster Reborn/Call of the Haunted é o único
+  // caminho de volta, e ele é genérico (e limitado). Estas duas são
+  // específicas de Normal — e por isso podem ser fartas sem desequilibrar.
+  35539880, // Birthright (Armadilha Contínua) — Invoca Especialmente 1 Normal
+            // do SEU cemitério em Ataque; a carta e o monstro morrem juntos
+  96765646, // Swing of Memories — o mesmo da mão, mas o monstro é destruído
+            // na End Phase (corpo de um turno: tributo, matéria de fusão, ataque)
+
   // --- armadilhas ---
   4206964,  // Trap Hole
   62279055, // Magic Cylinder
@@ -60,6 +71,9 @@ export const LISTA1_SPELLTRAP = [
   63102017, // Stop Defense — passa 1 monstro do oponente para Ataque
   83887306, // Two-Pronged Attack — destrói 2 monstros SEUS e 1 do oponente
   51482758, // Remove Trap — destrói 1 armadilha com a face para cima
+  19159413, // De-Spell — o par do Remove Trap do outro lado: destrói 1 Magia
+            // com a face para cima, ou 1 Magia/Armadilha SETADA (revelando-a;
+            // se for Armadilha, só revela). Veio do booster "Origem do Caos".
   82542267, // Gravedigger Ghoul — bane até 2 monstros do cemitério do oponente
   38199696, // Red Medicine — +500 LP
   11868825, // Goblin's Secret Remedy — +600 LP
@@ -122,6 +136,30 @@ export const LISTA1_SPELLTRAP = [
 
   // --- equipamento clássico avulso (fora dos dois ciclos) ---
   32268901, // Salamandra — +700 de ATK a monstro de FOGO
+  55226821, // Lightning Blade — Guerreiro +800 ATK, e todo monstro de ÁGUA do
+            // campo perde 500 (o contra-deck do Umi)
+  37684215, // Fusion Sword Murasame Blade — Guerreiro +800 ATK; o equipamento
+            // em si não é destruído por efeito. De "Fusion" só tem o nome
+  64047146, // Horn of the Unicorn — +700 ATK/DEF e VOLTA pro topo do deck ao ir
+            // pro cemitério (o mesmo truque do Sword of Deep-Seated)
+
+  // --- magias contínuas de apoio ---
+  // Buff de campo que fica ligado: numa Lista de monstros Normais, +200/+300
+  // constante decide combate muito mais do que uma remoção a mais.
+  403847,   // The A. Forces — todo Guerreiro seu ganha +200 ATK por Guerreiro
+            // ou Mago que você controla (cresce com o próprio campo)
+  10012614, // Banner of Courage — +200 ATK a todos os seus, só na SUA Fase de
+            // Batalha (não ajuda a defender no turno do oponente)
+  4542651,  // Yellow Luster Shield — +300 DEF em todos os seus
+  23615409, // Insect Barrier — Inseto do OPONENTE não pode declarar ataque
+            // (a resposta direta ao deck do Weevil)
+  24294108, // Burning Land — destrói as magias de CAMPO em jogo e cobra 500 de
+            // dano do jogador do turno, a cada Standby: o anti-Bônus de Campo
+
+  // --- busca de equipamento ---
+  38960450, // Armory Call (Armadilha Normal) — busca 1 Equipamento do deck e
+            // já pode equipá-lo. É o que dá consistência aos dois ciclos de
+            // equipamento clássico acima, que sozinhos são cartas soltas
 
   // --- burn simples (dano fixo) ---
   19523799, // Ookazi (800)
@@ -164,6 +202,25 @@ export const LISTA1_SPELLTRAP = [
   99426834, // Beastking of the Swamp — só substituto
   31786629, // thunder dragon
 
+  // O pacote do booster "Mestre da Fusão I". Nenhuma delas escreve efeito
+  // novo: o que fazem é ACHAR a matéria e ENCURTAR o caminho até o Extra
+  // Deck — o problema real de um deck de fusão nesta Lista, onde a receita
+  // mora no Lua da carta fundida e juntar as duas peças certas na mão é o
+  // que quase nunca acontece.
+  1845204,  // Instant Fusion — paga 1000 LP e Invoca Especialmente 1 Fusão
+            // Nv≤5 do Extra SEM matéria; não ataca e morre na End Phase
+            // (corpo de um turno: tributo, matéria de outra fusão, parede)
+  63854005, // Ready Fusion — o mesmo por 1000 LP, mas Nv≤6 e só Fusão SEM
+            // efeito, que é exatamente a fatia que a Lista 1 já tem inteira
+  17194258, // Fusion Conscription — revela 1 Fusão do Extra e busca 1 das
+            // matérias NOMEADAS nela, do deck OU do cemitério, para a mão
+  61070601, // Fusion Armament — igual, mas Invoca Especialmente a matéria
+            // (do Extra ou do cemitério); ela não ataca até o fim do turno
+            // do oponente
+  18511384, // Fusion Recovery — devolve à mão 1 Polymerization do cemitério
+            // MAIS 1 monstro que já serviu de matéria: a fusão de novo
+  27967615, // Fusion Weapon — equipa só em Fusão Nv≤6: +1500 ATK/DEF
+
   // --- Sincro / Xyz (teste) ---
   // Nem Sincro nem Xyz são Normal/Fusion, então `inLista1` não pega sozinho —
   // precisam entrar aqui explicitamente, um por um.
@@ -202,6 +259,14 @@ export const LISTA1_SPELLTRAP = [
   28112535, // Toon Barrel Dragon (Nv7 2600/2200) — 1 tributo
   61190918, // Toon Buster Blader (Nv7 2600/2300) — 1 tributo
   7171149,  // Toon Ancient Gear Golem (Nv8 3000/3000) — 2 tributos
+  38369349, // Manga Ryu-Ran (Nv7 2200/2600) — clássico: Invocação Especial da
+            // mão tributando 2, e 500 LP por ataque
+
+  // O resto do pacote: a busca e o roubo.
+  91500017, // Toon Bookmark — busca o Toon World do deck (ou qualquer carta
+            // que o cite). É o que faz o deck Toon abrir sem depender de sorte
+  33453260, // Comic Hand — com o Toon World em campo, equipa-se no monstro do
+            // OPONENTE e toma o controle dele, tratando-o como Toon
 
   // --- linha da Mariposa (o deck do Weevil) ---
   // O Petit Moth (Nv1 300/200) é vanilla e já entra sozinho pela regra do
@@ -218,6 +283,13 @@ export const LISTA1_SPELLTRAP = [
             // DECK 1 Inseto de nível +1 (o atalho pra chegar no casulo)
   3492538,  // Insect Armor with Laser Cannon — equipamento de Inseto (+700).
             // Não é o mesmo que Laser Cannon Armor (77007920, +300), lá em cima
+
+  // --- proteção de ritual ---
+  // A Lista 1 tem 15 rituais vanilla (abaixo) e o custo deles é alto: dois ou
+  // três tributos por um corpo que qualquer remoção derruba. Esta é a carta
+  // que faz esse custo valer a pena.
+  25796442, // Ritual Cage (Magia Contínua) — seus Rituais não sofrem dano de
+            // batalha e não podem ser alvo nem destruídos por efeito de monstro
 
   // --- rituais SEM efeito (vanilla) ---
   5405694,  // Black Luster Soldier (Nv 8, 3000/2500)
@@ -256,6 +328,21 @@ export const LISTA1_SPELLTRAP = [
   81756897, // Zera Ritual
   81933259, // Beastly Mirror Ritual
   94377247, // Curse of the Masked Beast
+
+  // --- o ritual COM efeito (o pacote do Relinquished) ---
+  //
+  // Os 15 rituais acima são vanilla. Este é o contrário, e entra por ser o
+  // ritual que DEFINE o Pegasus: o efeito inteiro já vem do Lua do ocgcore.
+  64631466, // Relinquished (Nv1 0/0) — 1x por turno equipa a si mesmo 1 monstro
+            // do oponente e copia o ATK/DEF dele; morrendo em batalha, morre o
+            // equipado no lugar
+  41426869, // Black Illusion Ritual — a magia de ritual dele
+  63519819, // Thousand-Eyes Restrict — Fusão COM efeito (Relinquished +
+            // Thousand-Eyes Idol), então não entra pela regra de `LISTA1_TIPOS`,
+            // que só pega Fusão vanilla; tranca a posição e o ataque de todos
+            // os outros monstros do campo
+  48206762, // Fulfillment of the Contract — paga 800 LP e ressuscita 1 Ritual do
+            // cemitério, equipado nela (o Monster Reborn dos rituais)
 ];
 
 /**

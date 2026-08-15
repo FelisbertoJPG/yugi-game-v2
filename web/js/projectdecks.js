@@ -133,9 +133,15 @@ export async function listProjectDecks() {
 /**
  * Grava um deck no projeto. Se o servidor não estiver disponível, baixa o
  * arquivo para você colocar em `decks/` na mão.
+ *
+ * `opcoes.livre` é o modo ADMIN da Área de Teste: manda `p_livre` para
+ * `salvar_deck`, que então pula as conferências de JOGO (posse, teto de cópias,
+ * pontos, lista compartilhada e pool permitido) e grava assim mesmo. O servidor
+ * confere que quem pediu é admin — aqui é só o pedido. Ver a migration 0024.
+ *
  * @returns {Promise<{ok: boolean, path?: string, downloaded?: boolean, error?: string}>}
  */
-export async function saveProjectDeck(path, deck, meta = {}) {
+export async function saveProjectDeck(path, deck, meta = {}, opcoes = {}) {
   const content = deck.toYdk(meta);
 
   // O SEU deck vai para o banco, onde `salvar_deck()` confere cada carta contra
@@ -146,9 +152,9 @@ export async function saveProjectDeck(path, deck, meta = {}) {
     const nome = nomeDeDeck(path);
     const r = await req('rpc/salvar_deck', {
       method: 'POST',
-      body: { p_nome: nome, p_ydk: content },
+      body: { p_nome: nome, p_ydk: content, ...(opcoes.livre ? { p_livre: true } : {}) },
     });
-    if (r.ok) return { ok: true, path: caminhoDeDeck(nome) };
+    if (r.ok) return { ok: true, path: caminhoDeDeck(nome), livre: !!opcoes.livre };
     return {
       ok: false,
       error: /nao possui/i.test(r.error ?? '')
@@ -262,6 +268,41 @@ export async function deleteProjectDeck(path) {
   } catch (e) {
     return { ok: remoto.ok, error: remoto.ok ? null : String(e.message ?? e) };
   }
+}
+
+/* ------------------------------------------------------------------ o banco
+ *
+ * As duas funções abaixo falam SÓ com `decks_jogador`, sem passar pelo disco
+ * nem pelos decks de NPC. Existem para a Área de Teste poder mostrar (e
+ * apagar) exatamente o que está gravado no banco DESTA conta — que é outra
+ * coisa que a lista do Deck Builder, montada a partir do `localStorage`
+ * hidratado. Quando as duas discordam, é justamente essa diferença que se
+ * quer ver.
+ */
+
+/** Os decks desta conta que estão no banco. Sem sessão, lista vazia. */
+export async function listarDecksNoBanco() {
+  if (!sessao()) return { ok: false, error: 'sem sessão', decks: [] };
+  const r = await req('decks_jogador?select=nome,ydk,atualizado_em&order=nome');
+  if (!r.ok || !Array.isArray(r.dados)) return { ok: false, error: r.error, decks: [] };
+  return {
+    ok: true,
+    decks: r.dados.map(({ nome, ydk, atualizado_em }) => {
+      const deck = Deck.fromYdk(ydk, nome);
+      return { nome, atualizadoEm: atualizado_em, main: deck.main.length, extra: deck.extra.length };
+    }),
+  };
+}
+
+/**
+ * Apaga um deck desta conta no banco. `apagar_deck` filtra por `usuario_id =
+ * auth.uid()`, então não há como apagar o deck de outra pessoa nem sendo admin.
+ */
+export async function apagarDeckNoBanco(nome) {
+  const r = await req('rpc/apagar_deck', { method: 'POST', body: { p_nome: nome } });
+  if (!r.ok) return { ok: false, error: r.error || 'não consegui apagar' };
+  // `{ok:false}` do RPC = não havia linha com esse nome (já apagado em outra aba).
+  return { ok: !!r.dados?.ok, error: r.dados?.ok ? null : 'esse deck não está no banco' };
 }
 
 /** Caminho canônico de um deck de NPC dentro de decks/. */

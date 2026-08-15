@@ -18,6 +18,8 @@ node web/js/ponte.test.mjs   # 13 testes da perspectiva do multiplayer (virar a 
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
 npm run data:check           # integridade do banco de cartas (5 checagens)
+npm run boosters:check       # cruza os boosters PUBLICADOS com a lista ativa —
+                             # acusa carta que o jogador compra e não pode jogar
 npm run data:build           # regenera ygo-data/data a partir do cards.cdb (precisa de Python 3)
 
 npm run duel:build           # para o servidor e compila o duel-server
@@ -97,7 +99,21 @@ Summoner's Art busca 1 Normal Nv5+ do deck e Ancient Rules o Invoca
 Especialmente da mão — o NPC ativa as duas sozinho, na ordem que fecha o combo
 no MESMO turno, escolhe sempre o de maior ATK entre os oferecidos e guarda as
 Regras quando não há alvo Nv5+ na mão; o duelo real prova que o corpo chega ao
-campo, e que quem chega é o Ryu-Ran de 2200, não o Parrot Dragon de 2000).
+campo, e que quem chega é o Ryu-Ran de 2200, não o Parrot Dragon de 2000),
+`--test-cartas-booster` (as cartas que os BOOSTERS já vendiam e a Lista 1 não
+conhecia — De-Spell, Ritual Cage, Birthright e Swing of Memories: os três duelos
+são dirigidos pelo jogador HUMANO, pelo mesmo `Respond` de `web/duel.html`, e
+provam o efeito de verdade — o Normal voltando do cemitério pela magia da mão e
+pela armadilha ativada do campo, a Magia Contínua ficando na zona e a De-Spell a
+destruindo. E, no fim, que nenhuma pergunta do motor caiu fora do que o front
+sabe desenhar: uma carta que peça um `kind` novo vira "⚠ ação não suportada" na
+tela e o duelo morre ali, sem erro nenhum no servidor),
+`--test-atk-vivo` (o NPC decide pelo ATK/DEF **de agora** — equipamento, magia
+de campo, efeito contínuo —, e não pelo statline impresso no `cards.cdb`, que
+era o que ele lia: o jogador punha +700 num monstro e o NPC atacava assim mesmo,
+entregando o corpo numa batalha que a conta dele dizia ganhar. O par CONTROLE é
+o teste: no MESMO duelo sem o equipamento ele TEM de atacar, senão "não atacou"
+não provaria nada).
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
@@ -162,6 +178,17 @@ publicar um Release. Qual lista vale no servidor sai do `listId` da banlist
 Só admin publica (RLS `eh_admin()`); a chave da lista tem que casar
 `^lista[a-z0-9-]{0,31}$`, e o editor já gera o slug assim.
 
+> **O Booster Builder monta do banco INTEIRO, não do pool da lista.** Nada
+> impede pôr num booster uma carta que a Lista 1 não conhece — e o estrago é
+> silencioso e caro: o jogador paga DP, abre a carta, ela entra na Coleção e
+> aparece no Deck Builder; só na hora de **salvar** o deck é que
+> `salvar_deck` diz "não está na lista permitida". Depois de mexer nos
+> boosters, rode `npm run boosters:check` (lê o BANCO, não o espelho em
+> `store/` — que envelhece e dizia estar tudo certo). Foi assim que De-Spell,
+> Ritual Cage, Birthright e Swing of Memories apareceram vendidas e injogáveis
+> — hoje estão na Lista 1, com `--test-cartas-booster` provando que os efeitos
+> rodam.
+
 `web/js/banlist.js` é uma camada **opcional** por cima da lista escolhida
 (`banlist.listId`) — não mexe nas regras oficiais de `deck.js` (min/max, 3
 cópias continuam sempre valendo). Três regras independentes, aplicadas
@@ -215,6 +242,18 @@ escolhido no editor entre os 6 campos básicos da Lista 1): a magia de campo
 de verdade entra ativada antes do duelo começar
 (`DuelSession.InjectField`), tipo "campo de Floresta do Weevil" no anime —
 sem simular efeito nenhum, é o Lua da própria carta.
+
+**De quem é essa carta importa.** Quando o tabuleiro veio do ADVERSÁRIO
+(`advNpc.board`), ela entra do lado DELE — o front manda `fieldSpellOwner:
+'npc'` no `/start`, e o `fieldSpellController` chega até o `InjectField`. Ela
+nascia sempre como do jogador (`controller: 0`), o que virava o efeito do
+avesso: o campo temático do NPC ocupava a SUA zona de campo, e bastava você
+ativar uma magia de campo qualquer da mão para ele sumir de graça, sem gastar
+remoção nenhuma. Com cada um na própria zona, as duas convivem e derrubar a
+dele voltou a custar uma carta. O tabuleiro que VOCÊ ativou no editor
+(`ygo:activeBoard`, modo Treino) continua sendo seu. Teste:
+`--test-fieldbonus`, com o par controle — como carta do jogador ela É
+substituída, como carta do NPC ela sobrevive.
 
 Todo NPC — os 3 fixos da fase 1 e os customizados (`web/npcs.html` →
 `web/js/npcs.js`) — pode ter `level` (**`iniciante`** ou `avancado`),
@@ -383,6 +422,21 @@ do modo NPC (`?npc=<id>` edita o deck do ADVERSÁRIO, não mexe em nada seu);
 `npcs.html`/`campo.html`/`banlist.html` (Área de Teste) não pedem login —
 são ferramenta de configuração do jogo, não progresso de ninguém.
 
+**Admin gravando deck na Área de Teste.** O Deck Builder sem `?owned=1` mostra
+o banco inteiro, mas `salvar_deck` confere POSSE carta a carta — então o deck
+montado ali nunca chegava ao banco: ficava só no `localStorage` daquele
+navegador, com o alerta "cartas que você não possui" num builder que existe
+justamente para ignorar a Coleção. A migration 0024 dá um `p_livre` a
+`salvar_deck`, que pula as conferências de JOGO (posse, teto de cópias, pontos,
+lista compartilhada, pool) **e só para admin**; o TAMANHO continua valendo para
+todo mundo, porque um main de 12 é deck que o motor recusa. O builder liga
+sozinho (`gravarLivre`, em `web/js/builder.js`) e o toast diz por qual caminho
+foi. Do outro lado, `web/teste.html` lista os decks **no banco** desta conta com
+um botão de excluir cada (`apagar_deck`, que filtra por `usuario_id =
+auth.uid()` — nem admin apaga deck alheio). A lista do Deck Builder vem do
+`localStorage` hidratado e a de lá vem do banco: quando as duas discordam, é
+ali que se vê.
+
 `store/accounts/`, `store/users/`, `decks/users/` e `store/sessions.json`
 estão no `.gitignore` — ao contrário do resto de `store/`/`decks/` (que é
 verdade do jogo versionada de propósito), dado de conta não tem por que ir
@@ -430,6 +484,13 @@ nenhuma conta nova herda esses dados automaticamente.
   trabalho; o repositório fica na pasta original (§13 do documento).
   `MECANISMO-INSTALADOR.md` é o documento genérico de origem (instalador do
   Souls Craft), útil como referência do mecanismo em abstrato.
+- **`CONTEUDO-COMPRADO-E-ATUALIZADO.md`** — obrigatório antes de EDITAR um Deck
+  Estrutural que já está à venda. A trava de 1 por conta
+  (`compras_estruturais`, PK composta) é permanente e nada registra qual versão
+  foi comprada: quem já pagou fica preso à versão velha, e "compra de novo"
+  cobra outra vez, duplica as cartas na Coleção e cria um deck com sufixo. O
+  documento traz a bifurcação (errata × nova edição — a segunda é `id` novo e
+  custa zero) e a saída manual enquanto isso não existir.
 - **`TAGFORCE-BATALHA.md`** — o que a batalha do Tag Force 1 é por dentro (ela é 2D,
   sem modelo 3D nenhum) e o timing exato de cada animação, lido do ISO. Os
   formatos byte a byte estão em `tools/tagforce/README.md`.

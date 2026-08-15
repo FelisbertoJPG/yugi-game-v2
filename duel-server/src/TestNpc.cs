@@ -36,6 +36,9 @@ namespace DuelServer
         const uint DUST_TORNADO = 60082869;         // remocao de S/T (Armadilha Normal)
         const uint CALL_HAUNTED = 97077563;        // continua ABERTA: alvo que vale remocao
         const uint MYSTERY_SHELL_DRAGON = 18108166;// Nv4 2000/0 — ameaca que os Nv4 do NPC nao superam
+        const uint RYU_RAN = 2964201;              // Nv7 2200/2600 — o corpo do relato: parede no papel,
+                                                   // beatstick na mesa
+        const uint ISLAND_TURTLE = 4042268;        // 1100/2000 — o alvo fraco do caso Aqua Madoor
 
         static int _pass, _fail;
 
@@ -262,6 +265,83 @@ namespace DuelServer
             p = brain.Decide(Idle(new[] { BATTLE_OX }, settable: new[] { BATTLE_OX, MYSTICAL_ELF }), 1);
             Check("atacante fraco diante de 2300: seta o de maior DEF",
                   p.Action == "setmonster" && p.Index == 1, $"(veio {p.Action} idx {p.Index})");
+
+            // --- o campo a' vista desmente o statline -----------------------
+            //
+            // O relato: o NPC tributava dois corpos para SETAR um Ryu-Ran
+            // (2200/2600) diante de um campo que ele atropelava inteiro — e
+            // deixava de pe, do outro lado, justamente os monstros que no turno
+            // seguinte viravam o tributo de algo maior que ele.
+            campo.Clear(); campo.Add(MYSTERY_SHELL_DRAGON);   // 2000 em campo
+            p = brain.Decide(Idle(new[] { RYU_RAN }, settable: new[] { RYU_RAN }), 1);
+            Check("Ryu-Ran (2200/2600) contra 2000: INVOCA em ataque (nao seta a parede)",
+                  p.Action == "summon", $"(veio {p.Action} — {p.Why})");
+
+            // O caso do relato ao pe da letra: DOIS corpos do outro lado, os
+            // dois abaixo do meu ATK. Bater derruba um deles, que e' um tributo
+            // a menos para o corpo grande do turno seguinte.
+            campo.Clear(); campo.Add(MYSTERY_SHELL_DRAGON); campo.Add(CELTIC);
+            p = brain.Decide(Idle(new[] { RYU_RAN }, settable: new[] { RYU_RAN }), 1);
+            Check("Ryu-Ran contra DOIS corpos que ele vence: bate (nega o tributo do proximo turno)",
+                  p.Action == "summon", $"(veio {p.Action} — {p.Why})");
+
+            // Campo dele vazio: o ataque direto de 2200 vale muito mais que os
+            // 400 de defesa que ele deixaria na mesa.
+            campo.Clear();
+            p = brain.Decide(Idle(new[] { RYU_RAN }, settable: new[] { RYU_RAN }), 1);
+            Check("Ryu-Ran com o campo dele vazio: entra de pe para bater direto",
+                  p.Action == "summon", $"(veio {p.Action} — {p.Why})");
+
+            // O contrario continua valendo: com 2600 do outro lado ele nao
+            // supera nada de pe, e a parede volta a ser a jogada.
+            campo.Clear(); campo.Add(GAIA_CHAMPION);          // 2600
+            p = brain.Decide(Idle(new[] { RYU_RAN }, settable: new[] { RYU_RAN }), 1);
+            Check("Ryu-Ran contra 2600: volta a SETAR (de pe seria atropelado)",
+                  p.Action == "setmonster", $"(veio {p.Action} — {p.Why})");
+
+            // --- posicao da Invocacao Especial (Regras Antigas / ritual) -----
+            // O mesmo furo entrava pela porta do MSG_SELECT_POSITION: o corpo
+            // grande chegava em campo DEITADO.
+            campo.Clear(); campo.Add(MYSTERY_SHELL_DRAGON);
+            Check("posicao: Ryu-Ran invocado especialmente contra 2000 nasce em ATAQUE",
+                  brain.DecidePosicao(RYU_RAN, 0x5, 1) == 0x1,
+                  $"(veio {brain.DecidePosicao(RYU_RAN, 0x5, 1):X})");
+
+            campo.Clear(); campo.Add(GAIA_CHAMPION);
+            Check("posicao: contra 2600 ele continua nascendo em DEFESA",
+                  brain.DecidePosicao(RYU_RAN, 0x5, 1) == 0x4,
+                  $"(veio {brain.DecidePosicao(RYU_RAN, 0x5, 1):X})");
+
+            campo.Clear();
+            Check("posicao: parede fraca (Mystical Elf 800/2000) continua deitada",
+                  brain.DecidePosicao(MYSTICAL_ELF, 0x5, 1) == 0x4,
+                  $"(veio {brain.DecidePosicao(MYSTICAL_ELF, 0x5, 1):X})");
+
+            // --- LEITURA: a parede nao segura o que ele ja pode montar -------
+            //
+            // Aqui o ganho de bater NAO paga a defesa aberta (e' o mesmo Aqua
+            // Madoor de cima, que segue setando). O que vira a decisao e' saber
+            // que o corpo em campo dele ja e' o tributo de um 2500 na mao —
+            // contra esse 2500 a DEF 2000 nao segura nada, e derrubar o corpo
+            // agora e' o unico jeito de atrasar a jogada.
+            var maoDele = new List<uint>();
+            var brainLe = new NpcBrain(db, p2 => p2 == 0 ? campo : new List<uint>(),
+                                       log: _ => { },
+                                       handOf: p2 => p2 == 0 ? maoDele : new List<uint>());
+
+            campo.Clear(); campo.Add(ISLAND_TURTLE);          // 1100 — o tributo dele
+            maoDele.Clear(); maoDele.Add(SUMMONED_SKULL_LIKE); // Nv6 2500: 1 tributo, quebra a DEF 2000
+            p = brainLe.Decide(Idle(new[] { AQUA_MADOOR }, settable: new[] { AQUA_MADOOR }), 1);
+            Check("leitura: com o 2500 a um tributo de distancia, o Aqua Madoor BATE no tributo",
+                  p.Action == "summon", $"(veio {p.Action} — {p.Why})");
+
+            // Controle: a MESMA mesa, mas a mao dele nao quebra a parede. Sem
+            // isso o teste acima nao provaria nada — poderia ser a regra geral.
+            campo.Clear(); campo.Add(ISLAND_TURTLE);
+            maoDele.Clear(); maoDele.Add(BATTLE_OX);          // 1700 < DEF 2000
+            p = brainLe.Decide(Idle(new[] { AQUA_MADOOR }, settable: new[] { AQUA_MADOOR }), 1);
+            Check("controle: sem nada que quebre a DEF 2000 na mao dele, o Aqua Madoor SETA",
+                  p.Action == "setmonster", $"(veio {p.Action} — {p.Why})");
 
             // mao vazia
             campo.Clear();

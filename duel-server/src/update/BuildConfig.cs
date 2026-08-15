@@ -34,7 +34,22 @@ namespace DuelServer.Update
         // assim que a varredura de ATK/DEF ficou publicada no front e ausente no
         // motor: a magia de campo continuava sem efeito visível na tela de quem
         // jogava com o exe antigo.
-        public const string InstallerVersion = "0.2.0";
+        //
+        // 0.3.0 (15/08/2026): o NpcBrain passou a decidir pelo ATK/DEF DE AGORA
+        // (`InteractiveDuel.StatsEmCampo`) em vez do statline impresso no
+        // `cards.cdb`, e o Bônus de Campo do tabuleiro do adversário passou a ser
+        // carta DELE (`fieldSpellController`). As duas são motor: sem trocar o
+        // exe, o `duel.html` novo mandaria `fieldSpellOwner` para um servidor que
+        // ignora o campo, e o NPC continuaria atacando monstro equipado.
+        //
+        // 0.4.0 (15/08/2026): o NpcBrain deixou de setar um corpo que atropela o
+        // campo do outro lado. O statline (DEF > ATK ⇒ parede) passou a poder ser
+        // desmentido pelo campo à vista — era o que fazia um Ryu-Ran (2200/2600)
+        // recém-tributado nascer deitado diante de dois monstros que ele vencia,
+        // e virarem tributo de algo maior no turno seguinte. Vale nos DOIS
+        // caminhos (invocação normal e MSG_SELECT_POSITION das especiais), e é
+        // decisão do motor: sem trocar o exe, nada disso chega a quem joga.
+        public const string InstallerVersion = "0.4.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

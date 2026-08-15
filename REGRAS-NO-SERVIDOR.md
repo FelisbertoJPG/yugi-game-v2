@@ -19,7 +19,7 @@ abrir o DevTools, editar um `.ydk` no bloco de notas, ou chamar a API direto.
 | domínio | onde vive | o que o servidor garante |
 |---|---|---|
 | **Economia** | `abrir_pacote`, `vender_cartas`, `remover_cartas` | o sorteio do pacote acontece **no servidor**, com pity e `urSpend`; o preço de venda sai da raridade publicada |
-| **Deck do jogador** | `salvar_deck` | tamanho (40–60 main, 15 extra/side), posse pela regra de raridade, teto individual da banlist, pool da lista ativa |
+| **Deck do jogador** | `salvar_deck` | tamanho (40–60 main, 15 extra/side), posse pela regra de raridade, teto individual da banlist, pool da lista ativa. O `p_livre` (migration 0024) pula tudo isso MENOS o tamanho, e só para admin — é o Deck Builder da Área de Teste, que monta com o banco inteiro |
 | **Deck estrutural** | `comprar_deck_estrutural`, `validar_deck_estrutural` | compra uma vez por conta |
 | **Conteúdo do jogo** | tabela `conteudo` | `banlist`, `boosters`, `npcs`, `cardlists`, `lista1` — só admin escreve (RLS `eh_admin()`) |
 | **Decks de NPC** | tabela `decks_npc` | os 8 estão publicados |

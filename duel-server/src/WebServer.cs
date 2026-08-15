@@ -363,6 +363,18 @@ namespace DuelServer
                 ? (uint)fs.GetInt64()
                 : (uint?)null;
 
+            // DE QUEM e' esse Bonus de Campo. "npc" = o tabuleiro e' do
+            // ADVERSARIO (`advNpc.board`), entao a magia de campo e' dele: e' o
+            // campo DELE que voce esta visitando, e o buff tem de ser dele.
+            // Ausente ou "player" mantem o comportamento antigo (lado do
+            // jogador), que e' o certo para o tabuleiro que o proprio jogador
+            // ativou no Treino.
+            string donoCampo = body.TryGetProperty("fieldSpellOwner", out var fo)
+                               && fo.ValueKind == JsonValueKind.String
+                ? (fo.GetString() ?? "")
+                : "";
+            int fieldSpellController = donoCampo.Equals("npc", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+
             // Nível do adversário. "avancado" é o NPC que LÊ a mão e as cartas
             // baixadas do jogador; qualquer outra coisa (inclusive campo ausente,
             // que é o caso de todo NPC criado antes disto existir) é iniciante.
@@ -380,6 +392,7 @@ namespace DuelServer
 
             Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
                      $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")} " +
+                     $"campoDe={(fieldSpell.HasValue ? (fieldSpellController == 1 ? "npc" : "jogador") : "-")} " +
                      $"nivel={(leitura ? "avancado" : "iniciante")} multiplayer={multi}");
             Faxina();
             var sala = SalaDe(body);
@@ -387,7 +400,8 @@ namespace DuelServer
             {
                 sala.Duel?.Dispose();
                 sala.Duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
-                                                npcLeitura: leitura, doisHumanos: multi);
+                                                npcLeitura: leitura, doisHumanos: multi,
+                                                fieldSpellController: fieldSpellController);
                 sala.Multiplayer = multi;
                 sala.Ultimo = DateTime.UtcNow;
                 var r = sala.Duel.Advance();

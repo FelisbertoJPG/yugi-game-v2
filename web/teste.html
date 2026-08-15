@@ -24,6 +24,13 @@
   .menu .k { color: #c9a6e0; font-weight: bold; min-width: 18px; }
   .menu .why { margin-left: auto; font-size: 10px; color: var(--dim); }
   .back { margin-top: 16px; }
+  /* Decks no banco (admin) */
+  .banco { background: var(--panel); border: 1px solid var(--line); padding: 10px 14px; margin-bottom: 16px; }
+  .banco h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 2px; color: #c9a6e0; }
+  .banco .linha { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12px; }
+  .banco .linha:first-child { border-top: 0; }
+  .banco .qtd { color: var(--dim); font-size: 10px; }
+  .banco button { font-size: 10px; padding: 3px 8px; }
 </style>
 </head>
 <body>
@@ -49,6 +56,20 @@
       <button id="btn-dp" class="btn-primary" style="font-size:11px">+ creditar DP</button>
     </span>
     <span id="dp-nota" style="font-size:10px; color:var(--dim)">DP só pela Loja e por vencer Adversários</span>
+  </div>
+
+  <!-- Decks NO BANCO desta conta. Não é a lista do Deck Builder (aquela vem
+       do localStorage hidratado): é o que está gravado em `decks_jogador`,
+       que é o que vale no Multiplayer e em outra máquina. Ver as duas lado a
+       lado é justamente o ponto — quando discordam, é aqui que se vê. -->
+  <div class="banco" id="admin-decks" hidden>
+    <h2>DECKS NO BANCO <span style="color:var(--dim); letter-spacing:0">(esta conta)</span></h2>
+    <div id="decks-lista"></div>
+    <div style="display:flex; align-items:center; gap:8px; margin-top:8px">
+      <span id="decks-nota" style="font-size:10px; color:var(--dim)">carregando…</span>
+      <span style="flex:1"></span>
+      <button id="btn-decks-recarregar">recarregar</button>
+    </div>
   </div>
 
   <div class="menu">
@@ -110,6 +131,8 @@
 <script type="module">
 import { getDP, hydrateWallet, creditarDP } from '/web/js/wallet.js';
 import { perfilAtual } from '/web/js/supabase.js';
+import { listarDecksNoBanco, apagarDeckNoBanco, playerDeckPath } from '/web/js/projectdecks.js';
+import { esquecerDeckLocal } from '/web/js/storage.js';
 const $ = (id) => document.getElementById(id);
 
 await hydrateWallet();
@@ -121,6 +144,9 @@ renderDP();
 const perfil = await perfilAtual().catch(() => null);
 if (perfil?.admin) {
   $('admin-dp').hidden = false;
+  $('admin-decks').hidden = false;
+  $('btn-decks-recarregar').onclick = () => renderDecksDoBanco();
+  renderDecksDoBanco();
   $('dp-nota').textContent = `admin (${perfil.usuario ?? ''}) — pode creditar direto`;
   $('btn-dp').onclick = async () => {
     const valor = Number($('dp-valor').value);
@@ -134,6 +160,63 @@ if (perfil?.admin) {
       : `não creditou: ${r.error}`;
   };
 }
+
+// ------------------------------------------------------------ decks no banco
+//
+// Apagar aqui chama `apagar_deck`, que filtra por `usuario_id = auth.uid()`:
+// nem sendo admin dá para apagar o deck de outra pessoa. Por isso a lista é
+// sempre "esta conta", nunca "todas".
+async function renderDecksDoBanco() {
+  const alvo = $('decks-lista');
+  const nota = $('decks-nota');
+  nota.textContent = 'carregando…';
+  const r = await listarDecksNoBanco();
+  if (!r.ok) {
+    alvo.replaceChildren();
+    nota.textContent = `não consegui ler: ${r.error ?? 'erro'}`;
+    return;
+  }
+  if (!r.decks.length) {
+    alvo.replaceChildren();
+    nota.textContent = 'nenhum deck no banco — salve um pelo Deck Builder';
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const d of r.decks) {
+    const linha = document.createElement('div');
+    linha.className = 'linha';
+
+    const nome = document.createElement('b');
+    nome.textContent = d.nome;
+    const qtd = document.createElement('span');
+    qtd.className = 'qtd';
+    qtd.textContent = `main ${d.main} · extra ${d.extra}`;
+    const espaco = document.createElement('span');
+    espaco.style.flex = '1';
+
+    const btn = document.createElement('button');
+    btn.textContent = 'excluir';
+    btn.onclick = async () => {
+      if (!confirm(`Apagar "${d.nome}" do banco? Isto não tem volta.`)) return;
+      btn.disabled = true;
+      const x = await apagarDeckNoBanco(d.nome);
+      // A cópia de trabalho deste navegador também some, senão o Deck Builder
+      // continuaria mostrando um deck que já não existe no banco.
+      if (x.ok) esquecerDeckLocal(playerDeckPath(d.nome));
+      // Redesenha ANTES de escrever o recado: o redesenho reescreve a nota
+      // com a contagem, e na ordem inversa o "apagado" some sem ninguem ler.
+      await renderDecksDoBanco();
+      nota.textContent = x.ok ? `"${d.nome}" apagado` : `não apagou: ${x.error}`;
+    };
+
+    linha.append(nome, qtd, espaco, btn);
+    frag.append(linha);
+  }
+  alvo.replaceChildren(frag);
+  nota.textContent = `${r.decks.length} deck(s) — o que vale no Multiplayer e em outra máquina`;
+}
+
 $('btn-deck').onclick = () => (location.href = '/web/deck.html');
 $('btn-booster').onclick = () => (location.href = '/web/booster.html');
 $('btn-estrutural').onclick = () => (location.href = '/web/estrutural.html');

@@ -100,6 +100,7 @@ namespace DuelServer
         bool EhHumano(int player) => _doisHumanos || player == HUMAN;
         List<object> _events;   // para o NPC registrar o que fez
         uint? _pendingFieldSpellEvent; // Bônus de Campo injetado antes do 1º Advance()
+        byte _fieldSpellController;    // de quem é esse Bônus de Campo (0 jogador, 1 NPC)
 
         /// <summary>Gancho de diagnóstico do SELECT_CHAIN cru (só o --probe-chain liga).</summary>
         public static Action<byte[], int, int> ChainProbe;
@@ -323,25 +324,33 @@ namespace DuelServer
         public InteractiveDuel(string streamingAssets, uint[] deck, ulong seed,
                                ulong flags = 0, bool npc = true, uint[] npcDeck = null,
                                uint[] extra = null, uint[] npcExtra = null, uint? fieldSpell = null,
-                               bool npcLeitura = false, bool doisHumanos = false)
+                               bool npcLeitura = false, bool doisHumanos = false,
+                               int fieldSpellController = 0)
         {
             // Sem `npcDeck` o oponente joga com o SEU deck; o Extra segue a mesma
             // regra, senão ele duelaria com o seu main e o extra de outro deck.
             _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags,
-                                 extra, npcDeck != null ? npcExtra : (npcExtra ?? extra), fieldSpell);
+                                 extra, npcDeck != null ? npcExtra : (npcExtra ?? extra), fieldSpell,
+                                 fieldSpellController);
             _doisHumanos = doisHumanos;
             _npcEnabled = npc && !doisHumanos;
             _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
                                 npcLeitura ? HandOf : HandHonesta,
                                 StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf, LpOf,
                                 npcLeitura ? AllMonstersPos : MonstrosHonestos,
-                                npcLeitura ? SetStOf : SetStHonesto);
+                                npcLeitura ? SetStOf : SetStHonesto,
+                                // ATK/DEF ao vivo dos DOIS lados. Não é leitura
+                                // escondida (não depende do `npcLeitura`): o
+                                // bônus de um Equip/magia de campo está com a
+                                // face para cima na mesa, um humano também o vê.
+                                StatsEmCampo);
             Log.Info($"[npc] nivel: {(npcLeitura ? "AVANCADO (le a mao e as cartas baixadas)" : "iniciante (so' o que esta com a face para cima)")}");
             // `DuelSession` já colocou a carta no motor (antes de OCG_StartDuel),
             // mas isso não gera MSG_MOVE — o front só sabe de campo por evento.
             // Sem isto, o Bônus de Campo funciona (o motor aplica o efeito) mas
             // a tela nasce com a zona de campo vazia, como se não tivesse nada.
             _pendingFieldSpellEvent = fieldSpell;
+            _fieldSpellController = (byte)(fieldSpellController == 1 ? 1 : 0);
         }
 
         /// <summary>Cartas na mão de um jogador (para a IA achar Reborn/dragões).</summary>
@@ -500,7 +509,11 @@ namespace DuelServer
                 {
                     type = "move", code = _pendingFieldSpellEvent.Value,
                     fromCtrl = (byte)0, fromLoc = (byte)0, fromSeq = 0,
-                    controller = (byte)0, loc = (byte)0x8, seq = 5, pos = 1,
+                    // O `controller` tem de ser o MESMO do `InjectField`, senão a
+                    // tela desenha a carta na zona de campo do lado errado — e o
+                    // jogador vê um bônus que na verdade está trabalhando contra
+                    // ele. `duel.html` já sabe desenhar os dois lados (seq 5).
+                    controller = _fieldSpellController, loc = (byte)0x8, seq = 5, pos = 1,
                 });
                 _pendingFieldSpellEvent = null;
             }
@@ -822,9 +835,10 @@ namespace DuelServer
                     });
                     break;
                 case "position":
-                    // Statline decide: parede fica deitada (com a face para cima,
-                    // que não é Set). Com a IA desligada, mantém o ataque de antes.
-                    _s.Respond(I32(_npcEnabled ? _npc.DecidePosicao(q.askCode, q.posMask) : 0x1));
+                    // Statline decide, com o campo do outro lado podendo desmentir
+                    // (ver DecidePosicao): parede que atropela o campo dele entra
+                    // de pé. Com a IA desligada, mantém o ataque de antes.
+                    _s.Respond(I32(_npcEnabled ? _npc.DecidePosicao(q.askCode, q.posMask, q.player) : 0x1));
                     break;
                 case "yesno":
                     // Efeito opcional (ex.: Dust Tornado setar da mão): o NPC aceita.
@@ -1170,6 +1184,32 @@ namespace DuelServer
                     def = agora.Item5, baseDef = agora.Item6,
                 });
             }
+        }
+
+        /// <summary>
+        /// ATK/DEF ATUAIS de um monstro em campo, para o <see cref="NpcBrain"/>.
+        ///
+        /// Existe porque o cérebro lia `DatabaseManager.Stats(code)` — o statline
+        /// IMPRESSO na carta, do `cards.cdb`. Todo modificador contínuo (Equip
+        /// Spell, magia de campo, efeito que sobe ATK) é invisível ali, e o
+        /// sintoma era o NPC atacar um monstro do jogador que já valia mais do
+        /// que ele achava: um Battle Ox 1700 se jogando contra uma Mystical Elf
+        /// 800/2000 equipada, porque no banco ela continua sendo 800.
+        ///
+        /// Aqui quem responde é o CORE, que já resolveu tudo. Mesma fonte da
+        /// `VarrerStats` — nenhum efeito é reimplementado nem inferido do Lua.
+        ///
+        /// Devolve `null` para zona vazia: `QueryAtk` despeja um aviso no log a
+        /// cada consulta sem carta, e o cérebro pergunta a todo turno.
+        /// </summary>
+        internal (int atk, int def)? StatsEmCampo(int player, int seq)
+        {
+            if (player < 0 || player > 1 || seq < 0) return null;
+            if (!_board.ContainsKey((player, seq))) return null;
+            var (atk, _) = QueryAtk(player, seq);
+            if (atk == null) return null;
+            var (def, _) = QueryDef(player, seq);
+            return (atk.Value, def ?? 0);
         }
 
         /// <summary>

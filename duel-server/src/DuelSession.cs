@@ -33,7 +33,8 @@ namespace DuelServer
         public DatabaseManager Cards => _db;
 
         public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0,
-                           uint[] extra0 = null, uint[] extra1 = null, uint? fieldSpell = null)
+                           uint[] extra0 = null, uint[] extra1 = null, uint? fieldSpell = null,
+                           int fieldSpellController = 0)
         {
             _db = new DatabaseManager(streamingAssets);
             _sm = new ScriptManager(streamingAssets);
@@ -96,7 +97,19 @@ namespace DuelServer
             // Main Phase pra ativar — igual "você caiu no campo de Floresta do
             // Weevil". É a carta de VERDADE, com o Lua dela rodando normal; não
             // reimplementamos efeito nenhum aqui.
-            if (fieldSpell.HasValue) InjectField(team: 0, controller: 0, code: fieldSpell.Value);
+            //
+            // De QUEM é a carta importa, e muito. Ela nasceu sempre do lado do
+            // jogador (controller 0), o que virava o efeito do avesso: o campo do
+            // adversário buffava QUEM ENTRAVA NELE, e ainda ocupava a zona de
+            // campo do visitante — bastava o jogador ativar uma magia de campo
+            // qualquer por cima para o "campo especial do NPC" sumir de graça.
+            // Com o tabuleiro sendo do NPC, a carta é dele: ela ocupa a zona DELE
+            // e derrubá-la passa a custar uma carta de verdade.
+            if (fieldSpell.HasValue)
+            {
+                byte dono = (byte)(fieldSpellController == 1 ? 1 : 0);
+                InjectField(team: dono, controller: dono, code: fieldSpell.Value);
+            }
 
             YgoCoreAPI.OCG_StartDuel(_duel);
         }

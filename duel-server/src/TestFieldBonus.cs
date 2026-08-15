@@ -46,8 +46,121 @@ namespace DuelServer
             ForestDaBonusDeVerdade(sa);
             Log.Info("\n=== teste: UMI ativada DA MAO, com monstro ja em campo ===\n");
             UmiAlcancaQuemJaEstavaEmCampo(sa);
+            Log.Info("\n=== teste: o campo do tabuleiro do NPC e' DELE ===\n");
+            OCampoDoNpcEhDele(sa);
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
             return _fail == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// De QUEM é a magia de campo injetada pelo tabuleiro.
+        ///
+        /// Ela nascia sempre do lado do jogador (`controller: 0`), o que virava o
+        /// efeito do avesso: o "campo de Floresta do Weevil" acabava sendo SEU —
+        /// ocupava a SUA zona de campo, e bastava você ativar uma magia de campo
+        /// qualquer da mão para o campo especial do adversário sumir de graça,
+        /// sem gastar remoção nenhuma. O tabuleiro temático do NPC durava até a
+        /// sua primeira magia de campo.
+        ///
+        /// Com o tabuleiro sendo do NPC, a carta é dele. As duas passam a
+        /// conviver — cada jogador tem a própria zona de campo —, então derrubar
+        /// a dele voltou a custar uma remoção de verdade.
+        ///
+        /// O par CONTROLE é o que dá sentido ao teste: o MESMO duelo com a carta
+        /// registrada como do jogador, onde ela É substituída.
+        /// </summary>
+        static void OCampoDoNpcEhDele(string sa)
+        {
+            // (dono do campo injetado) -> (o Umi sobreviveu?, controller no evento)
+            (bool sobreviveu, int controller) Rodar(int donoDoCampo)
+            {
+                // Deck do jogador: a magia de campo DELE (Forest) para pôr por
+                // cima, mais corpo inerte para o duelo andar.
+                var meu = new List<uint>();
+                for (int i = 0; i < 14; i++) meu.Add(FOREST);
+                while (meu.Count < 40) meu.Add(5053103);   // Battle Ox, filler
+
+                using var duel = new InteractiveDuel(sa, meu.ToArray(), 7654321UL, 0x1000000UL,
+                                                     npc: false, npcDeck: null,
+                                                     extra: null, npcExtra: null,
+                                                     fieldSpell: UMI,
+                                                     npcLeitura: false, doisHumanos: false,
+                                                     fieldSpellController: donoDoCampo);
+                var r = duel.Advance();
+
+                int ctrlDoEvento = -1;
+                bool umiMorreu = false, ativouForest = false;
+                int guard = 0;
+
+                while (!r.ended && guard++ < 200)
+                {
+                    foreach (var e in r.events)
+                    {
+                        var t = e.GetType();
+                        if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
+                        uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
+                        byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
+                        byte from = Convert.ToByte(t.GetProperty("fromLoc")?.GetValue(e) ?? (byte)0);
+                        int ctrl = Convert.ToInt32(t.GetProperty("controller")?.GetValue(e) ?? 0);
+
+                        // O evento SINTÉTICO do boot (fromLoc 0 = "nasceu ali"):
+                        // é ele que diz ao front em que lado desenhar a carta.
+                        if (code == UMI && from == 0 && loc == 0x8) ctrlDoEvento = ctrl;
+                        // O Umi saindo da zona de magia para o cemitério.
+                        if (code == UMI && from == 0x8 && loc == 0x10) umiMorreu = true;
+                    }
+                    if (ativouForest && umiMorreu) break;
+
+                    var q = r.question;
+                    if (q == null) break;
+
+                    switch (q.kind)
+                    {
+                        case "idle":
+                        {
+                            var forest = q.activatable.FirstOrDefault(a => a.code == FOREST);
+                            if (!ativouForest && forest.code == FOREST)
+                            {
+                                ativouForest = true;
+                                r = duel.Respond("activate", forest.index);
+                            }
+                            else r = duel.Respond("endturn", 0);
+                            break;
+                        }
+                        case "place": r = duel.Respond("place", q.zones.Count > 0 ? q.zones[0] : 0); break;
+                        case "position": r = duel.Respond("position", 0x1); break;
+                        case "chain": r = duel.Respond("chain", -1); break;
+                        case "yesno": r = duel.Respond("yesno", 1); break;
+                        case "battle": r = duel.Respond("endbattle", 0); break;
+                        case "selectcard":
+                        case "selecttribute":
+                            r = duel.Respond("select", 0,
+                                q.choices.Take(Math.Max(1, q.selMin)).Select(c => c.index).ToList());
+                            break;
+                        default: r = duel.Respond("endturn", 0); break;
+                    }
+                }
+
+                Check($"[dono={donoDoCampo}] o jogador chegou a ativar a propria magia de campo",
+                      ativouForest, "(sem isso nao ha' o que comparar)");
+                return (!umiMorreu, ctrlDoEvento);
+            }
+
+            var doNpc = Rodar(donoDoCampo: 1);
+            var doJogador = Rodar(donoDoCampo: 0);
+
+            Check("o evento de boot diz que a carta e' do NPC (controller 1)",
+                  doNpc.controller == 1,
+                  $"(veio {doNpc.controller} — o front desenharia na zona de campo errada)");
+            Check("CONTROLE: como carta do jogador, ela veio com controller 0",
+                  doJogador.controller == 0, $"(veio {doJogador.controller})");
+
+            Check("sendo do NPC, o Umi SOBREVIVE a magia de campo do jogador",
+                  doNpc.sobreviveu,
+                  "(o jogador derrubou o campo do adversario de graca, so' ativando o dele)");
+            Check("CONTROLE: sendo do jogador, ela e' substituida pela dele",
+                  !doJogador.sobreviveu,
+                  "(se nem assim ela sai, o teste acima nao esta provando nada)");
         }
 
         /// <summary>

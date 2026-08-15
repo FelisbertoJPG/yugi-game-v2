@@ -317,6 +317,18 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-pegasus") >= 0)
                 return TestPegasus.Run(streamingAssets);
 
+            // Teste de aceitacao das cartas que os BOOSTERS ja vendiam e a
+            // Lista 1 nao conhecia (De-Spell, Ritual Cage, Birthright, Swing of
+            // Memories): o efeito roda no motor E o front sabe desenhar toda
+            // pergunta que elas fazem.
+            if (Array.IndexOf(args, "--test-cartas-booster") >= 0)
+                return TestCartasBooster.Run(streamingAssets);
+
+            // O NPC decide pelo ATK/DEF DE AGORA (equip, magia de campo, efeito),
+            // nao pelo statline impresso no cards.cdb.
+            if (Array.IndexOf(args, "--test-atk-vivo") >= 0)
+                return TestAtkVivo.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-armory") >= 0)
                 return TestArmory.Run(streamingAssets);
 

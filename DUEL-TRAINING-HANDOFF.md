@@ -41,10 +41,22 @@ Detalhes que importam:
 - **"Pôr em defesa" = Set.** Pelas regras oficiais a Invocação Normal é sempre em
   ataque com a face para cima; a única forma legal de pôr um monstro em defesa no
   próprio turno é setá-lo. Por isso as regras de defesa viram `setmonster`.
-- **Ameaça** se mede só pelo que está **com a face para cima** (`FaceUpMonsters`):
+- **Ameaça** se mede só pelo que está **com a face para cima** (pelo ATK vivo,
   um monstro deitado não ataca ninguém, então contá-lo como ameaça deixaria o NPC
   medroso à toa. Isso **não** é mais o limite do que ele *sabe* — ver "Leitura",
   abaixo.
+- **ATK/DEF são os de AGORA, não os impressos na carta.** Todo número que o
+  cérebro compara (ameaça, alvo do ataque, quem ataca, o que vale tributar)
+  sai de `InteractiveDuel.StatsEmCampo`, que **pergunta ao core** — Equip
+  Spell, magia de campo e efeito contínuo já resolvidos. Ele lia
+  `DatabaseManager.Stats(code)`, o statline do `cards.cdb`, e o sintoma era o
+  NPC atacar um monstro do jogador que já valia mais do que ele: +700 de
+  equipamento eram invisíveis, e ele entregava o corpo numa batalha que a
+  conta dele dizia ganhar. Nada acusava — a TELA já mostrava o ATK certo
+  (evento `stats`), só quem decide o ataque é que não via. Sem acessador
+  (testes de decisão isolada, que montam campo só com códigos) cai no
+  impresso, que é o comportamento antigo. Teste: `--test-atk-vivo`, com o par
+  controle — o MESMO duelo sem o equipamento, onde ele tem de atacar.
 - Cada jogada vira um evento `{type:"npc", action, why}`, que o front mostra no
   log com o motivo. É assim que se confere se ele está seguindo as regras.
 - `POST /start {"npc": false}` volta ao oponente desligado (auto-passa), que é o

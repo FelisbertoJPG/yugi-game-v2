@@ -25,7 +25,19 @@ const t = (name, fn) => {
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const idx = JSON.parse(await readFile(join(ROOT, 'ygo-data', 'data', 'cards.index.json'), 'utf8'));
-const CARTAS = Array.isArray(idx) ? idx : (idx.cards ?? idx.data ?? Object.values(idx)[0]);
+const TODAS = Array.isArray(idx) ? idx : (idx.cards ?? idx.data ?? Object.values(idx)[0]);
+
+/**
+ * O índice SEM arte alternativa — que é o que o navegador entrega a
+ * `salvarListas`, porque lá a fonte é `db.filter({})` e o `filter` da `YgoDB`
+ * descarta `alt` por padrão.
+ *
+ * Fazer o mesmo aqui não é detalhe: são 100 cartas de diferença, e sem isto o
+ * número deste arquivo nunca podia bater com o de `conteudo/lista1` no banco —
+ * ou seja, o teste dizia conferir contra o publicado e conferia contra outra
+ * conta. Arte alternativa é a MESMA carta com outro id; ela não entra no pool.
+ */
+const CARTAS = TODAS.filter((c) => !c.alt);
 
 /** Volta ao padrão de fábrica entre um teste e outro (o módulo tem estado). */
 const padrao = () => aplicarListas([
@@ -58,13 +70,26 @@ t('carta avulsa entra mesmo não sendo monstro', () => {
 });
 
 console.log('\n=== resolução contra o índice (o que o servidor recebe) ===');
-t('a Lista 1 resolvida bate com o total publicado (1160)', () => {
+t('a Lista 1 resolvida bate com o total publicado (1086)', () => {
   padrao();
   // Se este número mudar sem ninguém ter mexido na lista, foi um
   // `npm run data:build` — e aí o `conteudo/lista1` no banco está velho.
-  // 1158 -> 1160 em 14/08/2026: entraram Ancient Rules (10667321) e
-  // Summoner's Art (79816536), o pacote "Normal grande" do deck do Pegasus.
-  assert.equal(resolverLista(fonteDasListas()[0], CARTAS).length, 1160);
+  //
+  // Em 14/08/2026 este teste passou a contar sem arte alternativa (ver CARTAS)
+  // e o padrão de fábrica foi sincronizado com a lista VIVA, que tinha 22
+  // cartas a mais publicadas pelo editor (`web/listas.html`) e nunca trazidas
+  // de volta para cá: os pacotes do Relinquished, da fusão e do Toon, as
+  // contínuas de apoio e o Armory Call. Antes disso, instalação nova e offline
+  // recusava deck com qualquer uma delas — a lista embutida discordava da
+  // publicada, que é exatamente o que `aplicarLista1` existe para evitar.
+  //
+  // Junto entraram as quatro cartas que os BOOSTERS já vendiam e a Lista 1 não
+  // conhecia — De-Spell (19159413), Ritual Cage (25796442), Birthright
+  // (35539880) e Swing of Memories (96765646). Ver `--test-cartas-booster`.
+  //
+  // 1086 é o mesmo número de `conteudo/lista1` no banco. Se os dois deixarem de
+  // bater, um dos lados está velho.
+  assert.equal(resolverLista(fonteDasListas()[0], CARTAS).length, 1086);
 });
 t('resolver = exatamente quem passa no filtro', () => {
   padrao();

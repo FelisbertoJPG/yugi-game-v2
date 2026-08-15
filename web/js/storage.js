@@ -66,8 +66,12 @@ export function listDecks() {
  *   salvo" — foi exatamente o que aconteceu com o primeiro tester, e o erro do
  *   banco ("cartas que voce nao possui: …") morria aqui dentro sem nunca chegar
  *   a ninguém.
+ *
+ * @param {{livre?: boolean}} [opcoes] `livre` é o modo ADMIN da Área de Teste
+ *   (ver `saveProjectDeck`): grava no banco sem conferir a Coleção. Quem decide
+ *   se pode é o servidor.
  */
-export function saveDeck(deck, index = null, aoFalharNoServidor = null) {
+export function saveDeck(deck, index = null, aoFalharNoServidor = null, opcoes = {}) {
   const decks = read(KEY_DECKS, []);
   const i = (index === null || index < 0 || index >= decks.length) ? decks.length : index;
   // Renomear NÃO troca o arquivo: o `path` de quem já está no projeto é
@@ -76,7 +80,7 @@ export function saveDeck(deck, index = null, aoFalharNoServidor = null) {
   const path = decks[i]?.path ?? null;
   decks[i] = { ...deck.toJSON(), path };
   write(KEY_DECKS, decks);
-  pushDeckToProject(i, deck, path, aoFalharNoServidor);
+  pushDeckToProject(i, deck, path, aoFalharNoServidor, opcoes);
   return i;
 }
 
@@ -90,6 +94,29 @@ export function deleteDeck(index) {
   const active = getActiveIndex();
   if (active === index) setActiveIndex(decks.length ? 0 : null);
   else if (active !== null && active > index) setActiveIndex(active - 1);
+  return true;
+}
+
+/**
+ * Tira o deck da cópia de trabalho SEM tocar no servidor.
+ *
+ * É o par de quem já apagou no banco por outro caminho (a Área de Teste apaga
+ * direto em `decks_jogador`). Sem isto os dois discordariam até o próximo
+ * `hydrateDecks`, e o deck apagado continuaria aparecendo no Deck Builder desta
+ * máquina — parecendo que a exclusão não funcionou.
+ *
+ * @returns {boolean} se havia algo para esquecer.
+ */
+export function esquecerDeckLocal(path) {
+  const decks = read(KEY_DECKS, []);
+  const i = decks.findIndex((d) => d.path === path);
+  if (i < 0) return false;
+  decks.splice(i, 1);
+  write(KEY_DECKS, decks);
+
+  const active = getActiveIndex();
+  if (active === i) setActiveIndex(decks.length ? 0 : null);
+  else if (active !== null && active > i) setActiveIndex(active - 1);
   return true;
 }
 
@@ -108,7 +135,7 @@ function caminhoLivre(nome, ocupados) {
  * possui" é uma decisão do jogo, e o jogador precisa saber para poder corrigir
  * o deck. Eram as duas tratadas como uma só, e a segunda sumia junto.
  */
-async function pushDeckToProject(index, deck, path, aoFalhar = null) {
+async function pushDeckToProject(index, deck, path, aoFalhar = null, opcoes = {}) {
   if (!(await canWrite())) return;
   let alvo = path;
   if (!alvo) {
@@ -116,7 +143,7 @@ async function pushDeckToProject(index, deck, path, aoFalhar = null) {
       .filter((p) => p.path.startsWith('player/')).map((p) => p.path));
     alvo = caminhoLivre(deck.name, ocupados);
   }
-  const r = await saveProjectDeck(alvo, deck, { updated: new Date().toISOString() });
+  const r = await saveProjectDeck(alvo, deck, { updated: new Date().toISOString() }, opcoes);
   if (!r.ok) {
     console.warn('[deck] o servidor recusou:', r.error);
     aoFalhar?.(r.error || 'o servidor recusou o deck');

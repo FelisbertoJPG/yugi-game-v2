@@ -930,13 +930,30 @@ namespace DuelServer
                 case 62: ev.Add(new { type = "spsummoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF });
                     MarcaGatilho("summon", d, o); break; // MSG_SPSUMMONING (Sincro/Xyz)
                 // MSG_SUMMONED (61) / MSG_SPSUMMONED (63): a invocação passou —
-                // não há mais nada a negar. MSG_CHAINING (70): uma carta ACABOU
-                // de ser ativada e a corrente vai abrir; MSG_CHAIN_END (74): ela
-                // resolveu. Nenhuma delas gera evento para a tela: existem só para
-                // o NPC saber a QUE está respondendo (ver Question.chainTrigger*).
+                // não há mais nada a negar. MSG_CHAIN_END (74): a corrente
+                // resolveu. Nenhuma das duas gera evento para a tela: existem só
+                // para o NPC saber a QUE está respondendo (ver Question.chainTrigger*).
                 case 61: case 63: LimpaGatilho(); break;
-                case 70: MarcaGatilho("activation", d, o); break;
                 case 74: LimpaGatilho(); break;
+                // MSG_CHAINING (70): uma carta ACABOU de ser ativada e a corrente
+                // vai abrir. Além do gatilho do NPC, isto vira evento de TELA: é o
+                // único ponto em que o motor diz "esta carta foi ativada" para
+                // QUALQUER ativação — magia da mão, armadilha baixada, efeito de
+                // monstro que já estava em campo. O `move` só cobre a carta que
+                // TROCA de lugar, então o efeito ativado em campo não acendia nada
+                // e a jogada do oponente passava sem o jogador ver o que foi.
+                //
+                // Só o código e o controlador saem daqui — os mesmos 6 bytes que o
+                // MarcaGatilho lê, a parte do layout que não muda entre versões do
+                // core (ver o comentário dele). `controller` é −1 quando o motor
+                // não disse de quem é; o front trata como desconhecido.
+                //
+                // Ativar carta é público (é assim na mesa também), então a
+                // `Projetar` deixa passar inteiro para os dois espectadores.
+                case 70:
+                    MarcaGatilho("activation", d, o);
+                    ev.Add(new { type = "chaining", code = _gatilhoCode, controller = _gatilhoPlayer });
+                    break;
                 case 50: // MOVE
                 {
                     int p = o + 1;

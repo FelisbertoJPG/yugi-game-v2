@@ -150,7 +150,9 @@
   }
 
   /* ---------- aviso de fase ---------- */
-  /* Entra deslizando, segura um instante e sai. Não intercepta clique. */
+  /* Entra deslizando, segura um instante e sai. Não intercepta clique.
+     A DURAÇÃO vem do JS (`--fase-ms`): o aviso trava o duelo enquanto está na
+     tela, então quem manda no tempo é quem espera por ele, não o CSS. */
   #phase-toast {
     position: fixed; top: 38%; left: 0; right: 0; text-align: center;
     pointer-events: none; z-index: 55;
@@ -159,13 +161,60 @@
     display: inline-block; padding: 8px 26px;
     background: #0c1118dd; border: 2px solid var(--gold); color: var(--gold);
     font-size: 22px; letter-spacing: 4px; text-transform: uppercase;
-    animation: fase 1.4s ease-out forwards;
+    animation: fase var(--fase-ms, 1400ms) ease-out forwards;
+  }
+  /* O aviso de TURNO é o marco maior: mesma faixa, peso de manchete. */
+  #phase-toast span.turno {
+    font-size: 30px; padding: 12px 34px; border-width: 3px;
+    box-shadow: 0 0 30px #f1c40f33, 0 10px 30px #000a;
   }
   @keyframes fase {
     0%   { opacity: 0; transform: translateX(-70px); }
-    18%  { opacity: 1; transform: translateX(0); }
-    68%  { opacity: 1; transform: translateX(0); }
+    14%  { opacity: 1; transform: translateX(0); }
+    74%  { opacity: 1; transform: translateX(0); }
     100% { opacity: 0; transform: translateX(70px); }
+  }
+
+  /* ---------- revelação da carta ativada ---------- */
+  /* O momento do Tag Force: a carta acende na zona, a arte vem grande ao centro
+     por um instante e só então o efeito resolve. Não intercepta clique — quem
+     segura o duelo é o `await` do laço de eventos, não este elemento. */
+  #reveal {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 58;
+  }
+  #reveal[hidden] { display: none; }
+  #reveal .rev {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    animation: revelar var(--rev-ms, 1200ms) ease-out forwards;
+  }
+  #reveal img {
+    width: 210px; max-width: 42vw; border: 3px solid var(--gold); border-radius: 4px;
+    box-shadow: 0 0 40px #f1c40f55, 0 14px 40px #000c; background: #0a0f16;
+  }
+  #reveal .rev-quem {
+    font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--dim);
+  }
+  #reveal .rev-nome {
+    font-size: 17px; color: var(--gold); text-align: center; max-width: 60vw;
+    background: #0c1118dd; border: 1px solid var(--gold); padding: 5px 16px;
+  }
+  @keyframes revelar {
+    0%   { opacity: 0; transform: scale(0.72); }
+    16%  { opacity: 1; transform: scale(1.04); }
+    24%  { opacity: 1; transform: scale(1); }
+    78%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.06); }
+  }
+
+  /* ---------- seletor de correntes (auto / manual / desligado) ---------- */
+  .chain-mode { display: flex; align-items: center; gap: 4px; }
+  .chain-mode > b { color: var(--dim); font-weight: normal; }
+  .chain-mode button {
+    font-size: 10px; padding: 2px 7px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .chain-mode button.on {
+    background: var(--gold); color: #101319; border-color: var(--gold); font-weight: bold;
   }
 
   .pilezone {
@@ -351,6 +400,16 @@
   <span class="status-line"><span class="dot" id="dot"></span><span id="conn">—</span></span>
   <span class="spacer"></span>
   <span class="status-line">turno: <b id="turn">—</b></span>
+  <!-- Correntes: quando o motor abre uma janela de resposta (armadilha, efeito
+       rápido), quem decide se ela vira pergunta é este seletor. Preferência
+       LOCAL, como o tabuleiro ativo — não é progresso de ninguém. -->
+  <span class="status-line chain-mode" id="chain-mode"
+        title="o que fazer quando uma carta sua pode ser ativada em resposta">
+    <b>correntes:</b>
+    <button data-mode="auto" title="ativa sozinho a carta oferecida, sem perguntar">auto</button>
+    <button data-mode="manual" title="pergunta sempre (padrao)">manual</button>
+    <button data-mode="off" title="nunca ativa e nunca pergunta">desligado</button>
+  </span>
   <select id="deck-sel" title="deck do treino" style="max-width:160px; font-size:11px"></select>
   <button id="btn-end">encerrar turno</button>
   <button id="btn-start">novo duelo</button>
@@ -435,6 +494,7 @@
 </div>
 
 <div id="phase-toast"></div>
+<div id="reveal" hidden></div>
 
 <div id="fx"></div>
 
@@ -734,18 +794,79 @@ async function loadActiveBoard() {
 function log(msg, big=false){ const e=document.createElement('div'); e.className='l'+(big?' big':''); e.textContent=msg; $('log').append(e); $('log').scrollTop=1e9; }
 
 /**
- * Anuncia a fase com um texto que entra deslizando e some. Recriamos o elemento
- * a cada aviso para a animação reiniciar — reusar o mesmo nó faz o CSS ignorar
- * a segunda chamada.
+ * Quanto tempo cada aviso fica na tela — e, por consequência, quanto o duelo
+ * fica PARADO. O aviso é `await`-ado dentro do laço de eventos (`apply`), que
+ * roda com `busy = true`: enquanto ele está na tela, nenhum clique do jogador
+ * passa pelo `act()`.
+ *
+ * Antes o aviso era um `setTimeout` solto: os eventos continuavam entrando por
+ * baixo dele e a rajada de fim de turno (turno → draw → standby → main) passava
+ * numa piscada só, sem dar tempo de ler nada. Segurar o laço é o que torna o
+ * duelo legível — e é de propósito que o número esteja aqui em cima, sozinho:
+ * é o botão de volume do ritmo do duelo.
  */
-let avisoTimer = null;
-function avisoFase(texto) {
+const AVISO_MS = { turno: 1500, fase: 1100, carta: 1200 };
+
+/**
+ * Anuncia a fase/turno com um texto que entra deslizando e some. Recriamos o
+ * elemento a cada aviso para a animação reiniciar — reusar o mesmo nó faz o CSS
+ * ignorar a segunda chamada. Devolve a promessa que só resolve quando o aviso
+ * saiu da tela.
+ */
+function avisoFase(texto, { turno = false } = {}) {
+  const ms = turno ? AVISO_MS.turno : AVISO_MS.fase;
   const box = $('phase-toast');
   const s = document.createElement('span');
+  if (turno) s.className = 'turno';
+  s.style.setProperty('--fase-ms', `${ms}ms`);
   s.textContent = texto;
   box.replaceChildren(s);
-  clearTimeout(avisoTimer);
-  avisoTimer = setTimeout(() => box.replaceChildren(), 1500);
+  return new Promise((pronto) => setTimeout(() => {
+    // Só limpa se este aviso ainda for o da vez: um aviso novo já trocou o nó.
+    if (box.firstChild === s) box.replaceChildren();
+    pronto();
+  }, ms));
+}
+
+/**
+ * **A carta ativada, grande, no meio da tela.** É o momento do Tag Force: a
+ * carta acende na zona, a arte vem ao centro por um instante e só então o efeito
+ * resolve e ela segue para o cemitério.
+ *
+ * O gatilho é o evento `chaining` (MSG_CHAINING do motor), e não o `move`: o
+ * `move` só existe para a carta que TROCA de lugar, então o efeito ativado por
+ * um monstro que já estava em campo não acendia nada — a jogada do oponente
+ * passava e o jogador nunca via o que tinha sido.
+ *
+ * Não pede clique nenhum, de propósito. Quem segura o duelo é o `await` no laço
+ * de eventos (`apply`, com `busy = true`), o mesmo mecanismo do aviso de fase.
+ */
+function revelarAtivacao(code, controller) {
+  const ms = AVISO_MS.carta;
+  const box = $('reveal');
+  const cx = document.createElement('div');
+  cx.className = 'rev';
+  cx.style.setProperty('--rev-ms', `${ms}ms`);
+
+  const quem = document.createElement('div');
+  quem.className = 'rev-quem';
+  quem.textContent = controller === 0 ? 'você ativou' : controller === 1 ? 'oponente ativou' : 'carta ativada';
+
+  const img = document.createElement('img');
+  img.src = ART(code); img.alt = '';
+
+  const nome = document.createElement('div');
+  nome.className = 'rev-nome';
+  nome.textContent = nameOf(code);
+
+  cx.append(quem, img, nome);
+  box.replaceChildren(cx);
+  box.hidden = false;
+  return new Promise((pronto) => setTimeout(() => {
+    // Só apaga se ninguém revelou outra carta por cima (corrente de 2+ elos).
+    if (box.firstChild === cx) { box.replaceChildren(); box.hidden = true; }
+    pronto();
+  }, ms));
 }
 
 // ---------- comunicação com o servidor ----------
@@ -1044,16 +1165,92 @@ function renderSelection() {
 }
 
 // ---------- corrente: ativar armadilha/efeito em resposta ----------
+//
+// **Modo das correntes.** O motor abre uma janela de resposta toda vez que
+// alguma carta sua PODERIA ser ativada — e "poderia" é muito mais frequente do
+// que se imagina: uma Forgotten Temple of the Deep pergunta a cada fase, todo
+// turno, enquanto houver monstro em campo. Perguntar sempre é o certo para quem
+// quer jogar a corrente, e é sufocante para quem não quer.
+//
+//   auto      ativa sozinho a carta oferecida (a primeira da lista)
+//   manual    pergunta, que é o comportamento de sempre
+//   off       nunca ativa e nunca pergunta
+//
+// A janela OBRIGATÓRIA (`chainForced`) ignora o modo e sempre pergunta: ali não
+// existe "passar", o motor exige uma escolha, e responder por conta própria
+// escolheria carta pelo jogador.
+//
+// É preferência LOCAL (`localStorage`), como o tabuleiro ativo: não é progresso
+// de conta, é como esta máquina gosta de jogar.
+const CHAIN_MODOS = { auto: 'auto', manual: 'manual', off: 'desligado' };
+let chainMode = 'manual';
+try {
+  const salvo = localStorage.getItem('ygo:chainMode');
+  if (salvo && CHAIN_MODOS[salvo]) chainMode = salvo;
+} catch { /* sem localStorage: fica no padrão */ }
+
+function renderChainMode() {
+  for (const b of $('chain-mode').querySelectorAll('button[data-mode]'))
+    b.classList.toggle('on', b.dataset.mode === chainMode);
+}
+$('chain-mode').onclick = (e) => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b || b.dataset.mode === chainMode) return;
+  chainMode = b.dataset.mode;
+  try { localStorage.setItem('ygo:chainMode', chainMode); } catch {}
+  renderChainMode();
+  log(`correntes: modo ${CHAIN_MODOS[chainMode]}`);
+};
+renderChainMode();
+
+/**
+ * O modo responde por mim nesta janela? Devolve `{index, why}` ou null.
+ *
+ * Não responde daqui de dentro de propósito: quem chama é o `apply`, junto das
+ * outras auto-respostas, porque só lá a trava de `busy` já foi solta — um
+ * `act()` disparado durante o render seria engolido em silêncio.
+ */
+function correnteAutomatica() {
+  const q = question;
+  if (!q || q.kind !== 'chain' || q.player !== 0) return null;
+  if (!q.choices || !q.choices.length) return null;
+  if (q.chainForced) return null;              // obrigatória: sempre pergunta
+  if (chainMode === 'off')
+    return { index: -1, why: `corrente ignorada (modo desligado) — ${q.choices.length} carta(s) ativável(is)` };
+  if (chainMode === 'auto')
+    return { index: q.choices[0].index, why: `ativa ${nameOf(q.choices[0].code)} (modo auto)` };
+  return null;
+}
+
+/**
+ * **Por que esta janela abriu.** O motor manda junto o gatilho
+ * (`chainTrigger*` — a invocação/ativação que abriu a janela, ver
+ * `InteractiveDuel.MarcaGatilho`); quando não há gatilho nenhum, o que abriu foi
+ * a própria mudança de fase, e é isso que o texto diz. Sem esta frase a janela
+ * aparecia sem contexto: "ativar em resposta?" — em resposta a quê?
+ */
+function motivoDaCorrente(q) {
+  const dele = q.chainTriggerPlayer === 1;
+  const quem = dele ? 'Seu oponente' : 'Você';
+  if (q.chainTriggerKind === 'activation' && q.chainTriggerCode)
+    return `${quem} ativou ${nameOf(q.chainTriggerCode)}`;
+  if (q.chainTriggerKind === 'summon' && q.chainTriggerCode)
+    return `${quem} invocou ${nameOf(q.chainTriggerCode)}`;
+  const fase = PHASE_NOME[phase] ?? `Fase ${phase}`;
+  return turn === 0 ? `Você está indo para a ${fase}` : `Seu oponente está indo para a ${fase}`;
+}
+
 function renderChain() {
   const q = (question && question.kind === 'chain' && question.player === 0
              && question.choices && question.choices.length) ? question : null;
   const box = $('chain-overlay');
-  if (!q) { box.hidden = true; return; }
+  // Em auto/desligado a janela nem chega a piscar: quem responde é o `apply`.
+  if (!q || correnteAutomatica()) { box.hidden = true; return; }
   box.hidden = false;
 
   $('chain-sub').textContent = q.chainForced
-    ? 'Você precisa ativar uma destas cartas.'
-    : 'Você pode ativar uma carta em resposta — ou passar.';
+    ? `${motivoDaCorrente(q)} — você precisa ativar uma destas cartas.`
+    : `${motivoDaCorrente(q)} — deseja ativar uma carta?`;
 
   const frag = document.createDocumentFragment();
   for (const c of q.choices) {
@@ -1281,6 +1478,16 @@ async function apply(j) {
     renderChain();
     renderYesno();
 
+    // Corrente em auto/desligado: o modo responde por mim. Mesma mecânica das
+    // auto-respostas abaixo — solta a trava antes de reenviar.
+    const corrente = correnteAutomatica();
+    if (corrente) {
+      log(`⛓ ${corrente.why}`);
+      busy = false;
+      act('chain', corrente.index, corrente.why);
+      return;
+    }
+
     // Auto-respostas do arrasto (tributo/alvo/zona) — liberam a trava antes de
     // reenviar, para o act() interno passar pelo guardião de `busy`.
     if (pendingTribute != null && question && question.player === 0
@@ -1348,13 +1555,25 @@ async function handle(ev) {
     case 'turn':
       turn = ev.player; turnNo++;
       log(`— turno ${turnNo} (jogador ${ev.player}) —`, true);
-      avisoFase(ev.player === 0 ? 'Seu turno' : 'Turno do oponente');
+      await avisoFase(ev.player === 0 ? 'Seu turno' : 'Turno do oponente', { turno: true });
       break;
     case 'phase': {
       const antes = phase;
       phase = ev.phase;
       // O motor emite as fases iniciais em rajada; só anunciamos mudanças reais.
-      if (antes !== phase) avisoFase(PHASE_NOME[phase] ?? `Fase ${phase}`);
+      // O `await` é o que faz o duelo respirar: até o aviso sair, o laço de
+      // eventos não anda e o jogador não consegue clicar em nada.
+      if (antes !== phase) await avisoFase(PHASE_NOME[phase] ?? `Fase ${phase}`);
+      break;
+    }
+    // Uma carta foi ATIVADA (qualquer uma: magia da mão, armadilha baixada,
+    // efeito de monstro em campo). Mostra a arte no meio da tela antes de o
+    // efeito resolver — sem isso o jogador só via o resultado, nunca a causa.
+    case 'chaining': {
+      if (!ev.code) break;
+      const quem = ev.controller === 0 ? 'você' : ev.controller === 1 ? 'oponente' : 'alguém';
+      log(`⛓ ${quem} ativou ${nameOf(ev.code)}`, true);
+      await revelarAtivacao(ev.code, ev.controller);
       break;
     }
     case 'summoning': log(`invocando ${nameOf(ev.code)}`); break;

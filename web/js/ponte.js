@@ -70,7 +70,12 @@ async function rpcBanco(nome, args) {
  * um evento novo com um campo novo tem de ser acrescentado aqui, e o erro de
  * esquecer é visível (a carta aparece do lado errado), não silencioso.
  */
-export const CAMPOS_DE_JOGADOR = ['player', 'controller', 'fromCtrl', 'ctrl', 'con', 'winner'];
+export const CAMPOS_DE_JOGADOR = ['player', 'controller', 'fromCtrl', 'ctrl', 'con', 'winner',
+                                  // de quem é a carta que ABRIU a janela de corrente. O motor
+                                  // sempre mandou; o front só passou a usar quando a janela
+                                  // ganhou o "seu oponente ativou X" — e sem espelhar, o
+                                  // segundo jogador leria a frase com os lados trocados.
+                                  'chainTriggerPlayer'];
 
 const outroLado = (v) => (v === 0 ? 1 : v === 1 ? 0 : v);
 

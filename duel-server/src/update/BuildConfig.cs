@@ -49,7 +49,13 @@ namespace DuelServer.Update
         // e virarem tributo de algo maior no turno seguinte. Vale nos DOIS
         // caminhos (invocação normal e MSG_SELECT_POSITION das especiais), e é
         // decisão do motor: sem trocar o exe, nada disso chega a quem joga.
-        public const string InstallerVersion = "0.4.0";
+        //
+        // 0.5.0 (15/08/2026): o MSG_CHAINING virou evento de tela
+        // (`{type:"chaining"}`), que é o que permite ao `duel.html` mostrar a
+        // carta ativada grande no meio do campo antes de o efeito resolver. O
+        // front novo escuta um evento que o motor velho não emite: sem trocar o
+        // exe, a revelação simplesmente nunca aparece — e nada acusa.
+        public const string InstallerVersion = "0.5.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

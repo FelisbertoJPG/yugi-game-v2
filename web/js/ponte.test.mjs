@@ -123,9 +123,23 @@ t('visao vazia ou nula nao explode', () => {
 t('a tabela de campos cobre TODOS os que o motor emite', () => {
   // Se o `InteractiveDuel` ganhar um evento com um campo de jogador novo, ele
   // tem de entrar aqui — senão a carta aparece do lado errado, sem erro nenhum.
-  for (const c of ['player', 'controller', 'fromCtrl', 'winner']) {
+  for (const c of ['player', 'controller', 'fromCtrl', 'winner', 'chainTriggerPlayer']) {
     assert.ok(CAMPOS_DE_JOGADOR.includes(c), `campo "${c}" saiu da tabela do espelho`);
   }
+});
+
+t('o GATILHO da corrente vira (quem ativou a carta que abriu a janela)', () => {
+  // A janela de corrente diz "seu oponente ativou X". O `chainTriggerPlayer`
+  // sempre veio do motor, mas so' passou a ser LIDO quando a janela ganhou esse
+  // texto — sem espelhar, o segundo jogador leria a frase com os lados trocados.
+  const v = espelharVisao({
+    events: [],
+    question: { kind: 'chain', player: 1, chainTriggerKind: 'activation',
+                chainTriggerCode: 55144522, chainTriggerPlayer: 0, choices: [] },
+  }, 1);
+  assert.equal(v.question.player, 0, 'a janela e minha');
+  assert.equal(v.question.chainTriggerPlayer, 1, 'quem ativou foi o ADVERSARIO');
+  assert.equal(v.question.chainTriggerCode, 55144522, 'o codigo da carta nao e jogador');
 });
 
 t('espelhar DUAS vezes volta ao original (a operacao e simetrica)', () => {

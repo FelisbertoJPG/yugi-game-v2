@@ -43,6 +43,10 @@ namespace DuelServer
             for (int i = 0; i < 20; i++) deck.Add(OX);
 
             bool viuJanela = false, ativou = false, atacanteDestruido = false;
+            // O evento que a TELA usa para mostrar a carta ativada no meio do
+            // campo (ver `revelarAtivacao` em web/duel.html). Sem ele o jogador
+            // só vê o resultado do efeito, nunca a causa.
+            var revelacoes = new List<(uint code, int controller)>();
 
             // Vários seeds até o jogador 0 abrir com Mirror Force na mão.
             foreach (ulong seed in new ulong[] { 7, 31337, 999, 2024, 12345, 555, 88, 41, 13 })
@@ -56,7 +60,15 @@ namespace DuelServer
                     foreach (var e in res.events)
                     {
                         var t = e.GetType();
-                        if ((t.GetProperty("type")?.GetValue(e) as string) != "move") continue;
+                        string tipo = t.GetProperty("type")?.GetValue(e) as string;
+                        if (tipo == "chaining")
+                        {
+                            revelacoes.Add((
+                                Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u),
+                                Convert.ToInt32(t.GetProperty("controller")?.GetValue(e) ?? -1)));
+                            continue;
+                        }
+                        if (tipo != "move") continue;
                         byte loc = Convert.ToByte(t.GetProperty("loc")?.GetValue(e) ?? (byte)0);
                         uint code = Convert.ToUInt32(t.GetProperty("code")?.GetValue(e) ?? 0u);
                         if (loc == LOC_GRAVE) aoCemiterio.Add(code);
@@ -105,6 +117,17 @@ namespace DuelServer
             Check("a corrente foi devolvida ao jogador (nao some mais sozinha)", viuJanela);
             Check("o jogador conseguiu ativar a Mirror Force", ativou);
             Check("o atacante (Battle Ox) foi destruido pela Mirror Force", atacanteDestruido);
+
+            // A tela precisa saber QUE carta foi ativada, e de quem ela e'. O
+            // `move` nao serve: uma armadilha ja' baixada nao troca de lugar ao
+            // ser ativada, entao sem o evento `chaining` a Mirror Force resolvia
+            // sem nada aparecer no meio do campo.
+            Check("a ativacao virou evento de tela (chaining) com a carta certa",
+                  revelacoes.Any(x => x.code == MIRROR),
+                  $"(vieram: {string.Join(",", revelacoes.Select(x => x.code))})");
+            Check("o evento diz de QUEM e' a carta ativada (o jogador, 0)",
+                  revelacoes.Any(x => x.code == MIRROR && x.controller == 0),
+                  $"(controllers: {string.Join(",", revelacoes.Select(x => x.controller))})");
         }
 
         static InteractiveDuel.Result Idle(InteractiveDuel duel, InteractiveDuel.Question q)

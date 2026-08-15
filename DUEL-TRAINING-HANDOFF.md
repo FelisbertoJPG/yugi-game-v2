@@ -258,6 +258,39 @@ que o protocolo abaixo foi decifrado — use pra achar novos formatos).
 2 lados, cemitério clicável, LP), traduz eventos→estado e mostra as ações da carta
 selecionada (Invocar/Utilizar/Setar).
 
+### Ritmo e correntes (`web/duel.html`)
+
+Duas coisas que mudam o *como se joga*, não o que é jogado:
+
+- **O aviso de fase segura o duelo.** `avisoFase()` é `await`-ado dentro do laço
+  de eventos do `apply()`, que roda com `busy = true` — enquanto a faixa está na
+  tela, nenhum clique passa pelo `act()`. Antes era um `setTimeout` solto: os
+  eventos continuavam entrando por baixo e a rajada de fim de turno
+  (turno → draw → standby → main) passava numa piscada, sem dar tempo de ler.
+  Os tempos estão em **`AVISO_MS`** (turno 1500 ms, fase 1100 ms, carta 1200 ms) —
+  é o botão de volume do ritmo, e é de propósito que seja um lugar só.
+- **A carta ativada aparece grande no meio da tela** (`revelarAtivacao`), no
+  mesmo espírito do Tag Force: acende na zona, vem ao centro por um instante, e
+  só então o efeito resolve. Não pede clique — quem segura o duelo é o mesmo
+  `await` do laço de eventos. O gatilho é o evento **`chaining`** (MSG_CHAINING),
+  e não o `move`: o `move` só existe para a carta que TROCA de lugar, então
+  armadilha já baixada e efeito de monstro em campo não acendiam nada e a jogada
+  do oponente passava sem o jogador ver a causa, só o resultado.
+- **Modo das correntes** (`ygo:chainMode` no `localStorage`, seletor na barra de
+  cima): `auto` ativa sozinho a carta oferecida, `manual` pergunta (o de sempre),
+  `off` nunca ativa nem pergunta. Nasceu de uma Forgotten Temple of the Deep
+  perguntando a cada fase, todo turno, enquanto houvesse monstro em campo.
+  A janela **obrigatória** (`chainForced`) ignora o modo e sempre pergunta — ali
+  não existe passar, e responder sozinho escolheria a carta pelo jogador. Quem
+  responde é o `apply()`, junto das outras auto-respostas, porque só lá a trava
+  de `busy` já foi solta.
+- A janela de corrente diz **por que abriu**: o gatilho (`chainTrigger*`, o mesmo
+  que o `NpcBrain` usa para decidir a negação) vira "Seu oponente ativou X"; sem
+  gatilho, foi a mudança de fase, e o texto é "Seu oponente está indo para a
+  Battle Phase — deseja ativar uma carta?". **`chainTriggerPlayer` nomeia jogador**,
+  então entrou em `CAMPOS_DE_JOGADOR` (`web/js/ponte.js`): sem espelhar, o
+  segundo jogador do multiplayer leria a frase com os lados trocados.
+
 ## 4. Protocolo ocgcore (edo9300, DLL 11.0) — DECIFRADO empiricamente
 
 Buffer de `OCG_DuelGetMessage`: sequência de `[int32 len][byte type][payload]`.
@@ -368,6 +401,11 @@ resto do layout (que muda entre mensagens: veja o `seq` de 1 byte do MSG_POS_CHA
 ele é limpo em MSG_SUMMONED (61), MSG_SPSUMMONED (63), MSG_CHAIN_END (74) e a cada
 turno novo — gatilho velho é pior que gatilho nenhum, faria o NPC "negar a
 invocação do turno passado".
+O MSG_CHAINING também vira **evento de tela** (`{type:"chaining", code, controller}`):
+é o ÚNICO ponto em que o motor diz "esta carta foi ativada" para qualquer ativação.
+O `move` não serve de substituto — uma armadilha já baixada não troca de lugar ao
+ser ativada, e um efeito de monstro em campo não move nada. Coberto por
+`--test-chain` (a Mirror Force ativada tem de aparecer no evento, com `controller = 0`).
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).
 **MSG_MOVE (50):** `code(4)` + prev`{ctrl(1)loc(1)seq(4)pos(4)}` + curr`{...}` + reason(4)`.
 **MSG_POS_CHANGE (53):** `code(4) ctrl(1) loc(1) seq(1) posAnterior(1) posAtual(1)`.

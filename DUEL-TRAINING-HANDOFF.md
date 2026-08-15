@@ -276,14 +276,32 @@ Duas coisas que mudam o *como se joga*, não o que é jogado:
   e não o `move`: o `move` só existe para a carta que TROCA de lugar, então
   armadilha já baixada e efeito de monstro em campo não acendiam nada e a jogada
   do oponente passava sem o jogador ver a causa, só o resultado.
-- **Modo das correntes** (`ygo:chainMode` no `localStorage`, seletor na barra de
-  cima): `auto` ativa sozinho a carta oferecida, `manual` pergunta (o de sempre),
-  `off` nunca ativa nem pergunta. Nasceu de uma Forgotten Temple of the Deep
-  perguntando a cada fase, todo turno, enquanto houvesse monstro em campo.
+- **Modo das correntes** (`web/js/correntes.js`, preferência em
+  `ygo:chainMode`, seletor na barra de cima). Nasceu de uma Forgotten Temple of
+  the Deep perguntando a cada fase, todo turno, enquanto houvesse monstro em
+  campo. Os três modos são **os do Master Duel/EDOPro**, com o mesmo sentido —
+  e **nenhum deles ativa carta por você**: em jogo nenhum de Yu-Gi-Oh existe
+  "encadeia sozinho" (encadear na hora errada perde duelo). O que muda é QUANDO
+  o jogo pergunta:
+
+  | modo | equivalente | o que faz |
+  |---|---|---|
+  | `off` | MD "OFF" / EDOPro "Chain: OFF" | não pergunta por efeito opcional nenhum |
+  | `auto` | MD "Auto" (**padrão** lá e aqui) | pergunta nos 4 momentos que importam |
+  | `on` | MD "ON" / EDOPro "Chain: ON" | pergunta em toda janela que o motor abrir |
+
+  Os quatro momentos do `auto`: **invocação** e **ativação** saem do
+  `chainTrigger*` que o motor já manda; o **ataque declarado** vem do evento
+  `attack` (é o único que não está na própria pergunta, por isso o
+  `ataqueDeclarado` no `duel.html`, zerado a cada turno e a cada janela
+  respondida); e a **End Phase do oponente**, a hora clássica do MST baixado.
+
   A janela **obrigatória** (`chainForced`) ignora o modo e sempre pergunta — ali
   não existe passar, e responder sozinho escolheria a carta pelo jogador. Quem
   responde é o `apply()`, junto das outras auto-respostas, porque só lá a trava
-  de `busy` já foi solta.
+  de `busy` já foi solta. Regra sem DOM e com 16 testes:
+  `node web/js/correntes.test.mjs`. `manual` era o nome antigo do `on` e é
+  migrado por `normalizarModo`.
 - A janela de corrente diz **por que abriu**: o gatilho (`chainTrigger*`, o mesmo
   que o `NpcBrain` usa para decidir a negação) vira "Seu oponente ativou X"; sem
   gatilho, foi a mudança de fase, e o texto é "Seu oponente está indo para a

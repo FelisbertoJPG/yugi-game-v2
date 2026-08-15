@@ -401,14 +401,17 @@
   <span class="spacer"></span>
   <span class="status-line">turno: <b id="turn">—</b></span>
   <!-- Correntes: quando o motor abre uma janela de resposta (armadilha, efeito
-       rápido), quem decide se ela vira pergunta é este seletor. Preferência
+       rápido), quem decide se ela vira pergunta é este seletor. Os três modos
+       são os do Master Duel/EDOPro — nenhum deles ativa carta por você, o que
+       muda é QUANDO o jogo pergunta (ver web/js/correntes.js). Preferência
        LOCAL, como o tabuleiro ativo — não é progresso de ninguém. -->
   <span class="status-line chain-mode" id="chain-mode"
-        title="o que fazer quando uma carta sua pode ser ativada em resposta">
+        title="quando o duelo deve parar pra perguntar se voce quer encadear">
     <b>correntes:</b>
-    <button data-mode="auto" title="ativa sozinho a carta oferecida, sem perguntar">auto</button>
-    <button data-mode="manual" title="pergunta sempre (padrao)">manual</button>
-    <button data-mode="off" title="nunca ativa e nunca pergunta">desligado</button>
+    <button data-mode="off" title="nao pergunta por efeito opcional nenhum">desligado</button>
+    <button data-mode="auto"
+            title="padrao — pergunta so' nos momentos que importam: invocacao, ativacao, ataque declarado e antes de o turno do oponente acabar">auto</button>
+    <button data-mode="on" title="pergunta em toda janela que o motor abrir">sempre</button>
   </span>
   <select id="deck-sel" title="deck do treino" style="max-width:160px; font-size:11px"></select>
   <button id="btn-end">encerrar turno</button>
@@ -530,6 +533,7 @@ import { listProjectBoards } from '/web/js/projectboards.js';
 import { requireLogin, contaAtual } from '/web/js/auth.js';
 import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
 import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
+import { decidirCorrente, normalizarModo, MODOS, MODO_PADRAO } from '/web/js/correntes.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -1003,6 +1007,9 @@ async function act(action, arg, label, args) {
   // cada evento da resposta chama render(), que antes reabria o popup de posição
   // já respondido e permitia um segundo clique (o motor então emitia RETRY).
   const perguntaRespondida = question;
+  // A janela de corrente consumiu o ataque que a abriu: da próxima vez o modo
+  // `auto` tem de julgar pelo que vier, não por este ataque já respondido.
+  if (action === 'chain') ataqueDeclarado = false;
   busy = true;
   question = null;
   render(); renderSelection(); renderChain(); renderYesno();
@@ -1166,28 +1173,27 @@ function renderSelection() {
 
 // ---------- corrente: ativar armadilha/efeito em resposta ----------
 //
-// **Modo das correntes.** O motor abre uma janela de resposta toda vez que
-// alguma carta sua PODERIA ser ativada — e "poderia" é muito mais frequente do
-// que se imagina: uma Forgotten Temple of the Deep pergunta a cada fase, todo
-// turno, enquanto houver monstro em campo. Perguntar sempre é o certo para quem
-// quer jogar a corrente, e é sufocante para quem não quer.
-//
-//   auto      ativa sozinho a carta oferecida (a primeira da lista)
-//   manual    pergunta, que é o comportamento de sempre
-//   off       nunca ativa e nunca pergunta
-//
-// A janela OBRIGATÓRIA (`chainForced`) ignora o modo e sempre pergunta: ali não
-// existe "passar", o motor exige uma escolha, e responder por conta própria
-// escolheria carta pelo jogador.
+// **Modo das correntes** — a regra mora em `web/js/correntes.js` (sem DOM, com
+// testes em Node); aqui fica só a barra e a ligação com o duelo. Os três modos
+// são os do Master Duel/EDOPro e nenhum deles ativa carta por você: o que muda
+// é QUANDO o jogo pergunta.
 //
 // É preferência LOCAL (`localStorage`), como o tabuleiro ativo: não é progresso
 // de conta, é como esta máquina gosta de jogar.
-const CHAIN_MODOS = { auto: 'auto', manual: 'manual', off: 'desligado' };
-let chainMode = 'manual';
-try {
-  const salvo = localStorage.getItem('ygo:chainMode');
-  if (salvo && CHAIN_MODOS[salvo]) chainMode = salvo;
-} catch { /* sem localStorage: fica no padrão */ }
+let chainMode = MODO_PADRAO;
+try { chainMode = normalizarModo(localStorage.getItem('ygo:chainMode')); }
+catch { /* sem localStorage: fica no padrão */ }
+
+/**
+ * Um ataque acabou de ser declarado?
+ *
+ * É o único dos quatro momentos do modo `auto` que o motor não entrega junto da
+ * pergunta: `chainTrigger*` cobre invocação e ativação, a End Phase sai da fase
+ * atual, e o ataque só existe no evento `attack`, que chega logo antes da
+ * janela. Zera quando a janela é respondida e a cada turno novo — bandeira
+ * velha faria o NPC parecer estar atacando o tempo todo.
+ */
+let ataqueDeclarado = false;
 
 function renderChainMode() {
   for (const b of $('chain-mode').querySelectorAll('button[data-mode]'))
@@ -1196,10 +1202,10 @@ function renderChainMode() {
 $('chain-mode').onclick = (e) => {
   const b = e.target.closest('button[data-mode]');
   if (!b || b.dataset.mode === chainMode) return;
-  chainMode = b.dataset.mode;
+  chainMode = normalizarModo(b.dataset.mode);
   try { localStorage.setItem('ygo:chainMode', chainMode); } catch {}
   renderChainMode();
-  log(`correntes: modo ${CHAIN_MODOS[chainMode]}`);
+  log(`correntes: modo ${MODOS[chainMode]}`);
 };
 renderChainMode();
 
@@ -1211,15 +1217,11 @@ renderChainMode();
  * `act()` disparado durante o render seria engolido em silêncio.
  */
 function correnteAutomatica() {
-  const q = question;
-  if (!q || q.kind !== 'chain' || q.player !== 0) return null;
-  if (!q.choices || !q.choices.length) return null;
-  if (q.chainForced) return null;              // obrigatória: sempre pergunta
-  if (chainMode === 'off')
-    return { index: -1, why: `corrente ignorada (modo desligado) — ${q.choices.length} carta(s) ativável(is)` };
-  if (chainMode === 'auto')
-    return { index: q.choices[0].index, why: `ativa ${nameOf(q.choices[0].code)} (modo auto)` };
-  return null;
+  if (!question || question.player !== 0) return null;
+  const d = decidirCorrente({
+    modo: chainMode, pergunta: question, turno, fase: phase, ataqueDeclarado,
+  });
+  return (!d.perguntar && d.resposta !== null) ? { index: d.resposta, why: d.porque } : null;
 }
 
 /**
@@ -1554,6 +1556,7 @@ async function handle(ev) {
       break;
     case 'turn':
       turn = ev.player; turnNo++;
+      ataqueDeclarado = false;   // bandeira velha faria toda janela parecer ataque
       log(`— turno ${turnNo} (jogador ${ev.player}) —`, true);
       await avisoFase(ev.player === 0 ? 'Seu turno' : 'Turno do oponente', { turno: true });
       break;
@@ -1588,6 +1591,10 @@ async function handle(ev) {
       warn(`Ação "${ev.action}" não vale agora (o motor espera: ${ev.expected}).`);
       break;
     case 'attack':
+      // Marca o momento para o modo `auto` das correntes: a janela da Mirror
+      // Force abre logo depois desta mensagem, e é a única dos quatro momentos
+      // que não vem identificada na própria pergunta.
+      ataqueDeclarado = true;
       log(ev.direct ? '⚔ ataque direto!' : '⚔ ataque declarado');
       break;
     case 'battle': {

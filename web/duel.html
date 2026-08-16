@@ -1218,8 +1218,12 @@ renderChainMode();
  */
 function correnteAutomatica() {
   if (!question || question.player !== 0) return null;
+  // `turno:`/`fase:` são os nomes DO MÓDULO; aqui na tela as variáveis são
+  // `turn`/`phase`. Escrever `turno` solto (atalho de propriedade) referencia
+  // uma variável que não existe e o duelo morre com "turno is not defined" na
+  // PRIMEIRA janela de corrente — sintaxe válida, erro só em execução.
   const d = decidirCorrente({
-    modo: chainMode, pergunta: question, turno, fase: phase, ataqueDeclarado,
+    modo: chainMode, pergunta: question, turno: turn, fase: phase, ataqueDeclarado,
   });
   return (!d.perguntar && d.resposta !== null) ? { index: d.resposta, why: d.porque } : null;
 }

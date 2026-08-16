@@ -485,13 +485,16 @@ nenhuma conta nova herda esses dados automaticamente.
   trabalho; o repositório fica na pasta original (§13 do documento).
   `MECANISMO-INSTALADOR.md` é o documento genérico de origem (instalador do
   Souls Craft), útil como referência do mecanismo em abstrato.
-- **`CONTEUDO-COMPRADO-E-ATUALIZADO.md`** — obrigatório antes de EDITAR um Deck
-  Estrutural que já está à venda. A trava de 1 por conta
-  (`compras_estruturais`, PK composta) é permanente e nada registra qual versão
-  foi comprada: quem já pagou fica preso à versão velha, e "compra de novo"
-  cobra outra vez, duplica as cartas na Coleção e cria um deck com sufixo. O
-  documento traz a bifurcação (errata × nova edição — a segunda é `id` novo e
-  custa zero) e a saída manual enquanto isso não existir.
+- **`CONTEUDO-COMPRADO-E-ATUALIZADO.md`** — o que fazer com quem já pagou no dia
+  em que o conteúdo muda. A trava de 1 por conta (`compras_estruturais`, PK
+  composta) é permanente, e por isso editar um Deck Estrutural já vendido era
+  uma armadilha silenciosa. **Desde a migration 0025 não é mais:** um gatilho
+  (`decks_estruturais_sincroniza`) credita na Coleção de quem comprou as cartas
+  que ENTRARAM na versão nova e troca a cópia do deck dele — a não ser que ele
+  tenha customizado, caso em que só as cartas vão (o deck dele é dele). Carta
+  removida nunca é tomada de volta. O documento continua obrigatório pela
+  decisão editorial que nenhum código resolve: **errata × nova edição** — a
+  segunda é `id` novo e custa zero.
 - **`TAGFORCE-BATALHA.md`** — o que a batalha do Tag Force 1 é por dentro (ela é 2D,
   sem modelo 3D nenhum) e o timing exato de cada animação, lido do ISO. Os
   formatos byte a byte estão em `tools/tagforce/README.md`.

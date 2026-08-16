@@ -670,7 +670,14 @@ $('btn-salvar').onclick = async () => {
   // Só agora: o rascunho existe justamente para o caminho que NÃO chegou aqui.
   apagarRascunho();
   await pintarSalvos();
-  msg(`"${nome}" publicado — todo mundo recebe no próximo boot`, 'ok');
+  // Quem já comprou não fica na versão velha: o banco credita as cartas que
+  // entraram e troca a cópia do deck dele (ver migration 0025). Dizer isso aqui
+  // é o que torna a consequência visível na hora de publicar — antes, editar um
+  // deck já vendido era uma armadilha silenciosa.
+  const alcance = r.compradores > 0
+    ? ` — ${r.compradores} ${r.compradores === 1 ? 'conta que ja tinha comprado recebeu' : 'contas que ja tinham comprado receberam'} as cartas novas`
+    : ' — todo mundo recebe no próximo boot';
+  msg(`"${nome}" publicado${alcance}`, 'ok');
 };
 
 $('btn-apagar').onclick = async () => {

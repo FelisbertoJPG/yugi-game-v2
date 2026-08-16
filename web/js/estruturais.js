@@ -51,8 +51,39 @@ export async function comprarEstrutural(id) {
   return { ok: false, error: m || 'não consegui comprar' };
 }
 
-/** Grava (cria ou atualiza) um estrutural. Só admin — a RLS recusa o resto. */
+/**
+ * Quantas contas já compraram este estrutural — ou seja, quantas vão receber a
+ * atualização junto com a publicação (ver `sincronizar_estrutural`, migration
+ * 0025). A RLS de `compras_estruturais` só deixa cada um ver as PRÓPRIAS
+ * compras, então isto vem por função `security definer` fechada em admin.
+ *
+ * Devolve 0 quando não dá para saber (deck novo, sem sessão, erro): é um aviso
+ * de tela, não pode ser o que impede uma publicação de acontecer.
+ */
+export async function compradoresDoEstrutural(id) {
+  if (!id || !sessao()) return 0;
+  const r = await req('rpc/compradores_do_estrutural', {
+    method: 'POST',
+    body: { p_id: id },
+  });
+  return r.ok ? Number(r.dados) || 0 : 0;
+}
+
+/**
+ * Grava (cria ou atualiza) um estrutural. Só admin — a RLS recusa o resto.
+ *
+ * **Atualizar alcança quem já comprou.** Um gatilho no banco
+ * (`decks_estruturais_sincroniza`) credita na Coleção dele as cartas que
+ * entraram na versão nova e troca a cópia do deck — a não ser que ele tenha
+ * customizado, caso em que só as cartas vão. É gatilho, e não um passo daqui,
+ * porque este `salvarEstrutural` é um upsert direto na tabela: regra no botão
+ * valeria só para este caminho, e um UPDATE por SQL passaria por fora.
+ *
+ * Devolve `compradores` só para a tela poder dizer quantas contas foram
+ * alcançadas — quem faz o trabalho é o banco.
+ */
 export async function salvarEstrutural(deck) {
+  const compradores = await compradoresDoEstrutural(deck.id);
   const r = await req('decks_estruturais?on_conflict=id', {
     method: 'POST',
     body: {
@@ -69,7 +100,7 @@ export async function salvarEstrutural(deck) {
     },
     prefer: 'resolution=merge-duplicates,return=minimal',
   });
-  if (r.ok) return { ok: true };
+  if (r.ok) return { ok: true, compradores };
   return {
     ok: false,
     error: /row-level security/i.test(r.error ?? '')

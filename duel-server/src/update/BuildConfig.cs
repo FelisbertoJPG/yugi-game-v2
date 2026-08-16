@@ -55,7 +55,14 @@ namespace DuelServer.Update
         // carta ativada grande no meio do campo antes de o efeito resolver. O
         // front novo escuta um evento que o motor velho não emite: sem trocar o
         // exe, a revelação simplesmente nunca aparece — e nada acusa.
-        public const string InstallerVersion = "0.5.0";
+        //
+        // 0.6.0 (16/08/2026): o ATK/DEF novo passou a chegar na resposta em que o
+        // efeito resolve, e não uma interação depois. A `VarrerStats` só rodava
+        // quando a volta do laço trazia mensagem — e a volta que POSA a pergunta
+        // não traz nenhuma, que é justamente quando o campo já está no estado
+        // final. O jogador equipava e o número só subia ao ir para a Battle
+        // Phase. É decisão do motor: sem trocar o exe, a tela continua atrasada.
+        public const string InstallerVersion = "0.6.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

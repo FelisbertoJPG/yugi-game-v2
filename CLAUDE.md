@@ -68,7 +68,13 @@ carta e a que preço — e, nos dois duelos reais, que o contexto da janela de
 corrente chega mesmo, isto é, QUE invocação/magia abriu a janela; sem esse
 contexto o NPC não nega nada e nenhuma regra acusa),
 `--test-fusion` (Extra Deck + Polymerization + busca no deck), `--test-grave`
-(saída do cemitério), `--test-chain` (corrente de armadilhas), `--test-equip`,
+(saída do cemitério), `--test-chain` (corrente de armadilhas), `--test-equip`
+(o bônus do equipamento E **em que resposta** o ATK novo chega na tela: o
+relato foi "equipei e o ATK só subiu quando fui pra Battle Phase" — a
+`VarrerStats` só rodava quando a volta trazia mensagem, e a volta que POSA a
+pergunta não traz; agora `Entregar` varre uma vez por entrega. Cobre as duas
+formas: equipamento e efeito contínuo de monstro, o Star Boy subindo o ATK de
+quem já estava em campo),
 `--test-kaiba` e `--test-joey` (decks completos dos NPCs jogando sozinhos),
 `--test-dust` (Dust Tornado/remoção de magia-armadilha), `--test-synchro`
 (Invocação-Sincro pelo Extra Deck + negação do Stardust Dragon via corrente),

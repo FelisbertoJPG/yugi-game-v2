@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using YGO;
@@ -494,6 +494,34 @@ namespace DuelServer
             return _winByte == 0 || _winByte == 1 ? _winByte : -1;
         }
 
+        /// <summary>
+        /// **Entrega a pergunta ao humano — varrendo o campo uma última vez.**
+        ///
+        /// Dentro do laço a `VarrerStats` só roda quando aquela volta trouxe
+        /// mensagem (`r.events.Count != antes`), e a guarda é necessária: sem ela
+        /// a varredura rodaria nas milhares de voltas mudas, a duas consultas
+        /// nativas por monstro. Só que a volta que POSA A PERGUNTA normalmente
+        /// não traz evento nenhum — e é justamente nela que o campo já está no
+        /// estado final.
+        ///
+        /// O sintoma era esse: o jogador equipava a espada e o ATK na carta só
+        /// subia duas interações depois, quando alguma outra mensagem finalmente
+        /// destravasse a varredura ("só mudou quando fui pra Battle Phase"). Com
+        /// magia de campo parecia instantâneo por acaso — a ativação dela produz
+        /// mensagens depois do ajuste, e a varredura pegava carona.
+        ///
+        /// Aqui a varredura roda uma vez por ENTREGA, que é O(1) por resposta e
+        /// acontece no único instante que importa: quando a tela vai desenhar.
+        /// Coberto por `--test-equip` (o `stats` tem de chegar na MESMA resposta
+        /// em que o equipamento entra em campo).
+        /// </summary>
+        Result Entregar(Result r, Question q)
+        {
+            VarrerStats(r.events);
+            r.question = q;
+            return r;
+        }
+
         /// <summary>Avança até a sua vez de decidir (ou o fim). Resolve oponente/correntes.</summary>
         public Result Advance()
         {
@@ -553,7 +581,7 @@ namespace DuelServer
                 {
                     if (q.choices.Count == 0) { _s.Respond(I32(-1)); continue; }
                     if (!EhHumano(q.player)) { _s.Respond(NpcChain(q)); continue; }
-                    r.question = q; return r;
+                    return Entregar(r, q);
                 }
 
                 // Sem gente do outro lado, o motor joga por ele (NPC ou auto-passe).
@@ -566,10 +594,10 @@ namespace DuelServer
                 // front precisa mostrar qual carta receberá o efeito, em vez de
                 // equipar silenciosamente. Tributos continuam automáticos quando
                 // não há escolha real.
-                if (q.kind == "selectcard") { r.question = q; return r; }
+                if (q.kind == "selectcard") { return Entregar(r, q); }
                 if (q.kind == "selecttribute")
                 {
-                    if (HasRealChoice(q)) { r.question = q; return r; }
+                    if (HasRealChoice(q)) { return Entregar(r, q); }
                     _s.Respond(AutoSelect(q));
                     continue;
                 }
@@ -579,7 +607,7 @@ namespace DuelServer
                 // — aí perguntar seria só uma etapa a mais sem decisão nenhuma.
                 if (q.kind == "selectsum")
                 {
-                    if (SomaTemEscolha(q)) { r.question = q; return r; }
+                    if (SomaTemEscolha(q)) { return Entregar(r, q); }
                     _s.Respond(AutoSum(q));
                     continue;
                 }
@@ -594,20 +622,20 @@ namespace DuelServer
                         _s.Respond(PickOne(q.choices[0].index));  // escolha única: não pergunta
                         continue;
                     }
-                    r.question = q; return r;
+                    return Entregar(r, q);
                 }
                 // SELECT_POSITION: quem escolhe é o JOGADOR. Invocação-Ritual (e
                 // qualquer Invocação-Especial) pode entrar em ataque OU em defesa
                 // com a face para cima — não é Set, é escolha de posição. Antes
                 // respondíamos 0x1 aqui e o ritual sempre caía em ataque, sem a
                 // pergunta jamais chegar à tela.
-                if (q.kind == "position" && EhHumano(q.player)) { r.question = q; return r; }
+                if (q.kind == "position" && EhHumano(q.player)) { return Entregar(r, q); }
                 // pergunta que não sei responder: devolve pro front avisar (em vez de
                 // travar). O usuário começa um novo duelo.
-                if (q.kind == "unsupported") { r.question = q; return r; }
+                if (q.kind == "unsupported") { return Entregar(r, q); }
 
-                r.question = q;   // idle / place / battle de um humano -> devolve pro front
-                return r;
+                // idle / place / battle de um humano -> devolve pro front
+                return Entregar(r, q);
             }
             // Estourar o guard significa laço fechado: o motor pede algo que
             // respondemos sempre igual e ele nunca avança. Dizer QUAL pergunta

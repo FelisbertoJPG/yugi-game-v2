@@ -37,6 +37,10 @@ npm run update:test          # 79 asserções do instalador/auto-updater (sem re
                              # --test-update + --test-offline + --test-selfupdate
                              #   + --test-update-duelo
 npm run release:build        # DRY-RUN: gera dist/release/ (game.zip, cards.zip, manifest.json)
+                             # o cards.zip (21 mil .lua) é CACHEADO em dist/.cache por
+                             # impressão digital das entradas: ~4s quando o banco não
+                             # mudou, ~18s quando mudou. Era ~5min todo build (deflate
+                             # 'Optimal' + cópia dos 21 mil arquivos para um estágio)
 npm run release:test         # instala esses artefatos numa raiz descartável e confere
 npm run release:publish      # sobe o Release para o repo privado de distribuição
                              # -- -PodarReleases 5 apaga as tags antigas (opt-in)

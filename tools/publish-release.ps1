@@ -260,25 +260,107 @@ Ok "game.zip: $([math]::Round((Get-Item $zipGame).Length / 1MB, 1)) MB"
 # ------------------------------------------------------ 2. pacote 'cards' (pesado)
 # cards.json + cards.cdb + os ~21 mil scripts lua. So' muda quando roda o
 # data:build, entao o marcador de versao poupa o jogador de re-baixar 47 MB.
+#
+# ESTE PASSO ERA O DONO DO RELOGIO. Medido em 16/08/2026, nos 20.949 .lua
+# (41,6 MB, media de 2 KB por arquivo):
+#
+#     CreateFromDirectory 'Optimal'  ->  278,3 s   24,6 MB
+#     CreateFromDirectory 'Fastest'  ->    6,1 s   25,6 MB
+#
+# 45x mais lento para economizar 1 MB (4%). O deflate no nivel maximo e'
+# patologico com muito arquivo minusculo: ele paga a otimizacao POR ENTRADA,
+# 21 mil vezes. E ate aqui isso rodava a cada publicacao, mesmo quando o banco
+# nao tinha mudado nada - o marcador saia identico (`cards-416a0904cf12` em
+# todas as publicacoes do dia), ou seja, ~5 minutos por ciclo para produzir um
+# arquivo que ja' existia.
+#
+# Duas correcoes, nesta ordem de importancia:
+#
+#   1. CACHE por impressao digital das ENTRADAS (caminho + tamanho + data de
+#      cada arquivo). Bateu, reaproveita o zip inteiro de `dist\.cache` - sem
+#      copiar 21 mil arquivos para o estagio e sem comprimir nada. E' o caso
+#      comum: mudanca de front ou de motor nao toca no banco de cartas.
+#      Reaproveitar o zip BYTE A BYTE tambem preserva o `version` do manifesto
+#      (que e' o sha256 do proprio zip), entao ninguem re-baixa a toa.
+#   2. 'Fastest' quando ele PRECISA ser refeito. O 1 MB a mais so' e' pago no
+#      dia raro em que o banco muda - e nesse dia o conteudo mudou de qualquer
+#      forma, entao o download ja' aconteceria.
+#
+# A digital usa tamanho+data em vez do hash do conteudo de proposito: ler 41 MB
+# em 21 mil arquivos para decidir se vale a pena nao ler 41 MB seria trocar seis
+# por meia duzia. Data mexida sem conteudo novo (um checkout, por exemplo) so'
+# custa uma recompressao de 6 s.
 Passo 2 "montando o pacote 'cards' (banco + scripts lua)"
-$c = Join-Path $stage 'cards'
-Copiar (Join-Path $root 'ygo-data\data\cards.json') (Join-Path $c 'ygo-data\data\cards.json')
 
 $saOrigem  = Join-Path $root 'duel_academy\Assets\StreamingAssets\YGODemo'
-$saDestino = Join-Path $c    'duel_academy\Assets\StreamingAssets\YGODemo'
 if (-not (Test-Path (Join-Path $saOrigem 'cards.cdb'))) { Falhar 'nao achei o cards.cdb dos StreamingAssets' }
-Copiar (Join-Path $saOrigem 'cards.cdb') (Join-Path $saDestino 'cards.cdb')
-
-# Os .meta sao lixo da Unity: dobrariam a contagem de arquivos sem servir a nada.
 $scriptOrigem = Join-Path $saOrigem 'script'
+# Os .meta sao lixo da Unity: dobrariam a contagem de arquivos sem servir a nada.
 $luas = Get-ChildItem $scriptOrigem -Recurse -Filter '*.lua' -File
-foreach ($lua in $luas) {
-  $rel = $lua.FullName.Substring($scriptOrigem.Length).TrimStart('\')
-  Copiar $lua.FullName (Join-Path (Join-Path $saDestino 'script') $rel)
+
+$entradas = @(
+  (Get-Item (Join-Path $root 'ygo-data\data\cards.json')),
+  (Get-Item (Join-Path $saOrigem 'cards.cdb'))
+) + $luas
+$digital = ($entradas | Sort-Object FullName | ForEach-Object {
+  "$($_.Name)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)"
+}) -join "`n"
+$digital = [System.BitConverter]::ToString(
+  [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+    [System.Text.Encoding]::UTF8.GetBytes($digital))).Replace('-', '').ToLowerInvariant()
+
+$cache      = Join-Path $root 'dist\.cache'
+$cacheZip   = Join-Path $cache 'cards.zip'
+$cacheDigit = Join-Path $cache 'cards.digital'
+$zipCards   = Join-Path $saida 'cards.zip'
+
+$reaproveita = (Test-Path $cacheZip) -and (Test-Path $cacheDigit) -and
+               ((Get-Content $cacheDigit -Raw).Trim() -eq $digital)
+
+if ($reaproveita) {
+  Copy-Item $cacheZip $zipCards -Force
+  Ok "cards.zip: $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB - reaproveitado do cache ($($luas.Count) scripts lua, nada mudou)"
 }
-$zipCards = Join-Path $saida 'cards.zip'
-[System.IO.Compression.ZipFile]::CreateFromDirectory($c, $zipCards, 'Optimal', $false)
-Ok "cards.zip: $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB ($($luas.Count) scripts lua)"
+else {
+  # Zipa DIRETO da origem, sem passar por uma pasta de estagio.
+  #
+  # Copiar os 21 mil .lua para o estagio custava ~200 s - mais do que a propria
+  # compressao depois do 'Fastest' (medido: 207 s no total, dos quais so' ~6 s
+  # eram o deflate). Sao 21 mil criacoes de arquivo no NTFS para produzir uma
+  # copia que existe por dez segundos e e' apagada em seguida.
+  #
+  # O separador das entradas e' a CONTRABARRA de proposito: e' o que o
+  # `CreateFromDirectory` gerava no Windows, e portanto o que os pacotes ja'
+  # publicados usam e o instalador espera. Trocar por barra aqui seria uma
+  # mudanca invisivel no build e visivel so' na maquina do jogador.
+  $entradasZip = @(
+    @{ arq = (Join-Path $root 'ygo-data\data\cards.json'); nome = 'ygo-data\data\cards.json' },
+    @{ arq = (Join-Path $saOrigem 'cards.cdb');
+       nome = 'duel_academy\Assets\StreamingAssets\YGODemo\cards.cdb' }
+  )
+  foreach ($lua in $luas) {
+    $rel = $lua.FullName.Substring($scriptOrigem.Length).TrimStart('\')
+    $entradasZip += @{ arq = $lua.FullName
+                       nome = "duel_academy\Assets\StreamingAssets\YGODemo\script\$rel" }
+  }
+
+  Add-Type -AssemblyName System.IO.Compression
+  if (Test-Path $zipCards) { Remove-Item $zipCards -Force }
+  $fsCards = [System.IO.File]::Create($zipCards)
+  $zipArq = New-Object System.IO.Compression.ZipArchive($fsCards, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($e in $entradasZip) {
+      [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+        $zipArq, $e.arq, $e.nome, [System.IO.Compression.CompressionLevel]::Fastest) | Out-Null
+    }
+  }
+  finally { $zipArq.Dispose(); $fsCards.Dispose() }
+
+  New-Item -ItemType Directory -Path $cache -Force | Out-Null
+  Copy-Item $zipCards $cacheZip -Force
+  Set-Content -Path $cacheDigit -Value $digital -Encoding ascii
+  Ok "cards.zip: $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB ($($luas.Count) scripts lua) - refeito e guardado no cache"
+}
 
 # ------------------------------------------------------------- 3. arquivos avulsos
 # CONTEUDO GLOBAL do jogo (banlist, boosters, NPCs, listas de cartas) -

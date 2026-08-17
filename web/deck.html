@@ -103,6 +103,24 @@
   /* O anel do "segurar" é injetado por web/js/interact.js. */
   .thumb { user-select: none; -webkit-user-select: none; }
 
+  /* ---------- pool de drop (modo NPC) ---------- */
+  /* Uma faixa por raridade, com a chance ao lado. A chance é CALCULADA
+     (`chancesDe`, em drops.js) e renormalizada entre as raridades que têm
+     carta — prometer 4% de UR num pool sem UR seria mentira na tela. */
+  .bucket { margin-bottom: 8px; }
+  .bucket-head {
+    display: flex; align-items: baseline; gap: 6px; font-size: 10px;
+    color: var(--dim); letter-spacing: 1px; margin-bottom: 3px;
+  }
+  .bucket-head b { font-size: 11px; }
+  .bucket-head .UR { color: #e8c46a; }
+  .bucket-head .SR { color: #c0c0d8; }
+  .bucket-head .R  { color: #6fa8dc; }
+  .bucket-head .N  { color: var(--dim); }
+  .bucket-head .chance { margin-left: auto; color: var(--ink); }
+  .bucket-head .chance.zero { color: var(--dim); }
+  .bucket .vazio { font-size: 10px; color: var(--line2, #4a5570); font-style: italic; }
+
   /* ---------- arrastar e soltar ---------- */
   .dropzone { min-height: 74px; transition: background .12s, outline-color .12s; }
   .dropzone.over {
@@ -216,9 +234,11 @@
     <span id="npc-cover" class="cover-slot" tabindex="0"
           title="clique e depois escolha uma carta do deck"></span>
   </label>
-  <label style="display:flex; gap:5px; align-items:center">
-    carta que dropa:
-    <select id="npc-drop" style="max-width:220px; font-size:11px"></select>
+  <label style="display:flex; gap:5px; align-items:center"
+         title="quantas cartas o jogador leva ao vencer, sorteadas no pool de drop (abaixo do Extra Deck)">
+    quantidade do drop:
+    <input type="number" id="npc-drop-qtd" min="0" max="20" step="1" placeholder="0"
+           style="width:60px; font-size:11px">
   </label>
   <label style="display:flex; gap:5px; align-items:center" title="quanto DP o jogador ganha ao vencer este deck (vazio = padrão 100)">
     prêmio:
@@ -264,6 +284,27 @@
         <div class="deck-grid extra" id="extra-grid"></div>
         <div class="zone-empty" id="extra-empty">
           Fusion, Synchro, Xyz e Link vêm para cá automaticamente.
+        </div>
+      </div>
+
+      <!-- POOL DE DROP — só no modo NPC. Não é parte do deck: são as cartas que
+           ESTE adversário pode largar ao ser derrotado. A raridade de cada uma
+           vem dos boosters (a mesma fonte que a Loja usa), então a gaveta é
+           escolhida sozinha e a % ao lado é a chance real daquela raridade. -->
+      <div id="drop-sec" hidden>
+        <div class="sec-head" style="margin:16px -12px 8px; border-top:1px solid var(--line)">
+          <span>POOL DE DROP</span>
+          <span class="n" id="drop-count">0</span>
+          <span class="spacer"></span>
+          <span id="drop-resumo" style="font-size:10px; color:var(--dim)"></span>
+        </div>
+        <div class="dropzone" id="drop-zone">
+          <div id="drop-buckets"></div>
+          <div class="zone-empty" id="drop-empty">
+            Arraste cartas para cá — do deck ou da direita. Elas não entram no
+            deck: são o que o adversário pode largar ao perder, sorteadas por
+            raridade. Clique numa carta daqui para tirá-la.
+          </div>
         </div>
       </div>
     </div>

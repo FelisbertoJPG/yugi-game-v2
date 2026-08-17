@@ -22,7 +22,11 @@ import { inLista1 } from '/web/js/lista1.js';
 import { hydrateCardLists } from '/web/js/cardlists.js';
 import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
-import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
+import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters, reprintsOf } from '/web/js/boosters.js';
+import {
+  carregarDrops, salvarDrops, chancesDe, totalDoPool, poolVazio,
+  RARIDADES, MAX_DROPS,
+} from '/web/js/drops.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
 import { perfilAtual } from '/web/js/supabase.js';
@@ -65,6 +69,13 @@ let dirty = false;
 let npcMode = null;
 let npcDeckIndex = null;
 let npcSignature = null;
+// ---------------------------------------------------------------- pool de drop
+// As cartas que ESTE adversário pode largar ao ser derrotado, por raridade, e
+// quantas ele larga por vitória. Não é parte do deck: mora em
+// `conteudo/npc-drops`, por NPC (não por deck), e quem sorteia é o servidor.
+let dropsCfg = {};              // a configuração de TODOS os NPCs (é uma chave só)
+let dropPool = poolVazio();     // a do NPC aberto aqui
+let dropQtd = 0;
 
 // Modo Coleção (?owned=1): o pool mostra só as cartas que o jogador POSSUI —
 // é o Deck Builder "real". Sem a flag (Área de Teste), o pool é o banco inteiro.
@@ -342,7 +353,7 @@ function addCard(c) {
 function refresh() {
   renderDeck();
   renderPool();   // recalcula os contadores nas miniaturas do pool
-  if (npcMode) { updateNpcDrop(); renderCover(); }
+  if (npcMode) { renderDropPool(); renderCover(); }
 }
 
 // ---------------------------------------------------------------- modo NPC
@@ -350,6 +361,7 @@ function refresh() {
 /** Ajusta a UI para editar um deck de um NPC. */
 function enterNpcModeUI() {
   $('npc-bar').hidden = false;
+  $('drop-sec').hidden = false;
   $('npc-name').textContent = npcMode.name;
   // o campo de nome passa a ser o nome DESTE deck do NPC (editável).
   for (const id of ['deck-select', 'btn-new', 'btn-delete']) $(id).hidden = true;
@@ -379,17 +391,80 @@ function enterNpcModeUI() {
   };
 }
 
-/** Popula o select "carta que dropa" com as cartas do deck montado. */
-function updateNpcDrop() {
-  const sel = $('npc-drop');
-  const prev = Number(sel.value) || npcSignature;
-  const uniq = [...new Set([...deck.main, ...deck.extra])];
-  if (!uniq.length) {
-    sel.replaceChildren(new Option('(deck vazio)', ''));
-    return;
+/**
+ * A raridade de uma carta vem dos BOOSTERS — a mesma fonte que a Loja e o
+ * servidor usam (`raridade_da_carta`). Carta que não está em booster nenhum é
+ * N, que é o padrão do servidor também.
+ *
+ * Isso é o que permite o pool de drop se dividir sozinho: o usuário arrasta a
+ * carta e ela cai na gaveta certa, sem uma segunda tela para dizer "esta é UR".
+ * O preço é que mudar a raridade de uma carta num booster muda o pool de todo
+ * NPC que a tenha — e isso é o certo: raridade é uma propriedade da carta no
+ * jogo, não de cada adversário.
+ */
+const raridadeDe = (id) => reprintsOf(Number(id))?.rarity ?? 'N';
+
+/** Está em alguma gaveta do pool de drop? */
+const noDropPool = (id) => RARIDADES.some((r) => dropPool[r].includes(Number(id)));
+
+/** Põe no pool, na gaveta da raridade dela. Devolve false se já estava. */
+function addAoDropPool(id) {
+  id = Number(id);
+  if (!id || noDropPool(id)) return false;
+  dropPool[raridadeDe(id)].push(id);
+  return true;
+}
+
+function tiraDoDropPool(id) {
+  id = Number(id);
+  for (const r of RARIDADES) dropPool[r] = dropPool[r].filter((c) => c !== id);
+}
+
+/** Desenha as quatro gavetas com a chance real de cada uma. */
+function renderDropPool() {
+  const caixa = $('drop-buckets');
+  const chances = chancesDe(dropPool);
+  const total = totalDoPool(dropPool);
+  const frag = document.createDocumentFragment();
+
+  for (const r of RARIDADES) {
+    const ids = dropPool[r];
+    const sec = document.createElement('div');
+    sec.className = 'bucket';
+
+    const head = document.createElement('div');
+    head.className = 'bucket-head';
+    head.innerHTML = `<b class="${r}">${r}</b><span>${ids.length} carta${ids.length === 1 ? '' : 's'}</span>`
+      + `<span class="chance${chances[r] ? '' : ' zero'}">${chances[r]}% de chance</span>`;
+    sec.append(head);
+
+    if (!ids.length) {
+      sec.append(Object.assign(document.createElement('div'),
+        { className: 'vazio', textContent: 'nenhuma' }));
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'deck-grid';
+      for (const id of ids) {
+        const c = brief(id);
+        const el = document.createElement('div');
+        el.className = 'thumb';
+        el.dataset.id = id;
+        el.title = `${c?.name ?? id}\nclique para tirar do pool`;
+        el.innerHTML = `<img src="${ART(id)}" alt="" draggable="false">`;
+        el.onclick = () => { tiraDoDropPool(id); markDirty(); renderDropPool(); };
+        grid.append(el);
+      }
+      sec.append(grid);
+    }
+    frag.append(sec);
   }
-  sel.replaceChildren(...uniq.map((id) => new Option(brief(id)?.name ?? String(id), String(id))));
-  sel.value = uniq.includes(prev) ? String(prev) : String(uniq[0]);
+
+  caixa.replaceChildren(frag);
+  $('drop-count').textContent = String(total);
+  $('drop-empty').hidden = total > 0;
+  $('drop-resumo').textContent = dropQtd > 0
+    ? `${dropQtd} carta(s) por vitória`
+    : 'quantidade 0 — nada é sorteado';
 }
 
 /* ---------------------------------------------------------------- moldura
@@ -439,7 +514,10 @@ async function saveNpcDeckFromUI() {
   const st = deckStatus({ ignoreBanlist: $('npc-ignore-banlist').checked });
   if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
 
-  const sig = Number($('npc-drop').value) || npcSignature;
+  // A carta de assinatura continua sendo a que ILUSTRA o deck e o premio de
+  // quem nao tem pool configurado; ela deixou de ser escolhida num select e
+  // passou a ser a moldura, que e' a mesma decisao visual.
+  const sig = npcCover || npcSignature;
   const name = $('deck-name').value.trim() || `Deck ${npcMode.name}`;
   // Prêmio em DP por vencer este deck. Campo vazio = padrão; 0 é válido.
   const rw = $('npc-reward').value;
@@ -452,6 +530,16 @@ async function saveNpcDeckFromUI() {
   npcDeckIndex = r.index;
   npcSignature = sig;
   markDirty(false);
+
+  // O pool de drop vai junto, mas para OUTRO lugar: `conteudo/npc-drops`, por
+  // NPC. O resultado e' dito na tela — uma configuracao que nao chegou ao
+  // banco e' exatamente uma que 'nao funciona' sem explicar por que.
+  dropQtd = Math.max(0, Math.min(MAX_DROPS, Number($('npc-drop-qtd').value) || 0));
+  if (totalDoPool(dropPool) && dropQtd > 0) dropsCfg[npcMode.id] = { quantidade: dropQtd, pool: dropPool };
+  else delete dropsCfg[npcMode.id];
+  const pub = await salvarDrops(dropsCfg);
+  if (pub?.banco && !pub.banco.ok) toast(`pool de drop NAO publicado: ${pub.banco.erro}`);
+  else if (dropQtd > 0) toast(`pool de drop: ${dropQtd} carta(s) de ${totalDoPool(dropPool)}`);
 
   if (r.path) {
     toast(`salvo em decks/${r.path}`);
@@ -494,6 +582,10 @@ function wireDragSource(el, id, from) {
 function accepts(zone) {
   if (!drag) return false;
   if (zone === 'pool') return drag.from !== 'pool';          // devolver ao pool
+  // O pool de DROP aceita de qualquer lugar: ele nao e' parte do deck, e' a
+  // lista de premios. Arrastar uma carta do Main para ca' NAO a tira do deck —
+  // a carta que o adversario joga costuma ser a mesma que ele larga.
+  if (zone === 'drop') return drag.from !== 'drop';
   return drag.from === 'pool' || drag.from === zone;          // adicionar ou reordenar
 }
 
@@ -527,6 +619,15 @@ function setupDropZone(el, zone) {
     if (!drag || !accepts(zone)) return;
 
     const { id, from } = drag;
+
+    if (zone === 'drop') {
+      const c = brief(id);
+      if (!addAoDropPool(id)) return void toast(`"${c?.name ?? id}" ja' esta' no pool de drop`);
+      markDirty();
+      renderDropPool();
+      toast(`+ ${c?.name ?? id} -> pool de drop (${raridadeDe(id)})`);
+      return;
+    }
 
     if (zone === 'pool') {
       // devolver ao pool = remover uma cópia
@@ -863,6 +964,11 @@ $('deck-select').onchange = (e) => {
 
 $('deck-name').oninput = () => markDirty();
 $('npc-reward').oninput = () => markDirty();
+$('npc-drop-qtd').oninput = () => {
+  dropQtd = Math.max(0, Math.min(MAX_DROPS, Number($('npc-drop-qtd').value) || 0));
+  markDirty();
+  renderDropPool();
+};
 
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
 const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-rar', 'f-banlist', 'f-sort',
@@ -1102,6 +1208,7 @@ document.addEventListener('keydown', (e) => {
 setupDropZone($('main-zone'), 'main');
 setupDropZone($('extra-zone'), 'extra');
 setupDropZone($('pool-zone'), 'pool');
+setupDropZone($('drop-zone'), 'drop');
 
 window.addEventListener('beforeunload', (e) => {
   if (dirty) { e.preventDefault(); e.returnValue = ''; }
@@ -1195,6 +1302,16 @@ if (npc) {
   $('deck-name').value = deck.name;
   // prêmio em DP do deck (deixa em branco = usa o padrão ao salvar)
   $('npc-reward').value = slot && Number.isFinite(Number(slot.rewardDp)) ? slot.rewardDp : '';
+
+  // O POOL DE DROP e' do NPC, nao do deck: ele vive em `conteudo/npc-drops` e
+  // vale para qualquer deck que este adversario use. Falha de rede nao derruba
+  // o builder — so' deixa o pool vazio, e o aviso aparece ao tentar salvar.
+  try { dropsCfg = await carregarDrops(); } catch { dropsCfg = {}; }
+  const meuDrop = dropsCfg[npcId];
+  dropPool = meuDrop ? meuDrop.pool : poolVazio();
+  dropQtd = meuDrop ? meuDrop.quantidade : 0;
+  $('npc-drop-qtd').value = dropQtd ? String(dropQtd) : '';
+
   enterNpcModeUI();
   markDirty(false);
 } else {

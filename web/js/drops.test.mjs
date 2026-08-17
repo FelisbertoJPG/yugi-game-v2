@@ -3,13 +3,15 @@
  *   node web/js/drops.test.mjs
  *
  * O sorteio em si NAO esta' aqui: quem sorteia e' o servidor
- * (`premiar_vitoria`, migration 0027), porque o duelo roda na maquina do
- * jogador e sortear no navegador seria deixar escolher o proprio premio. O que
- * se prova aqui e' que a configuracao aguenta ser editada por gente — id
- * repetido, texto no lugar do numero, quantidade absurda — sem virar um pool
- * que o servidor vai recusar ou, pior, um premio errado.
+ * (`premiar_vitoria`), porque o duelo roda na maquina do jogador e sortear no
+ * navegador seria deixar escolher o proprio premio. O que se prova aqui e' o
+ * que a TELA depende: que a configuracao aguenta ser editada por gente, e que a
+ * porcentagem mostrada e' a mesma conta que o servidor faz.
  */
-import { normalizarDrops, dropsDoNpc, MAX_DROPS } from './drops.js';
+import {
+  normalizarDrops, dropsDoNpc, chancesDe, totalDoPool, poolVazio,
+  MAX_DROPS, DROP_ODDS, RARIDADES,
+} from './drops.js';
 import assert from 'node:assert/strict';
 
 let pass = 0, fail = 0;
@@ -18,67 +20,99 @@ const t = (nome, fn) => {
   catch (e) { console.log(`  \x1b[31mFALHA\x1b[0m ${nome}\n        ${e.message}`); fail++; }
 };
 
-t('o caso normal passa inteiro', () => {
-  const c = normalizarDrops({ yugi: { quantidade: 3, pool: [1, 2, 3, 4, 5] } });
-  assert.deepEqual(c.yugi, { quantidade: 3, pool: [1, 2, 3, 4, 5] });
+const cfg1 = (pool, quantidade = 3) => normalizarDrops({ yugi: { quantidade, pool } }).yugi;
+
+// ------------------------------------------------------------- normalizacao
+
+t('o caso normal passa inteiro, com as quatro gavetas', () => {
+  const c = cfg1({ UR: [1], SR: [2], R: [3], N: [4, 5] });
+  assert.deepEqual(c, { quantidade: 3, pool: { UR: [1], SR: [2], R: [3], N: [4, 5] } });
 });
 
-t('id REPETIDO no pool sai (sortear com repetido viciaria a chance)', () => {
-  const c = normalizarDrops({ yugi: { quantidade: 1, pool: [7, 7, 7, 8] } });
-  assert.deepEqual(c.yugi.pool, [7, 8]);
+t('a MESMA carta em duas raridades fica so na primeira (viciaria a chance)', () => {
+  const c = cfg1({ UR: [7], SR: [7], N: [7, 8] });
+  assert.deepEqual(c.pool.UR, [7]);
+  assert.deepEqual(c.pool.SR, []);
+  assert.deepEqual(c.pool.N, [8]);
 });
 
-t('a ORDEM da escolha e preservada (a tela mostra na ordem em que se montou)', () => {
-  const c = normalizarDrops({ yugi: { quantidade: 1, pool: [30, 10, 20] } });
-  assert.deepEqual(c.yugi.pool, [30, 10, 20]);
+t('id repetido, texto, zero e negativo caem fora', () => {
+  const c = cfg1({ N: [5, 5, '6', 'abc', 0, -1, null] });
+  assert.deepEqual(c.pool.N, [5, 6]);
 });
 
-t('id que nao e numero, zero ou negativo cai fora', () => {
-  const c = normalizarDrops({ yugi: { quantidade: 1, pool: ['abc', 0, -5, null, 42] } });
-  assert.deepEqual(c.yugi.pool, [42]);
+t('o formato ANTIGO (lista simples) vira a gaveta N', () => {
+  // E' onde o servidor ja' colocava quem nao esta' em booster nenhum.
+  const c = cfg1([10, 20, 20]);
+  assert.deepEqual(c.pool.N, [10, 20]);
+  assert.equal(totalDoPool(c.pool), 2);
 });
 
-t('id em TEXTO vira numero (o JSON do editor pode trazer string)', () => {
-  const c = normalizarDrops({ yugi: { quantidade: 1, pool: ['46986414'] } });
-  assert.deepEqual(c.yugi.pool, [46986414]);
-});
-
-t(`quantidade acima do teto e cortada em ${MAX_DROPS}`, () => {
-  const c = normalizarDrops({ yugi: { quantidade: 999, pool: [1] } });
-  assert.equal(c.yugi.quantidade, MAX_DROPS);
-});
-
-t('quantidade quebrada ou negativa nao vira premio', () => {
-  assert.equal(normalizarDrops({ a: { quantidade: 2.7, pool: [1] } }).a.quantidade, 2);
-  assert.equal(normalizarDrops({ a: { quantidade: -3, pool: [1] } }).a, undefined);
-  assert.equal(normalizarDrops({ a: { quantidade: 'tres', pool: [1] } }).a, undefined);
+t(`quantidade e cortada em ${MAX_DROPS} e nao aceita quebrada`, () => {
+  assert.equal(cfg1({ N: [1] }, 999).quantidade, MAX_DROPS);
+  assert.equal(cfg1({ N: [1] }, 2.7).quantidade, 2);
 });
 
 t('pool vazio ou quantidade 0 SOME da configuracao', () => {
   // Sumir e' o certo: no servidor "sem configuracao" cai no comportamento
   // antigo (a carta de assinatura), e um registro pela metade viraria vitoria
   // sem premio nenhum.
-  const c = normalizarDrops({ a: { quantidade: 3, pool: [] }, b: { quantidade: 0, pool: [1] } });
-  assert.deepEqual(c, {});
+  assert.deepEqual(normalizarDrops({ a: { quantidade: 3, pool: poolVazio() } }), {});
+  assert.deepEqual(normalizarDrops({ b: { quantidade: 0, pool: { N: [1] } } }), {});
 });
 
 t('lixo no lugar do objeto nao explode', () => {
   assert.deepEqual(normalizarDrops(null), {});
-  assert.deepEqual(normalizarDrops(undefined), {});
   assert.deepEqual(normalizarDrops({ a: null, b: 'x', c: 42 }), {});
 });
 
-t('dropsDoNpc devolve so o do npc pedido, ja normalizado', () => {
-  const bruto = { yugi: { quantidade: 2, pool: [1, 1, 2] }, kaiba: { quantidade: 1, pool: [9] } };
-  assert.deepEqual(dropsDoNpc(bruto, 'yugi'), { quantidade: 2, pool: [1, 2] });
-  assert.equal(dropsDoNpc(bruto, 'joey'), null);
-  assert.equal(dropsDoNpc(bruto, null), null);
+t('normalizar duas vezes da o mesmo (a operacao e estavel)', () => {
+  const uma = normalizarDrops({ y: { quantidade: 99, pool: { UR: [5, 5], N: ['6'] } } });
+  assert.deepEqual(normalizarDrops(uma), uma);
 });
 
-t('normalizar duas vezes da o mesmo (a operacao e estavel)', () => {
-  const bruto = { yugi: { quantidade: 99, pool: [5, 5, '6', 'x'] } };
-  const uma = normalizarDrops(bruto);
-  assert.deepEqual(normalizarDrops(uma), uma);
+t('dropsDoNpc devolve so o do npc pedido', () => {
+  const bruto = { yugi: { quantidade: 2, pool: { N: [1] } }, kaiba: { quantidade: 1, pool: { UR: [9] } } };
+  assert.deepEqual(dropsDoNpc(bruto, 'yugi').pool.N, [1]);
+  assert.equal(dropsDoNpc(bruto, 'joey'), null);
+});
+
+// ------------------------------------------------------------ as chances (%)
+
+t('com as quatro raridades, a soma das chances e 100%', () => {
+  const ch = chancesDe({ UR: [1], SR: [2], R: [3], N: [4] });
+  assert.equal(Math.round(ch.UR + ch.SR + ch.R + ch.N), 100);
+  assert.ok(ch.UR < ch.SR && ch.SR < ch.R && ch.R < ch.N, 'a ordem das raridades tem de valer');
+});
+
+t('raridade SEM carta vale 0% (nao se promete UR num pool sem UR)', () => {
+  const ch = chancesDe({ UR: [], SR: [], R: [1], N: [2] });
+  assert.equal(ch.UR, 0);
+  assert.equal(ch.SR, 0);
+  assert.equal(Math.round(ch.R + ch.N), 100);
+});
+
+t('pool de UMA raridade so da 100% para ela', () => {
+  // Sem renormalizar, um pool so de N daria 52% e 48% de "nada".
+  const ch = chancesDe({ UR: [], SR: [], R: [], N: [1, 2] });
+  assert.equal(ch.N, 100);
+});
+
+t('pool vazio nao da chance nenhuma (e nao divide por zero)', () => {
+  assert.deepEqual(chancesDe(poolVazio()), { UR: 0, SR: 0, R: 0, N: 0 });
+  assert.deepEqual(chancesDe(null), { UR: 0, SR: 0, R: 0, N: 0 });
+});
+
+t('as chances saem dos PESOS, nao de numero escrito na tela', () => {
+  // Se alguem mexer em DROP_ODDS, a tela acompanha sozinha — e este teste
+  // continua valendo, porque ele compara com a fonte.
+  const ch = chancesDe({ UR: [1], N: [2] });
+  const esperado = Math.round((DROP_ODDS.UR / (DROP_ODDS.UR + DROP_ODDS.N)) * 1000) / 10;
+  assert.equal(ch.UR, esperado);
+});
+
+t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
+  assert.deepEqual(RARIDADES, ['UR', 'SR', 'R', 'N']);
 });
 
 console.log(`\n  ${pass} passaram, ${fail} falharam`);

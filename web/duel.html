@@ -534,6 +534,7 @@ import { requireLogin, contaAtual } from '/web/js/auth.js';
 import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
 import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
 import { decidirCorrente, normalizarModo, MODOS, MODO_PADRAO } from '/web/js/correntes.js';
+import { criarFilaDeVisoes } from '/web/js/filavisoes.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -811,6 +812,16 @@ function log(msg, big=false){ const e=document.createElement('div'); e.className
  */
 const AVISO_MS = { turno: 1500, fase: 1100, carta: 1200 };
 
+// Uma visão de cada vez, na ordem de chegada. A regra e o porquê moram em
+// `web/js/filavisoes.js` (com testes em Node — o único jeito de provar
+// concorrência sem duas pessoas jogando de verdade). Aqui só se liga o `apply`
+// nela. Fica ANTES do primeiro uso de propósito: `const` não é içado como
+// `function`, e um uso acima da declaração daria ReferenceError em execução,
+// com a sintaxe passando limpa (foi assim que o `turno is not defined` chegou
+// ao duelo de alguém).
+const filaVisoes = criarFilaDeVisoes((j) => apply(j));
+const aplicarEmOrdem = (j) => filaVisoes.enfileirar(j);
+
 /**
  * Anuncia a fase/turno com um texto que entra deslizando e some. Recriamos o
  * elemento a cada aviso para a animação reiniciar — reusar o mesmo nó faz o CSS
@@ -818,6 +829,11 @@ const AVISO_MS = { turno: 1500, fase: 1100, carta: 1200 };
  * saiu da tela.
  */
 function avisoFase(texto, { turno = false } = {}) {
+  // Com visão ESPERANDO na fila, a pausa dramática deixa de ser ritmo e vira
+  // atraso: quem espera não é mais o jogador olhando a tela, é o duelo inteiro
+  // (no multiplayer, o outro já jogou e a visão dele está parada na fila). O
+  // aviso continua aparecendo — só não segura mais o laço.
+  const segura = !filaVisoes.esperando;
   const ms = turno ? AVISO_MS.turno : AVISO_MS.fase;
   const box = $('phase-toast');
   const s = document.createElement('span');
@@ -825,9 +841,13 @@ function avisoFase(texto, { turno = false } = {}) {
   s.style.setProperty('--fase-ms', `${ms}ms`);
   s.textContent = texto;
   box.replaceChildren(s);
+  // A limpeza acontece de qualquer jeito (senão a faixa fica na tela); o que
+  // muda com `segura` é só QUEM espera por ela.
+  const limpar = () => { if (box.firstChild === s) box.replaceChildren(); };
+  if (!segura) { setTimeout(limpar, ms); return Promise.resolve(); }
   return new Promise((pronto) => setTimeout(() => {
     // Só limpa se este aviso ainda for o da vez: um aviso novo já trocou o nó.
-    if (box.firstChild === s) box.replaceChildren();
+    limpar();
     pronto();
   }, ms));
 }
@@ -1457,30 +1477,6 @@ async function animateEvent(ev) {
       return;
     }
   } catch { /* animação nunca derruba o duelo */ }
-}
-
-/**
- * **Uma visão de cada vez.**
- *
- * No modo NPC as visões chegam como RETORNO da minha própria jogada, uma por
- * vez. No MULTIPLAYER elas chegam por canal, quando o outro joga — e podem
- * chegar enquanto a anterior ainda está sendo aplicada, porque o `apply` agora
- * ESPERA (o aviso de fase segura o laço por ~1 s de propósito).
- *
- * Sem fila, duas aplicações se sobrepõem e a mais VELHA termina por último:
- * ela roda `question = j.question` com o estado ANTIGO e apaga a pergunta que
- * acabou de chegar. Foi exatamente o que travou um duelo em 17/08/2026 — o
- * motor mandou a End Phase e, 1,15 s depois, a janela de corrente da Aegis; a
- * janela apareceu, a aplicação da fase acordou do aviso e a apagou, e o duelo
- * ficou esperando para sempre uma resposta que a tela não tinha mais como dar.
- *
- * A fila é uma corrente de promessas: barata, preserva a ORDEM de chegada (que
- * é a ordem do motor) e não deixa duas aplicações vivas ao mesmo tempo.
- */
-let filaDeVisoes = Promise.resolve();
-function aplicarEmOrdem(j) {
-  filaDeVisoes = filaDeVisoes.then(() => apply(j), () => apply(j));
-  return filaDeVisoes;
 }
 
 async function apply(j) {
@@ -2654,9 +2650,13 @@ if (partidaId) {
     if (selBox) selBox.hidden = true;
 
     ponte = abrirPonte(sala, (visao) => {
-      // Toda visão que chega da ponte entra pelo MESMO `apply` do modo NPC —
+      // Toda visão que chega da ponte entra pela MESMA fila do modo NPC —
       // eventos são eventos, venham do motor ao lado ou do outro estado.
-      busy = false;
+      //
+      // Não se solta `busy` aqui: quem o liga e desliga é o `apply`, e com a
+      // fila pode haver uma aplicação ainda rodando. Soltar antes abriria uma
+      // janela para o jogador clicar no meio de uma aplicação — que é a mesma
+      // família de bug que a fila veio resolver.
       aplicarEmOrdem(visao);
     });
     window.addEventListener('beforeunload', () => ponte?.fechar());

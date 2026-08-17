@@ -262,9 +262,21 @@ selecionada (Invocar/Utilizar/Setar).
 
 Duas coisas que mudam o *como se joga*, não o que é jogado:
 
+- **Concorrência: uma visão de cada vez** (`web/js/filavisoes.js`). No modo NPC
+  a visão chega como retorno da própria jogada; no MULTIPLAYER ela chega por
+  canal, a qualquer momento. Enquanto aplicar era instantâneo isso não
+  incomodava — passou a incomodar quando o `apply` começou a ESPERAR por dentro
+  (o aviso de fase). Duas aplicações se sobrepunham e a mais VELHA terminava por
+  último, escrevendo `question` do estado antigo por cima do novo: a janela de
+  corrente sumia da tela e o duelo travava esperando uma resposta impossível
+  (aconteceu em 17/08/2026, com 1,15 s entre a End Phase e a janela da Aegis).
+  As TRÊS entradas (`/start`, `/respond` e a visão da ponte) passam pela fila.
+  9 testes em Node, incluindo um que prova que **sem** a fila o bug acontece.
 - **O aviso de fase segura o duelo.** `avisoFase()` é `await`-ado dentro do laço
   de eventos do `apply()`, que roda com `busy = true` — enquanto a faixa está na
-  tela, nenhum clique passa pelo `act()`. Antes era um `setTimeout` solto: os
+  tela, nenhum clique passa pelo `act()`. Com visão ESPERANDO na fila ele deixa
+  de segurar (só aparece): aí a pausa não é mais ritmo, é atraso — quem espera
+  passa a ser o duelo inteiro, não o jogador olhando a tela. Antes era um `setTimeout` solto: os
   eventos continuavam entrando por baixo e a rajada de fim de turno
   (turno → draw → standby → main) passava numa piscada, sem dar tempo de ler.
   Os tempos estão em **`AVISO_MS`** (turno 1500 ms, fase 1100 ms, carta 1200 ms) —

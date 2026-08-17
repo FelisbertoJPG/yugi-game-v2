@@ -117,7 +117,10 @@ namespace DuelServer.Update
         // (assets/icone-fonte.png), no lugar do desenho geometrico. E' recurso
         // DENTRO do executavel — sem trocar o exe, quem ja' tem o jogo continua
         // vendo o icone antigo na barra de tarefas e no atalho.
-        public const string InstallerVersion = "0.11.1";
+        // 0.11.2 (17/08/2026): arte nova do icone (o Enigma sobre a parede de
+        // hieroglifos). Recurso dentro do exe — sem trocar o exe, o icone antigo
+        // continua na barra de tarefas.
+        public const string InstallerVersion = "0.11.2";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 

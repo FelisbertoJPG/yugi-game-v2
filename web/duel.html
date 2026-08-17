@@ -413,11 +413,13 @@
     width: 96px; aspect-ratio: 59/86; perspective: 700px; cursor: pointer;
     background: none; border: 0; padding: 0;
   }
-  /* Revelada, a carta vira `disabled` para não ser clicada de novo — e o
+  /* Revelada, a carta NÃO fica `disabled`, e por duas razões: o
      `button:disabled { opacity: .4 }` de `ui.css` apagava justamente o prêmio
-     que o jogador acabou de ganhar (mal dava para enxergar a arte). Aqui
-     "desligado" quer dizer só "não aceita mais clique". */
-  .drop[disabled] { cursor: default; opacity: 1; }
+     recém-ganho (mal dava para enxergar a arte), e navegador nenhum entrega
+     evento de ponteiro a um controle desligado — o "segurar para ampliar"
+     simplesmente não começaria. Quem impede a segunda virada é o `abertas` do
+     `renderDrops`, que é onde a regra já morava. */
+  .drop.aberta { cursor: zoom-in; }
   .drop .giro {
     position: relative; width: 100%; height: 100%;
     transform-style: preserve-3d; transition: transform .55s cubic-bezier(.2,.7,.3,1);
@@ -465,7 +467,7 @@
   /* O verso é o mesmo `.back` do tabuleiro — a carta virada do jogo, não um
      desenho novo só para esta tela. */
   .drop .verso .back { width: 100%; height: 100%; }
-  .drop:not([disabled]):hover .verso { border-color: var(--gold); }
+  .drop:not(.aberta):hover .verso { border-color: var(--gold); }
   .drop-nome {
     font-size: 10px; color: var(--gold); margin-top: 4px; min-height: 13px;
     max-width: 96px; line-height: 1.2;
@@ -2876,7 +2878,9 @@ function renderDrops(drops) {
     if (abertas.has(i)) return;
     abertas.add(i);
     botao.classList.add('aberta');
-    botao.disabled = true;
+    // O título muda junto: de "clique para revelar" para o gesto que a carta
+    // aceita depois de aberta.
+    botao.title = `${nameOf(drops[i].id)}\nsegurar: ver detalhes`;
     nome.textContent = nameOf(drops[i].id);
     if (abertas.size === drops.length) { pular.hidden = true; liberarSaidaDoFim(true); }
   };
@@ -2901,7 +2905,22 @@ function renderDrops(drops) {
     const nome = document.createElement('div');
     nome.className = 'drop-nome';
 
-    b.onclick = () => abrir(i, b, nome);
+    // **Segurar amplia** — o mesmo gesto da mão, do campo, do cemitério e do
+    // Extra, com o mesmo anel de progresso (`injectHoldStyles`) e o mesmo
+    // botão direito de atalho. Só DEPOIS de revelada: segurar uma carta ainda
+    // virada abriria o detalhe dela e mataria a virada, que é a única coisa
+    // que esta tela tem para oferecer — então ali o gesto revela, como o
+    // clique, em vez de não fazer nada e ainda engolir o clique seguinte.
+    const ampliar = () => {
+      if (abertas.has(i)) showCardDetail(drop.id);
+      else abrir(i, b, nome);
+    };
+    const segurou = wireLongPress(b, HOLD_MS, ampliar);
+    b.oncontextmenu = (e) => { e.preventDefault(); ampliar(); };
+    // `segurou()` consome o gesto: sem isto, soltar depois de ampliar
+    // dispararia o clique logo atrás — e numa carta ainda virada o "segurar
+    // revela" seria seguido de um `abrir` redundante.
+    b.onclick = () => { if (segurou()) return; abrir(i, b, nome); };
     cel.append(b, nome);
     caixa.append(cel);
     botoes.push({ b, nome });

@@ -283,10 +283,17 @@ ela tem nos boosters, que é justamente o que deixa um adversário largar um
 Normal como prêmio raro —, e "é nova" só existe **antes** do crédito (a carteira
 que volta na resposta já tem a carta dentro). Servidor sem a 0029 devolve
 `cartas` sem `drops` e a tela mostra a carta sem selo nenhum, como antes.
-A carta revelada também ficava quase invisível: `renderDrops` marca o botão como
-`disabled` para não virar de novo, e o `button:disabled { opacity: .4 }` de
-`web/css/ui.css` apagava o prêmio recém-ganho — daí o `opacity: 1` explícito em
-`.drop[disabled]`.
+**Segurar amplia**, o mesmo gesto da mão, do campo, do cemitério e do Extra
+(`wireLongPress` + `showCardDetail`, com o anel de progresso de sempre) — e o
+botão direito como atalho. Só depois de revelada: segurar uma carta ainda
+virada abriria o detalhe e mataria a virada, então ali o gesto **revela**, como
+o clique, em vez de não fazer nada e ainda engolir o clique seguinte.
+
+Por causa disso a carta revelada **não** fica `disabled`, e o `abertas` do
+`renderDrops` é quem impede a segunda virada. São duas razões: navegador nenhum
+entrega evento de ponteiro a um controle desligado (o "segurar" não começaria),
+e o `button:disabled { opacity: .4 }` de `web/css/ui.css` apagava justamente o
+prêmio recém-ganho — a carta ficava quase invisível.
 
 `web/js/customcards.js` importa cartas de um "card maker" externo (nome, tipo,
 ATK/DEF, arte) para o Deck Builder. Isso só monta o **esqueleto** da carta —

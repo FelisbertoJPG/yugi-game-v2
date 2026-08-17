@@ -42,16 +42,16 @@ namespace DuelServer
         /// Mensagem de "não consegui abrir a porta", escrita para quem joga.
         ///
         /// A causa é quase sempre a mesma e tem solução de um clique: já existe
-        /// um Duel Academy aberto (ou um `npm run dev`). O texto diz isso antes
+        /// um Classic Duels aberto (ou um `npm run dev`). O texto diz isso antes
         /// de qualquer coisa técnica — quem precisa do `netsh` sabe procurar no
         /// log.
         /// </summary>
         public static void PortaOcupada(string url, string detalhe)
         {
-            Erro("Duel Academy não conseguiu abrir",
+            Erro("Classic Duels não conseguiu abrir",
                  "O jogo não conseguiu usar a porta de que precisa.\n\n" +
-                 "Quase sempre é porque JÁ EXISTE UM DUEL ACADEMY ABERTO — " +
-                 "procure na barra de tarefas, ou rode o duel-academy-stop.exe " +
+                 "Quase sempre é porque JÁ EXISTE UM CLASSIC DUELS ABERTO — " +
+                 "procure na barra de tarefas, ou rode o classic-duels-stop.exe " +
                  "que fica na pasta do jogo.\n\n" +
                  "Se você estiver desenvolvendo, um 'npm run dev' aberto também " +
                  "ocupa a mesma porta.\n\n" +

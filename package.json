@@ -14,10 +14,10 @@
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish-release.ps1",
     "release:test": ".\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-release dist/release",
     "release:publish": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish-release.ps1 -Publish",
-    "update:test": ".\\duel-academy-stop.exe && dotnet build duel-server -v q --nologo && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-update && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-offline && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-selfupdate && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-update-duelo",
-    "stop": ".\\duel-academy-stop.exe",
-    "duel:build": ".\\duel-academy-stop.exe && dotnet build duel-server -v q --nologo",
-    "duel:test": ".\\duel-academy-stop.exe && dotnet build duel-server -v q --nologo && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-npc && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-summons"
+    "update:test": ".\\classic-duels-stop.exe && dotnet build duel-server -v q --nologo && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-update && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-offline && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-selfupdate && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-update-duelo",
+    "stop": ".\\classic-duels-stop.exe",
+    "duel:build": ".\\classic-duels-stop.exe && dotnet build duel-server -v q --nologo",
+    "duel:test": ".\\classic-duels-stop.exe && dotnet build duel-server -v q --nologo && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-npc && .\\duel-server\\bin\\Debug\\net8.0\\win-x64\\duel-server.exe --test-summons"
   },
   "engines": {
     "node": ">=18"

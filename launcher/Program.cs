@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
-// duel-academy — atalho para subir o ambiente sem linha de comando.
+// classic-duels — atalho para subir o ambiente sem linha de comando.
 //
 // Fluxo: sobe o servidor estatico (8080), espera 200; sobe o duel-server
 // (8770), espera 200 no /health; confere a URL final; abre o navegador; sai.
@@ -33,8 +33,8 @@ internal static class Program
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-        // O mesmo codigo gera dois executaveis: duel-academy.exe (liga) e
-        // duel-academy-stop.exe (desliga), este ultimo compilado com STOP_MODE.
+        // O mesmo codigo gera dois executaveis: classic-duels.exe (liga) e
+        // classic-duels-stop.exe (desliga), este ultimo compilado com STOP_MODE.
 #if STOP_MODE
         bool stop = true;
 #else
@@ -43,17 +43,17 @@ internal static class Program
         bool keep = Has(args, "--keep");
         bool noBrowser = Has(args, "--no-browser");
 
-        Console.Title = stop ? "Duel Academy — desligar" : "Duel Academy";
+        Console.Title = stop ? "Classic Duels — desligar" : "Classic Duels";
         Banner(stop);
 
         _root = FindRepoRoot();
         if (_root == null)
         {
             Fail("Nao achei a raiz do projeto (procurei por package.json + ygo-data/ + duel-server/).");
-            Console.WriteLine("  Deixe o duel-academy.exe dentro da pasta do projeto.");
+            Console.WriteLine("  Deixe o classic-duels.exe dentro da pasta do projeto.");
             return Hold(2, true);
         }
-        _pidFile = Path.Combine(Path.GetTempPath(), "duel-academy-launcher.json");
+        _pidFile = Path.Combine(Path.GetTempPath(), "classic-duels-launcher.json");
         Info($"projeto: {_root}");
 
         if (stop) return StopAll();
@@ -109,7 +109,7 @@ internal static class Program
         Ok("tudo pronto.");
         Console.WriteLine($"  front       {FrontUrl}");
         Console.WriteLine($"  duel-server {DuelUrl}");
-        Console.WriteLine("  para derrubar:  duel-academy.exe --stop");
+        Console.WriteLine("  para derrubar:  classic-duels.exe --stop");
 
         return Hold(0, keep);
     }
@@ -537,8 +537,8 @@ internal static class Program
     static void Banner(bool stop)
     {
         Write(stop ? ConsoleColor.Red : ConsoleColor.Yellow,
-              stop ? "\n  ####  DUEL ACADEMY — DESLIGAR  ####\n"
-                   : "\n  ####  DUEL ACADEMY  ####\n");
+              stop ? "\n  ####  CLASSIC DUELS — DESLIGAR  ####\n"
+                   : "\n  ####  CLASSIC DUELS  ####\n");
     }
 
     static void Step(int n, string what)

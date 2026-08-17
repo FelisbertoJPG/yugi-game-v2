@@ -5,7 +5,7 @@ jogo monta as animações de duelo. Node puro, zero dependência, no mesmo espí
 do resto do projeto.
 
 > **Os assets são da Konami.** Extrair pra estudar e referenciar é uma coisa;
-> embutir no `dist/DuelAcademy.exe` é outra, e é decisão que ninguém tomou
+> embutir no `dist/ClassicDuels.exe` é outra, e é decisão que ninguém tomou
 > ainda. Por isso nenhum script escreve dentro do repo, e `tudo.mjs` recusa
 > rodar sem um destino explícito.
 

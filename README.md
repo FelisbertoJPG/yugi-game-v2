@@ -9,8 +9,8 @@ Jeito fácil, sem linha de comando (Windows) — dois executáveis na raiz:
 
 | Duplo clique em | O que faz |
 |---|---|
-| **`duel-academy.exe`** | sobe o front (8080), sobe o duel-server (8770), confere cada um com 200 OK, abre a página e fecha sozinho |
-| **`duel-academy-stop.exe`** | encerra os dois de forma limpa e confirma que as portas caíram |
+| **`classic-duels.exe`** | sobe o front (8080), sobe o duel-server (8770), confere cada um com 200 OK, abre a página e fecha sozinho |
+| **`classic-duels-stop.exe`** | encerra os dois de forma limpa e confirma que as portas caíram |
 
 Se ainda não existirem, gere com `npm run launcher:build` (precisa do SDK .NET).
 O launcher compila o `duel-server` sozinho na primeira vez, é idempotente (não
@@ -40,14 +40,14 @@ Python 3 só é necessário para regenerar o banco de cartas (`npm run data:buil
 ## Mandar para alguém jogar
 
 ```bash
-npm run pack        # gera dist/DuelAcademy.exe (~61 MB)
+npm run pack        # gera dist/ClassicDuels.exe (~61 MB)
 ```
 
 Um arquivo só, e do outro lado **não se instala nada**: o .NET vai dentro do
 executável e o Node deixou de ser necessário (o `StaticServer.cs` faz o papel do
 `serve.mjs`). Web, cartas, `cards.cdb` e os 20.949 scripts Lua viajam como um
 `payload.zip` embutido, que na primeira execução se instala em
-`%LOCALAPPDATA%\DuelAcademy\game` — de segundos, e nas próximas vezes abre
+`%LOCALAPPDATA%\ClassicDuels\game` — de segundos, e nas próximas vezes abre
 direto. Duplo clique sobe as duas portas num processo só e abre o navegador; a
 janela do console **é** o jogo, fechá-la encerra tudo.
 

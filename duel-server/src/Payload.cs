@@ -14,7 +14,7 @@ namespace DuelServer
     ///
     /// Isso existe para o projeto poder ser compartilhado: um arquivo so', sem
     /// clonar repositorio, sem instalar .NET e sem instalar Node. Na primeira
-    /// execucao o conteudo e' extraido para %LOCALAPPDATA%\DuelAcademy\game e nas
+    /// execucao o conteudo e' extraido para %LOCALAPPDATA%\ClassicDuels\game e nas
     /// seguintes so' se confere o carimbo.
     ///
     /// Em desenvolvimento nao existe payload embutido: `Exists` da' false e o
@@ -61,6 +61,60 @@ namespace DuelServer
 
         static Assembly Asm => typeof(Payload).Assembly;
 
+        /// <summary>A pasta em %LOCALAPPDATA% onde o jogo se instala.</summary>
+        public const string PASTA = "ClassicDuels";
+
+        /// <summary>
+        /// O nome que a pasta tinha quando o jogo se chamava **Duel Academy**.
+        /// Fica literal aqui, e não pode ser renomeado junto com o resto: é o
+        /// nome do que já está no disco de quem joga, e não o nome do jogo.
+        /// </summary>
+        public const string PASTA_ANTIGA = "DuelAcademy";
+
+        /// <summary>
+        /// **A instalação que ficou com o nome antigo.**
+        ///
+        /// O jogo se chamava Duel Academy, e a pasta tinha o nome dele. Só que
+        /// dentro dela não mora apenas o jogo: moram os `decks/` e o `store/`,
+        /// que são de quem joga e o instalador tem ordem de nunca tocar. Trocar
+        /// o nome sem mais nada abandonaria tudo isso num canto do disco e
+        /// reinstalaria do zero por cima.
+        ///
+        /// Move a pasta INTEIRA — assim `game/`, os marcadores `.duelacademy/`
+        /// (que continuam com o nome velho de propósito: são invisíveis, e
+        /// renomeá-los faria todo cliente instalado rebaixar 28 MB à toa) e o
+        /// que mais estiver lá viajam juntos, sem o instalador perceber
+        /// diferença nenhuma.
+        ///
+        /// Nunca sobrescreve: se a pasta nova já existe, uma instalação nova já
+        /// aconteceu e ela é a verdade. Falhar aqui não é fatal — o jogo segue e
+        /// instala do zero, que é o pior caso e não a regra.
+        ///
+        /// Devolve `true` quando a mudança aconteceu de verdade.
+        /// </summary>
+        public static bool MigrarInstalacaoAntiga(string velha, string nova)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(velha) || string.IsNullOrEmpty(nova)) return false;
+                if (!Directory.Exists(velha) || Directory.Exists(nova)) return false;
+
+                Directory.CreateDirectory(Path.GetDirectoryName(nova) ?? ".");
+                Directory.Move(velha, nova);
+                Log.Info($"instalacao antiga migrada: {velha} -> {nova}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                // Pasta em uso, permissao, disco diferente… O jogo continua: a
+                // instalacao nova acontece do zero na pasta nova, e a antiga fica
+                // onde esta' (nada e' apagado).
+                Log.Warn($"nao consegui migrar a instalacao antiga ({e.Message}) — " +
+                         "o jogo vai instalar do zero na pasta nova");
+                return false;
+            }
+        }
+
         /// <summary>
         /// Garante o jogo extraido em disco e devolve a raiz. Null quando este
         /// executavel nao carrega payload (build de desenvolvimento).
@@ -70,9 +124,12 @@ namespace DuelServer
             if (!Exists) return null;
 
             string carimbo = Carimbo();
-            string root = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DuelAcademy", "game");
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            // Quem ja' jogava tem a instalacao — e os decks e o store dentro dela
+            // — na pasta com o nome ANTIGO do jogo.
+            MigrarInstalacaoAntiga(Path.Combine(local, PASTA_ANTIGA),
+                                   Path.Combine(local, PASTA));
+            string root = Path.Combine(local, PASTA, "game");
             string marca = Path.Combine(root, ".versao");
 
             if (Directory.Exists(root) && File.Exists(marca))

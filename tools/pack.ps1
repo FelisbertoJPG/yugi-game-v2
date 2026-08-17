@@ -1,4 +1,4 @@
-# Gera dist\DuelAcademy.exe - o jogo inteiro num arquivo so'.
+# Gera dist\ClassicDuels.exe - o jogo inteiro num arquivo so'.
 #
 # O executavel sai self-contained (o .NET vai dentro dele) e com um payload.zip
 # embutido contendo o jogo. Quem recebe nao precisa de .NET, nem de Node, nem do
@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $root = Split-Path -Parent $PSScriptRoot
-$stage = Join-Path $env:TEMP 'duel-academy-pack'
+$stage = Join-Path $env:TEMP 'classic-duels-pack'
 $payload = Join-Path $root 'duel-server\payload.zip'
 $dist = Join-Path $root 'dist'
 $release = Join-Path $dist 'release'
@@ -34,7 +34,7 @@ function Ok($texto) { Write-Host "  OK   $texto" -ForegroundColor Green }
 function Aviso($texto) { Write-Host "  !    $texto" -ForegroundColor Yellow }
 function Falhar($texto) { Write-Host "  ERRO $texto" -ForegroundColor Red; exit 1 }
 
-Write-Host "`n  ####  DUEL ACADEMY - EMPACOTAR  ####" -ForegroundColor Yellow
+Write-Host "`n  ####  CLASSIC DUELS - EMPACOTAR  ####" -ForegroundColor Yellow
 
 # --------------------------------------------------------- 0. conferir o release
 Passo 0 'conferindo dist\release\ (gerado pelo npm run release:build)'
@@ -194,7 +194,7 @@ Remove-Item $payload -Force
 # --------------------------------------------------------------- 4. entrega
 Passo 4 'montando dist/'
 if (-not (Test-Path $dist)) { New-Item -ItemType Directory -Path $dist -Force | Out-Null }
-$exeFinal = Join-Path $dist 'DuelAcademy.exe'
+$exeFinal = Join-Path $dist 'ClassicDuels.exe'
 if (Test-Path $exeFinal) { Remove-Item $exeFinal -Force }
 Copy-Item (Join-Path $saidaTmp 'duel-server.exe') $exeFinal -Force
 
@@ -204,11 +204,11 @@ $sobras = Get-ChildItem $saidaTmp -File | Where-Object { $_.Name -ne 'duel-serve
 if ($sobras) {
   Write-Host "  !    ficaram arquivos fora do exe:" -ForegroundColor Yellow
   $sobras | ForEach-Object { Write-Host "         $($_.Name)" -ForegroundColor Yellow }
-  Write-Host "       copie-os junto do DuelAcademy.exe ao compartilhar." -ForegroundColor Yellow
+  Write-Host "       copie-os junto do ClassicDuels.exe ao compartilhar." -ForegroundColor Yellow
   $sobras | ForEach-Object { Copy-Item $_.FullName (Join-Path $dist $_.Name) -Force }
 }
 
 Remove-Item $stage -Recurse -Force
 $tamanho = [math]::Round((Get-Item $exeFinal).Length / 1MB, 1)
-Ok "dist\DuelAcademy.exe - $tamanho MB"
+Ok "dist\ClassicDuels.exe - $tamanho MB"
 Write-Host "`n  Mande esse arquivo. Do outro lado: dois cliques, sem instalar nada.`n" -ForegroundColor Green

@@ -347,9 +347,9 @@ Teste: `duel-server.exe --test-paradox` — 36 checagens.
 
 ## 2. Como rodar
 
-**Atalho (Windows):** duplo clique em `duel-academy.exe` na raiz — sobe os dois
+**Atalho (Windows):** duplo clique em `classic-duels.exe` na raiz — sobe os dois
 servidores, confere 200 OK em cada um, abre a página e fecha sozinho.
-`duel-academy-stop.exe` encerra tudo de forma limpa. Se os exes não existirem,
+`classic-duels-stop.exe` encerra tudo de forma limpa. Se os exes não existirem,
 `npm run launcher:build`. Fonte em `launcher/` (um `Program.cs` gera os dois).
 
 Na mão:
@@ -368,7 +368,7 @@ nativas Win-x64, ficam em `duel-server/native/`).
 
 **Encerramento limpo:** `POST /shutdown` no duel-server (libera a memória nativa do
 ocgcore via `Dispose` antes de sair) e `POST /__shutdown` no front (só aceita de
-localhost). É o que o `duel-academy-stop.exe` usa; o kill por PID é só o último
+localhost). É o que o `classic-duels-stop.exe` usa; o kill por PID é só o último
 recurso, se o servidor não responder em 8s.
 
 Modos do exe: sem args = demo no console; `--serve` = servidor web; `--selfplay` =

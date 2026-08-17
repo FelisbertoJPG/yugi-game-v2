@@ -1,4 +1,4 @@
-# Instalador / Auto-Updater do Duel Academy — plano de implementação
+# Instalador / Auto-Updater do Classic Duels — plano de implementação
 
 Adaptação do mecanismo descrito em [`MECANISMO-INSTALADOR.md`](./MECANISMO-INSTALADOR.md)
 (origem: instalador do Souls Craft) para **este** projeto. Aquele documento é o "neurônio"
@@ -19,7 +19,7 @@ só que **contra um zip embutido no exe**, não contra um servidor.
 | Conceito (doc de origem) | Onde já vive aqui | Estado |
 |---|---|---|
 | Payload .zip versionado por marcador (§5) | `Payload.Carimbo()` = `sha256(payload.zip)[:16]`, gravado em `<raiz>/.versao` | pronto |
-| Raiz da instância (§9.1) | `%LOCALAPPDATA%\DuelAcademy\game` | pronto |
+| Raiz da instância (§9.1) | `%LOCALAPPDATA%\ClassicDuels\game` | pronto |
 | `removeMode: "keep"` (§2.4) | `Payload.Preservadas = { "store/", "decks/" }` | pronto, mas incompleto (ver §3) |
 | Zip-slip (§2.5) | o teste `destino.StartsWith(root + separador)` em `EnsureExtracted` | pronto, vira `SafeCombine` |
 | Fallback offline (§7) | o payload embutido no exe | **melhor** que o original: o plano B é permanente |
@@ -31,7 +31,7 @@ só que **contra um zip embutido no exe**, não contra um servidor.
 | UI de progresso | — | **pendente** |
 
 **O problema concreto que isto resolve:** hoje, atualizar o jogo é o jogador baixar
-`DuelAcademy.exe` (64 MB) na mão, e o `EnsureExtracted` reescrever os ~21 mil arquivos de
+`ClassicDuels.exe` (64 MB) na mão, e o `EnsureExtracted` reescrever os ~21 mil arquivos de
 uma vez. Um ajuste de 1 KB em `web/js/duel.js` custa 64 MB de download.
 
 ---
@@ -44,13 +44,13 @@ os nossos conteúdos têm ritmos de mudança muito diferentes:
 
 | Pacote | Conteúdo | Tamanho **real** | Muda quando |
 |---|---|---|---|
-| `DuelAcademy.exe` | motor .NET + `ocgcore.dll` + `sqlite3.dll` | ~14 MB | mexe em `duel-server/src/` |
+| `ClassicDuels.exe` | motor .NET + `ocgcore.dll` + `sqlite3.dll` | ~14 MB | mexe em `duel-server/src/` |
 | `game.zip` | `web/`, `ygo-data/src/`, e de `ygo-data/data/`: `cards.index.json`, `archetypes.json`, `scripts.index.json`, `meta.json`, `constants.json` | **0,8 MB** (53 arquivos) | **quase todo dia** |
 | `cards.zip` | `ygo-data/data/cards.json` (14 MB), `.../YGODemo/cards.cdb` e os 20.949 `script/*.lua` | **24,9 MB** (20.951 arquivos) | só quando roda `npm run data:build` |
 | `files[]` | `store/banlist.json`, `store/boosters.json`, `store/npcs.json` | KB | conteúdo global do jogo, sob demanda |
 
 Os tamanhos acima são medidos, não estimados (`npm run release:build`). Publicar um
-ajuste de front custa **0,8 MB** ao jogador, contra os 64 MB do `DuelAcademy.exe` de hoje.
+ajuste de front custa **0,8 MB** ao jogador, contra os 64 MB do `ClassicDuels.exe` de hoje.
 
 Os três `store/*.json` acima são **conteúdo do jogo** versionado de propósito (banlist,
 boosters, NPCs customizados), não progresso de ninguém — por isso entram em `files[]` e
@@ -96,7 +96,7 @@ carteira e decks. Hoje eles guardam **contas de verdade** — `store/accounts/`,
 save: **desloga todo mundo e some com a coleção**. A varredura de órfãos tem que pular essas
 pastas explicitamente, como o §5 manda pular os `roots` do payload.
 
-Backups em `%LOCALAPPDATA%\DuelAcademy\backups\<AAAA-MM-DD-HHmmss>\`, fora da raiz da
+Backups em `%LOCALAPPDATA%\ClassicDuels\backups\<AAAA-MM-DD-HHmmss>\`, fora da raiz da
 instância (senão viram órfãos de si mesmos na próxima varredura).
 
 ---
@@ -105,12 +105,12 @@ instância (senão viram órfãos de si mesmos na próxima varredura).
 
 ```jsonc
 {
-  "gameVersion": "duel-academy-20260807",   // rótulo humano
-  "displayName": "Duel Academy",
+  "gameVersion": "classic-duels-20260807",   // rótulo humano
+  "displayName": "Classic Duels",
 
   "installer": {                            // o PRÓPRIO exe (auto-update, §6 do original)
     "version": "0.2.0",
-    "asset":   "DuelAcademy.exe",
+    "asset":   "ClassicDuels.exe",
     "sha256":  "…",
     "size":    14000000
   },
@@ -204,14 +204,14 @@ escuta é o SSE, o console ou o self-test.
 **Marca da Web (erro 1223).** Já documentada no `CLAUDE.md` e tratada em
 `launcher/Program.cs` (`OfferUnblock`, linha ~223: apaga o fluxo `Zone.Identifier` via
 `DeleteFileW(f + ":Zone.Identifier")`). O exe **baixado pelo auto-updater** vai carregar esse
-fluxo. Como o `.bat` de troca do §6 dá `start "" DuelAcademy.exe` com janela oculta, o
+fluxo. Como o `.bat` de troca do §6 dá `start "" ClassicDuels.exe` com janela oculta, o
 Windows cancela sem perguntar nada e o jogador vê o jogo simplesmente não abrir. **O
 `SelfUpdater` tem que apagar o ADS do `.new` antes de mover** — reusando a mesma
 `DeleteFileW` do launcher. Isto não é hipótese: é o mesmo bug que já custou tempo aqui.
 
 **O exe travado durante a extração.** O `CLAUDE.md` avisa: "compile sempre com o servidor
 parado". A mesma regra vale para o update — se o `duel-server` estiver rodando
-(`duel-academy.exe` do launcher, ou uma segunda janela do jogo), o `ApplyAsync` pode falhar
+(`classic-duels.exe` do launcher, ou uma segunda janela do jogo), o `ApplyAsync` pode falhar
 ao substituir arquivo em uso. O update roda no boot, **antes** de o `HttpListener` subir, e
 o `SelfUpdater` só age depois de o processo atual pedir para encerrar.
 
@@ -229,7 +229,7 @@ o `SelfUpdater` só age depois de o processo atual pedir para encerrar.
    renomeia assets e isso quebra o match manifesto→asset (§7 do original);
 5. escreve `manifest.json` **sem BOM**;
 6. **dry-run por padrão**; com `-Publish`, cria o Release via `gh` CLI e sobe os assets.
-   Com `-ComExe`, inclui o `DuelAcademy.exe` e lê a `InstallerVersion` do `BuildConfig.cs`.
+   Com `-ComExe`, inclui o `ClassicDuels.exe` e lê a `InstallerVersion` do `BuildConfig.cs`.
 
 ```bash
 npm run release:build      # dry-run: gera dist/release/ e lista os tamanhos
@@ -400,7 +400,7 @@ novidade, o jogador clica, a barra anda e o jogo entra sozinho.
 ## 11. A atualização fantasma — resolvida, e por que assim
 
 Uma instalação recém-baixada oferecia uma atualização de **25,7 MB que ela já tinha por
-dentro**. O `DuelAcademy.exe` embute `payload.zip`, mas quem registrava os marcadores
+dentro**. O `ClassicDuels.exe` embute `payload.zip`, mas quem registrava os marcadores
 (`.duelacademy/<id>.version`) era só o `UpdateEngine` — o `Payload` não escrevia nenhum. Sem
 marcador, o diff concluía (corretamente, pelo que sabia) que faltava tudo.
 

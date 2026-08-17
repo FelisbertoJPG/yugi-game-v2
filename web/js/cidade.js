@@ -55,7 +55,7 @@ const username = await requireLogin();
 if (!username) throw new Error('redirecionando para login');
 
 $('title').textContent = `▚ ${scenario.name.toUpperCase()}`;
-document.title = `${scenario.name} — Duel Academy`;
+document.title = `${scenario.name} — Classic Duels`;
 
 await hydrateWallet();
 $('dp').textContent = `${getDP()} DP`;

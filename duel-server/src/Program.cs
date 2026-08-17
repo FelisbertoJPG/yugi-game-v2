@@ -76,8 +76,8 @@ namespace DuelServer
             string appRoot = null;
             if (app)
             {
-                Console.Title = "Duel Academy";
-                Log.Info("=== Duel Academy ===");
+                Console.Title = "Classic Duels";
+                Log.Info("=== Classic Duels ===");
                 appRoot = Payload.EnsureExtracted() ?? FindProjectRoot();
                 if (appRoot == null)
                 {
@@ -158,7 +158,7 @@ namespace DuelServer
                     // Se o proprio executavel esta velho, trocar os arquivos do
                     // jogo sem trocar o exe deixa os dois fora de sincronia.
                     if (Update.UpdateService.InstaladorDesatualizado)
-                        Log.Info("ha' uma versao nova do proprio Duel Academy.exe");
+                        Log.Info("ha' uma versao nova do proprio Classic Duels.exe");
                 }
 
                 bool subiu = WebServer.Run(streamingAssets,

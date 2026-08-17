@@ -150,7 +150,7 @@ namespace DuelServer.Update
             if (novo == null) return false;
 
             Estagio(Estado.Reiniciando, "reiniciando",
-                    $"versao nova do Duel Academy ({_manifesto.Installer.Version})", 1);
+                    $"versao nova do Classic Duels ({_manifesto.Installer.Version})", 1);
 
             Task.Run(() =>
             {

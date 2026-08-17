@@ -214,7 +214,7 @@ namespace DuelServer
             Directory.CreateDirectory(release);
 
             string zipGame = Path.Combine(release, "game.zip");
-            Zip(zipGame, ("web/index.html", "<h1>Duel Academy</h1>"), ("web/js/deck.js", "// regras"));
+            Zip(zipGame, ("web/index.html", "<h1>Classic Duels</h1>"), ("web/js/deck.js", "// regras"));
 
             string zipCards = Path.Combine(release, "cards.zip");
             Zip(zipCards, ("ygo-data/data/cards.json", "[]"));
@@ -222,7 +222,7 @@ namespace DuelServer
             var m = new Manifest
             {
                 GameVersion = "offline-1",
-                DisplayName = "Duel Academy",
+                DisplayName = "Classic Duels",
                 ManagedRoots = new System.Collections.Generic.List<RaizGerenciada>
                 { new() { Path = "web", RemoveMode = "keep" } },
                 Payloads = new System.Collections.Generic.List<PayloadManifesto>

@@ -74,6 +74,14 @@ launcher/stop/obj/
 duel-server/bin/
 
 # Launcher publicado na raiz: artefato de build, refeito com `npm run launcher:build`
+classic-duels.exe
+classic-duels.pdb
+classic-duels-stop.exe
+classic-duels-stop.pdb
+# Os nomes de antes de o jogo virar Classic Duels. Continuam listados porque o
+# `launcher:build` NAO apaga o que ja' estava na raiz: quem tinha o repositorio
+# antes da troca segue com os dois exes velhos no disco, e um `git add -A` de
+# rotina os commitaria.
 duel-academy.exe
 duel-academy.pdb
 duel-academy-stop.exe

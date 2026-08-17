@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NPCs — Duel Academy</title>
+<title>NPCs — Classic Duels</title>
+<link rel="icon" href="/web/img/icone.png">
 <link rel="stylesheet" href="/web/css/ui.css">
 <style>
   .wrap { width: min(880px, 94vw); margin: 0 auto; padding: 18px 0 40px; }
@@ -405,7 +406,7 @@ function renderOrigin() {
   if (!canPersistToProject()) {
     bar.className = 'banner err';
     bar.textContent = 'Servidor de desenvolvimento fora do ar — os decks não podem '
-      + 'ser gravados no projeto. Rode `npm run dev` (ou o duel-academy.exe).';
+      + 'ser gravados no projeto. Rode `npm run dev` (ou o classic-duels.exe).';
     return;
   }
   if (soltos.length) {

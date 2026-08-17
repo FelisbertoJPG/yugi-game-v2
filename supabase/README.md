@@ -2,7 +2,7 @@
 
 Projeto: `shclhlbfkdnnqxboiuqc` · `https://shclhlbfkdnnqxboiuqc.supabase.co`
 
-Isto **não** é a fonte da verdade do jogo. O Duel Academy roda como servidor
+Isto **não** é a fonte da verdade do jogo. O Classic Duels roda como servidor
 local e tem que abrir offline — é a mesma regra que rege o instalador
 (`offline nunca trava o jogo`, `INSTALADOR.md` §5). O Supabase é **espelho**:
 sobe quando há rede, desce ao entrar noutra máquina.

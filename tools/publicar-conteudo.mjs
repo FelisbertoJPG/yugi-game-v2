@@ -149,7 +149,7 @@ async function tabuleiros() {
 
 // -------------------------------------------------------------------- main
 
-console.log('\n  ####  DUEL ACADEMY - PUBLICAR CONTEUDO  ####\n');
+console.log('\n  ####  CLASSIC DUELS - PUBLICAR CONTEUDO  ####\n');
 if (!publicar) linha('DRY-RUN (nada sera gravado). Use --publicar para subir.\n');
 
 const token = await entrar();

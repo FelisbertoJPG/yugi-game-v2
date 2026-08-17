@@ -50,6 +50,7 @@ namespace DuelServer
                 PacoteVolatilNaoArrastaOPesado(Sub(bancada, "7-volatilidade"));
                 RaizesSobrepostasNaoSeApagam(Sub(bancada, "8-sobreposicao"));
                 InstalacaoNovaNaoOfereceAtualizacaoFantasma(Sub(bancada, "9-fantasma"));
+                InstalacaoComNomeAntigoEMigrada(Sub(bancada, "10-renomeacao"));
             }
             finally
             {
@@ -308,7 +309,7 @@ namespace DuelServer
         /// </summary>
         static void ManifestoComBomParseia()
         {
-            string json = "﻿{\"gameVersion\":\"x\",\"displayName\":\"Duel Academy\"}";
+            string json = "﻿{\"gameVersion\":\"x\",\"displayName\":\"Classic Duels\"}";
             try
             {
                 var m = Manifest.Parse(json);
@@ -333,7 +334,7 @@ namespace DuelServer
             string novoGame = Path.Combine(dir, "release", "game.zip");
             var conteudo = new Dictionary<string, string>
             {
-                ["web/index.html"] = "<h1>Duel Academy v2</h1>",
+                ["web/index.html"] = "<h1>Classic Duels v2</h1>",
                 ["web/js/deck.js"] = "// v2",
                 ["ygo-data/src/ygodb.js"] = "// v2"
             };
@@ -363,8 +364,64 @@ namespace DuelServer
         }
 
         /// <summary>
+        /// **A instalação que ficou com o nome antigo.**
+        ///
+        /// O jogo se chamava Duel Academy e instalava em
+        /// `%LOCALAPPDATA%\DuelAcademy`. Dentro dessa pasta não mora só o jogo:
+        /// moram os `decks/` e o `store/`, que são de quem joga e o instalador
+        /// tem ordem de nunca tocar. Trocar o nome sem mais nada abandonaria
+        /// tudo isso num canto do disco.
+        ///
+        /// Três regras, e as três importam: migra quando só existe a antiga,
+        /// NÃO sobrescreve quando a nova já existe (aí uma instalação nova já
+        /// aconteceu e é ela a verdade), e leva a pasta INTEIRA — inclusive os
+        /// marcadores `.duelacademy/`, que continuam com o nome velho de
+        /// propósito: renomeá-los faria todo cliente instalado rebaixar 28 MB à
+        /// toa.
+        /// </summary>
+        static void InstalacaoComNomeAntigoEMigrada(string dir)
+        {
+            Directory.CreateDirectory(dir);
+            string velha = Path.Combine(dir, "DuelAcademy");
+            string nova = Path.Combine(dir, "ClassicDuels");
+
+            // Uma instalacao "de verdade": o jogo, o deck do jogador e o marcador.
+            Directory.CreateDirectory(Path.Combine(velha, "game", "web"));
+            Directory.CreateDirectory(Path.Combine(velha, "game", "decks", "player"));
+            Directory.CreateDirectory(Path.Combine(velha, "game", ".duelacademy"));
+            File.WriteAllText(Path.Combine(velha, "game", "web", "index.html"), "<html>v1</html>");
+            File.WriteAllText(Path.Combine(velha, "game", "decks", "player", "meu.ydk"), "#main\n5053103\n");
+            File.WriteAllText(Path.Combine(velha, "game", ".duelacademy", "game.version"), "game-abc123");
+
+            Checa(Payload.MigrarInstalacaoAntiga(velha, nova), "migra a instalacao com o nome antigo");
+            Checa(!Directory.Exists(velha), "a pasta antiga deixa de existir (foi movida, nao copiada)");
+            Checa(File.Exists(Path.Combine(nova, "game", "decks", "player", "meu.ydk")),
+                  "o deck do jogador foi junto");
+            Checa(File.ReadAllText(Path.Combine(nova, "game", ".duelacademy", "game.version")) == "game-abc123",
+                  "o marcador do instalador foi junto (senao o cliente rebaixaria 28 MB)");
+
+            // Segunda chamada: nao ha' mais o que migrar.
+            Checa(!Payload.MigrarInstalacaoAntiga(velha, nova), "chamar de novo nao faz nada");
+
+            // E com as DUAS existindo, a nova manda — nada e' sobrescrito.
+            string dir2 = Path.Combine(dir, "convivendo");
+            string velha2 = Path.Combine(dir2, "DuelAcademy");
+            string nova2 = Path.Combine(dir2, "ClassicDuels");
+            Directory.CreateDirectory(Path.Combine(velha2, "game"));
+            Directory.CreateDirectory(Path.Combine(nova2, "game"));
+            File.WriteAllText(Path.Combine(velha2, "game", "quem.txt"), "antiga");
+            File.WriteAllText(Path.Combine(nova2, "game", "quem.txt"), "nova");
+
+            Checa(!Payload.MigrarInstalacaoAntiga(velha2, nova2),
+                  "com a pasta nova ja' existindo, nao migra");
+            Checa(File.ReadAllText(Path.Combine(nova2, "game", "quem.txt")) == "nova",
+                  "e a instalacao nova fica intacta");
+            Checa(Directory.Exists(velha2), "a antiga tambem nao e' apagada (nada se perde)");
+        }
+
+        /// <summary>
         /// A "atualização fantasma" (INSTALADOR-PENDENCIAS.md §1): quem baixava o
-        /// `DuelAcademy.exe` pela primeira vez recebia, no primeiro boot, uma oferta
+        /// `ClassicDuels.exe` pela primeira vez recebia, no primeiro boot, uma oferta
         /// de ~26 MB — do conteúdo que o próprio exe acabara de instalar.
         ///
         /// O exe embute `payload.zip` e o `Payload` o descompacta, mas quem grava
@@ -684,7 +741,7 @@ namespace DuelServer
             // --- pacote 'game': o front, leve e volátil
             var game = new Dictionary<string, string>
             {
-                ["web/index.html"] = "<h1>Duel Academy</h1>",
+                ["web/index.html"] = "<h1>Classic Duels</h1>",
                 ["web/js/deck.js"] = "// regras de construcao",
                 ["ygo-data/src/ygodb.js"] = "// api de consulta",
                 // De propósito na MESMA pasta que o pacote 'cards' usa: é a
@@ -726,8 +783,8 @@ namespace DuelServer
             var m = new Manifest
             {
                 GameVersion = "teste-1",
-                DisplayName = "Duel Academy",
-                Installer = new InstaladorInfo { Version = "0.1.0", Asset = "DuelAcademy.exe" },
+                DisplayName = "Classic Duels",
+                Installer = new InstaladorInfo { Version = "0.1.0", Asset = "ClassicDuels.exe" },
                 ManagedRoots = new List<RaizGerenciada>
                 {
                     new() { Path = "web", RemoveMode = "backup" },

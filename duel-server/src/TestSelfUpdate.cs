@@ -38,8 +38,8 @@ namespace DuelServer
     /// </summary>
     public static class TestSelfUpdate
     {
-        const string ANTIGA = "eu sou a versao ANTIGA do Duel Academy";
-        const string NOVA = "eu sou a versao NOVA do Duel Academy";
+        const string ANTIGA = "eu sou a versao ANTIGA do Classic Duels";
+        const string NOVA = "eu sou a versao NOVA do Classic Duels";
 
         static int _pass, _fail;
 
@@ -191,12 +191,12 @@ namespace DuelServer
         /// <summary>Um "exe" antigo em disco + um Release falso com o "exe" novo.</summary>
         static (string alvo, FonteDeAssets fonte, Manifest m) Cenario(string dir)
         {
-            string alvo = Path.Combine(dir, "DuelAcademy.exe");
+            string alvo = Path.Combine(dir, "ClassicDuels.exe");
             File.WriteAllText(alvo, ANTIGA);
 
             string release = Path.Combine(dir, "release");
             Directory.CreateDirectory(release);
-            string asset = Path.Combine(release, "DuelAcademy.exe");
+            string asset = Path.Combine(release, "ClassicDuels.exe");
             File.WriteAllText(asset, NOVA);
 
             var m = new Manifest
@@ -205,7 +205,7 @@ namespace DuelServer
                 Installer = new InstaladorInfo
                 {
                     Version = "0.2.0",
-                    Asset = "DuelAcademy.exe",
+                    Asset = "ClassicDuels.exe",
                     Sha256 = HashCache.Computar(asset),
                     Size = new FileInfo(asset).Length
                 }

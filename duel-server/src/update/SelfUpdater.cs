@@ -13,7 +13,7 @@ namespace DuelServer.Update
     /// Auto-update do PRÓPRIO executável.
     ///
     /// O Windows não deixa sobrescrever um `.exe` em execução, então a troca é
-    /// feita por fora: baixamos `DuelAcademy.exe.new`, escrevemos um `.bat` no
+    /// feita por fora: baixamos `ClassicDuels.exe.new`, escrevemos um `.bat` no
     /// `%TEMP%` que espera este processo morrer, troca os arquivos e reabre o
     /// jogo. Só então encerramos.
     /// </summary>
@@ -154,7 +154,7 @@ namespace DuelServer.Update
                     UseShellExecute = false
                 });
 
-                Log.Info("executavel novo instalado — reabrindo o Duel Academy");
+                Log.Info("executavel novo instalado — reabrindo o Classic Duels");
                 return true;
             }
             catch (Exception e)

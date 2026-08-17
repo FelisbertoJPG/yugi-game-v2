@@ -31,7 +31,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $root    = Split-Path -Parent $PSScriptRoot
 $saida   = Join-Path $root 'dist\release'
-$stage   = Join-Path $env:TEMP 'duel-academy-release'
+$stage   = Join-Path $env:TEMP 'classic-duels-release'
 
 $owner = 'FelisbertoJPG'
 $repo  = 'yugi-server-'
@@ -42,7 +42,7 @@ function Aviso($t)     { Write-Host "  !    $t" -ForegroundColor Yellow }
 function Falhar($t)    { Write-Host "  ERRO $t" -ForegroundColor Red; exit 1 }
 
 # ---------------------------------------------------------------- tabuleiros
-# Um campo criado NO JOGO grava em %LOCALAPPDATA%\DuelAcademy\game\boards\, nao
+# Um campo criado NO JOGO grava em %LOCALAPPDATA%\ClassicDuels\game\boards\, nao
 # no repositorio - so' o banco ve os dois mundos. Sem isto, um tabuleiro feito
 # no .exe chegava nos outros jogadores (o front le `tabuleiros`) mas nunca
 # entrava no game.zip nem no git: instalacao nova e offline ficavam sem ele.
@@ -115,7 +115,7 @@ function SincronizarTabuleiros {
 }
 
 # Mesma historia dos tabuleiros: um deck de adversario montado DENTRO do jogo
-# grava em %LOCALAPPDATA%\DuelAcademy\game\decks\npc\, nao no repositorio. Sem
+# grava em %LOCALAPPDATA%\ClassicDuels\game\decks\npc\, nao no repositorio. Sem
 # descer o banco antes de empacotar, o deck do Pegasus (por exemplo) chegava aos
 # jogadores pelo `decks_npc` mas nunca entrava no git nem numa instalacao nova.
 #
@@ -209,7 +209,7 @@ function Copiar($de, $para) {
   Copy-Item $de $para -Recurse -Force
 }
 
-Write-Host "`n  ####  DUEL ACADEMY - PUBLICAR ATUALIZACAO  ####" -ForegroundColor Yellow
+Write-Host "`n  ####  CLASSIC DUELS - PUBLICAR ATUALIZACAO  ####" -ForegroundColor Yellow
 if (-not $Publish) { Aviso 'DRY-RUN (nada sera publicado). Use -Publish para subir.' }
 
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
@@ -408,18 +408,18 @@ function PayloadInfo($id, $zip, $roots) {
   }
 }
 
-$exe = Join-Path $root 'dist\DuelAcademy.exe'
+$exe = Join-Path $root 'dist\ClassicDuels.exe'
 $instalador = $null
 if ($ComExe) {
-  if (-not (Test-Path $exe)) { Falhar 'nao achei dist\DuelAcademy.exe (rode npm run pack antes de -ComExe)' }
+  if (-not (Test-Path $exe)) { Falhar 'nao achei dist\ClassicDuels.exe (rode npm run pack antes de -ComExe)' }
   $versao = Select-String -Path (Join-Path $root 'duel-server\src\update\BuildConfig.cs') `
                           -Pattern 'InstallerVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
   if (-not $versao) { Falhar 'nao consegui ler a InstallerVersion do BuildConfig.cs' }
   $v = $versao.Matches[0].Groups[1].Value
-  Copy-Item $exe (Join-Path $saida 'DuelAcademy.exe') -Force
+  Copy-Item $exe (Join-Path $saida 'ClassicDuels.exe') -Force
   $instalador = [ordered]@{
     version = $v
-    asset   = 'DuelAcademy.exe'
+    asset   = 'ClassicDuels.exe'
     sha256  = Sha256 $exe
     size    = (Get-Item $exe).Length
   }
@@ -427,14 +427,14 @@ if ($ComExe) {
 }
 
 $manifesto = [ordered]@{
-  gameVersion  = "duel-academy-$(Get-Date -Format 'yyyyMMdd-HHmm')"
-  displayName  = 'Duel Academy'
+  gameVersion  = "classic-duels-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+  displayName  = 'Classic Duels'
   installer    = $instalador
   # `web/` foi o primeiro a sair de "keep", como o plano previa: e' a raiz que o
   # inventario do pacote 'game' cobre inteira, entao "orfao" ali quer dizer
   # mesmo "sobra de uma versao anterior" - e um .js velho que fica no disco para
   # sempre e' justamente o tipo de coisa que carrega em silencio e quebra a
-  # pagina. "backup" nao apaga nada: move para %LOCALAPPDATA%\DuelAcademy\backups
+  # pagina. "backup" nao apaga nada: move para %LOCALAPPDATA%\ClassicDuels\backups
   # preservando o caminho, e o botao "voltar para a versao anterior" da tela de
   # atualizacao devolve tudo.
   #

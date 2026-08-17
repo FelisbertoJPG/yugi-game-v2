@@ -10,7 +10,7 @@ Estado de quem chega agora: a cadeia funciona ponta a ponta — publicar → o c
 `--test-update` 35/35, `--test-offline` 16/16, `--test-selfupdate` 15/15,
 `--test-update-duelo` 13/13, `--test-release` 11/11, `--test-remote` 10/10 (a última é a
 única que precisa de rede). E a cadeia foi exercitada de ponta a ponta: `release:build` →
-`release:test` → `pack` → rodar o `dist\DuelAcademy.exe` empacotado, que instalou os dois
+`release:test` → `pack` → rodar o `dist\ClassicDuels.exe` empacotado, que instalou os dois
 pacotes **com marcador** (`pacote 'game' embutido: 54 arquivos — game-e3ac821fb672`).
 
 Ordenado por **impacto no jogador**, não por esforço.
@@ -163,7 +163,7 @@ repositório de verdade (`FelisbertoJPG/yugi-game-v2`) já está inicializado na
 O histórico existe; só não é aqui que ele mora.
 
 > O texto original descrevia ainda outra máquina (`C:\Users\Mestre\…`, com uma cópia em
-> `duel academy v4\yugi-game-v2` 31 commits atrás). Nada disso existe aqui — desconsidere.
+> `classic duels v4\yugi-game-v2` 31 commits atrás). Nada disso existe aqui — desconsidere.
 
 **Consequência prática, que continua valendo:** o que for editado NESTA pasta não está
 versionado enquanto não voltar para a cópia com `.git`. Não é um bloqueio do instalador, é

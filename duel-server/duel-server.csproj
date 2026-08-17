@@ -19,6 +19,10 @@
          codigo, outra plataforma. -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+  
+    <!-- O icone do jogo. Gerado em codigo por tools/gerar-icone.mjs — o desenho
+         e o codigo sao a mesma coisa, nao existe binario sem fonte. -->
+    <ApplicationIcon>$(MSBuildThisFileDirectory)../assets/icone.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Distribuicao: `npm run pack` gera duel-server/payload.zip (web, dados,

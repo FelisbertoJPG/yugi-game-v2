@@ -53,7 +53,7 @@ As sete ferramentas (`iso`, `ehp`, `gim`, `ehf`, `timing`, `folha`, `tudo`) são
 Node puro, zero dependência, no mesmo espírito do resto do projeto.
 
 > **Os assets são da Konami.** Extrair para estudar e referenciar é uma coisa;
-> embutir no `dist/DuelAcademy.exe` é outra, e é uma decisão que ninguém tomou —
+> embutir no `dist/ClassicDuels.exe` é outra, e é uma decisão que ninguém tomou —
 > note que o jogo já busca arte de carta do ygoprodeck em runtime, que é situação
 > diferente de redistribuir num executável. Por isso nenhum script escreve dentro
 > do repo, `tudo.mjs` recusa rodar sem destino explícito, e `tagforce-extraido/`

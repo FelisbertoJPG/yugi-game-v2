@@ -146,7 +146,7 @@ export function travadaPorBooster(id, boosters) {
 }
 
 /** `{ [id]: quantidade }` -> texto .ydk (só main; estrutural não usa extra/side hoje). */
-export function paraYdk(quantidades, { criadoPor = 'duel academy' } = {}) {
+export function paraYdk(quantidades, { criadoPor = 'classic duels' } = {}) {
   const linhas = [`#created by ${criadoPor}`, '#main'];
   for (const [id, n] of Object.entries(quantidades))
     for (let i = 0; i < n; i++) linhas.push(String(id));

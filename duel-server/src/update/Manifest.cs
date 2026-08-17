@@ -13,7 +13,7 @@ namespace DuelServer.Update
     /// e sobe só os assets que mudaram.
     ///
     /// Diferença proposital em relação ao molde original (MECANISMO-INSTALADOR.md §5):
-    /// lá havia UM `payload`; aqui é uma LISTA. O conteúdo do Duel Academy tem dois
+    /// lá havia UM `payload`; aqui é uma LISTA. O conteúdo do Classic Duels tem dois
     /// ritmos muito diferentes — `web/` muda quase todo dia e pesa ~3 MB, enquanto
     /// `cards.cdb` + os ~21 mil scripts Lua pesam ~47 MB e só mudam quando roda o
     /// `npm run data:build`. Com um zip só, um ajuste de 1 KB no front custaria 50 MB
@@ -22,7 +22,7 @@ namespace DuelServer.Update
     public sealed class Manifest
     {
         [JsonPropertyName("gameVersion")] public string GameVersion { get; set; } = "";
-        [JsonPropertyName("displayName")] public string DisplayName { get; set; } = "Duel Academy";
+        [JsonPropertyName("displayName")] public string DisplayName { get; set; } = "Classic Duels";
         [JsonPropertyName("installer")] public InstaladorInfo Installer { get; set; }
         [JsonPropertyName("managedRoots")] public List<RaizGerenciada> ManagedRoots { get; set; } = new();
         [JsonPropertyName("files")] public List<ArquivoManifesto> Files { get; set; } = new();

@@ -105,9 +105,16 @@ namespace DuelServer.Update
         // Compra limpa vem antes de tudo; compra com descarte so' quando nao ha'
         // jogada ou quando encher o cemiterio e' o plano (corpo grande na mao +
         // reanimacao).
-        public const string InstallerVersion = "0.10.0";
+        //
+        // 0.11.0 (17/08/2026): o jogo virou CLASSIC DUELS. O exe passou a se
+        // chamar ClassicDuels.exe e a instalacao mudou de
+        // %LOCALAPPDATA%\DuelAcademy para %LOCALAPPDATA%\ClassicDuels — com
+        // migracao, porque dentro dessa pasta moram os decks e o store de quem
+        // joga. Quem ja' tem o jogo instalado precisa DESTE exe para a pasta ser
+        // movida: um exe antigo continuaria escrevendo no caminho velho.
+        public const string InstallerVersion = "0.11.0";
 
-        public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
+        public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 
         const string RecursoToken = "token.txt";
 

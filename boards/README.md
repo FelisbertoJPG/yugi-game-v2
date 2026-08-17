@@ -56,7 +56,7 @@ boards/
 ## Como grava
 
 Pelo editor de campo, com o servidor de desenvolvimento no ar (`npm run dev`
-ou o `duel-academy.exe`): salvar escreve o arquivo aqui direto, pelo endpoint
+ou o `classic-duels.exe`): salvar escreve o arquivo aqui direto, pelo endpoint
 `/__boards/save` — só aceita conexões de localhost e só escreve `.json`
 dentro desta pasta. Sem servidor no ar, o editor baixa o arquivo para você
 colocar aqui na mão.

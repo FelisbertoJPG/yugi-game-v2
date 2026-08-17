@@ -10,7 +10,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
-    <AssemblyName>duel-academy-stop</AssemblyName>
+    <AssemblyName>classic-duels-stop</AssemblyName>
     <RootNamespace>Launcher</RootNamespace>
 
     <PlatformTarget>x64</PlatformTarget>
@@ -23,6 +23,10 @@
 
     <!-- Nao usar o glob padrao: o fonte mora na pasta de cima. -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  
+    <!-- O icone do jogo. Gerado em codigo por tools/gerar-icone.mjs — o desenho
+         e o codigo sao a mesma coisa, nao existe binario sem fonte. -->
+    <ApplicationIcon>$(MSBuildThisFileDirectory)../../assets/icone.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

@@ -30,8 +30,10 @@ npm run duel:build           # para o servidor e compila o duel-server
 npm run duel:test            # para, compila e roda --test-npc + --test-summons
 npm run stop                 # encerra front e duel-server de forma limpa
 
-npm run launcher:build       # gera duel-academy.exe / duel-academy-stop.exe (SDK .NET 8)
-npm run pack                 # gera dist/DuelAcademy.exe (jogo inteiro num arquivo)
+node tools/gerar-icone.mjs   # redesenha assets/icone.ico + web/img/icone.png
+                             # (o ícone é CÓDIGO, não um binário sem fonte)
+npm run launcher:build       # gera classic-duels.exe / classic-duels-stop.exe (SDK .NET 8)
+npm run pack                 # gera dist/ClassicDuels.exe (jogo inteiro num arquivo)
                              # EXIGE um `npm run release:build` antes — o payload embutido
                              # é feito dos MESMOS game.zip/cards.zip do Release, senão a
                              # instalação nova oferece uma atualização do que ela já tem
@@ -166,9 +168,9 @@ mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
 
 > **Mexeu em C#? O Release comum NÃO leva a sua mudança.** `game.zip` é front +
 > índices; `cards.zip` é banco + Lua. O `duel-server` (o motor, o `NpcBrain`, o
-> `InteractiveDuel`) viaja **só dentro do `DuelAcademy.exe`**. Então a sequência
+> `InteractiveDuel`) viaja **só dentro do `ClassicDuels.exe`**. Então a sequência
 > depois de qualquer mudança no C# é `npm run release:build` → `npm run pack` →
-> `npm run release:publish -- -ComExe`; sem o `pack`, o `dist/DuelAcademy.exe`
+> `npm run release:publish -- -ComExe`; sem o `pack`, o `dist/ClassicDuels.exe`
 > que você distribui continua sendo o de antes. Foi assim que a varredura de
 > ATK/DEF (magia de campo) saiu publicada no front e ausente no motor: na tela do
 > jogador o Umi seguia sem efeito nenhum, e os testes todos passavam aqui.
@@ -447,8 +449,8 @@ em JSON, índice enxuto de 2 MB para o browser, 12.702 scripts Lua. `src/ygodb.j
 > manda. Desenhe o que ele ofereceu.
 
 O `duel-server` também sabe servir o front sozinho (`StaticServer.cs`,
-modo `--app`), que é como o `dist/DuelAcademy.exe` roda tudo num processo só,
-com o payload embutido instalado em `%LOCALAPPDATA%\DuelAcademy\game`.
+modo `--app`), que é como o `dist/ClassicDuels.exe` roda tudo num processo só,
+com o payload embutido instalado em `%LOCALAPPDATA%\ClassicDuels\game`.
 
 **`duel-server/src/update/`** — o instalador/auto-updater. Um manifesto no
 GitHub descreve o estado desejado; o cliente compara com o disco e baixa só a
@@ -553,6 +555,23 @@ nenhuma conta nova herda esses dados automaticamente.
 
 ## Armadilhas conhecidas
 
+- **O jogo se chamava Duel Academy.** Virou **Classic Duels** em 17/08/2026, e
+  três nomes NÃO acompanharam a troca, cada um por um motivo:
+  - a pasta **`duel_academy/`** é o protótipo Unity e a raiz do
+    `StreamingAssets` (o `cards.cdb` e os 21 mil `.lua` saem dali, via
+    `YGODEMO_PATH`). É caminho de arquivo, não nome de produto;
+  - existe uma **carta de verdade chamada "Duel Academy"** (id 5833312) no
+    banco. Nunca rode um replace em `ygo-data/`;
+  - a pasta de marcadores do instalador (`UpdateEngine.PastaMarcadores`)
+    continua **`.duelacademy`**. Ela é invisível e mora DENTRO da instalação, que
+    é movida inteira: renomeá-la faria todo cliente instalado concluir que não
+    tem nada e rebaixar 28 MB à toa.
+
+  A instalação mudou de `%LOCALAPPDATA%\DuelAcademy` para `…\ClassicDuels`, com
+  migração no primeiro boot (`Payload.MigrarInstalacaoAntiga`) — dentro dela
+  moram os `decks/` e o `store/`, que são de quem joga. Nunca sobrescreve e
+  nunca apaga; falhar ali só significa instalar do zero. Coberto por
+  `--test-update`.
 - **Caminhos são absolutos** (`/web/js/...`) e o dev-server redireciona `/` com
   302 de verdade. Servir o HTML direto em `/` faz os módulos darem 404 e a página
   morre em silêncio. Não troque por relativos.

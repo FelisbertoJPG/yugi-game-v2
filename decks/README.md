@@ -52,7 +52,7 @@ qualquer parser de `.ydk` ignora — o arquivo continua válido no YGOPro/EDOPro
 ## Como gravar
 
 Pelo Deck Builder, com o servidor de desenvolvimento no ar (`npm run dev` ou o
-`duel-academy.exe`): salvar escreve o arquivo aqui direto. A gravação é feita
+`classic-duels.exe`): salvar escreve o arquivo aqui direto. A gravação é feita
 pelo endpoint `/__decks/save`, que só aceita conexões de localhost e só escreve
 `.ydk` dentro desta pasta.
 

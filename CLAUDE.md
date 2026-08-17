@@ -34,6 +34,8 @@ node tools/gerar-icone.mjs   # redesenha assets/icone.ico + web/img/icone.png
                              # (o ícone é CÓDIGO, não um binário sem fonte)
 npm run launcher:build       # gera classic-duels.exe / classic-duels-stop.exe (SDK .NET 8)
 npm run pack                 # gera dist/ClassicDuels.exe (jogo inteiro num arquivo)
+npm run atalho               # poe "Classic Duels" na area de trabalho apontando
+                             # para dist/ClassicDuels.exe (precisa do pack antes)
                              # EXIGE um `npm run release:build` antes — o payload embutido
                              # é feito dos MESMOS game.zip/cards.zip do Release, senão a
                              # instalação nova oferece uma atualização do que ela já tem

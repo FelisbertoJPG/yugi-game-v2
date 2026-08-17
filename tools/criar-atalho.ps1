@@ -37,12 +37,21 @@ $atalho.TargetPath = $exe
 # diretorio de trabalho, ele nasce onde o Windows resolver.
 $atalho.WorkingDirectory = Split-Path -Parent $exe
 $atalho.Description = 'Classic Duels'
-# O icone ja' esta' dentro do exe (ApplicationIcon no .csproj); apontar para ele
-# mantem o atalho certo mesmo se assets\icone.ico sair do lugar.
-$atalho.IconLocation = "$exe,0"
+# O icone sai de assets\icone.ico, e nao de dentro do exe. Os dois tem o mesmo
+# desenho; o que muda e' o CACHE. O Windows guarda icone por caminho, e o exe
+# fica sempre no mesmo lugar — trocar a arte deixava a area de trabalho
+# mostrando a anterior ate' alguem limpar o cache na mao.
+$ico = Join-Path $root 'assets\icone.ico'
+$atalho.IconLocation = if (Test-Path $ico) { "$ico,0" } else { "$exe,0" }
 $atalho.Save()
 
 Ok "atalho criado: $lnk"
 Ok "aponta para:   $exe"
-Write-Host "`n  Se o icone continuar o antigo, e' o cache do Windows:"
-Write-Host "  ie4uinit.exe -show   (ou so' reiniciar o Explorer).`n"
+
+# E a limpeza do cache, que e' o outro lado do mesmo problema: sem isto, o
+# icone trocado so' aparece quando o Windows resolver.
+& ie4uinit.exe -ClearIconCache 2>$null
+& ie4uinit.exe -show 2>$null
+Ok "cache de icones do Windows limpo"
+Write-Host "`n  Se AINDA aparecer o icone antigo, so' o Explorer segura o cache:"
+Write-Host "  reinicie o explorer.exe (Gerenciador de Tarefas > Explorer > Reiniciar).`n"

@@ -970,7 +970,33 @@ function espiar(el, code) {
  * duelo legível — e é de propósito que o número esteja aqui em cima, sozinho:
  * é o botão de volume do ritmo do duelo.
  */
-const AVISO_MS = { turno: 1500, fase: 1100, carta: 1200 };
+const AVISO_MS = {
+  turno: 1100,   // o marco maior: mudou de dono a vez
+  fase: 600,     // Main, Battle, End — as fases em que se decide alguma coisa
+  rapida: 280,   // Draw, Standby e os passos de batalha (ver FASES_RAPIDAS)
+  carta: 1000,   // a carta ativada, grande no meio da tela
+};
+
+/**
+ * As fases que só PASSAM: nelas não há decisão a tomar e o motor nem oferece
+ * jogada. Elas aparecem no aviso para o duelo ser legível — não para ser
+ * esperado.
+ *
+ * A soma é o que importa: uma virada de turno emite turno → draw → standby →
+ * main de uma vez, e com todas valendo o mesmo isso dava quase 5 segundos de
+ * espera por turno. Com o Draw e o Standby em 280 ms, a mesma sequência cabe em
+ * ~2,3 s e ainda dá para ler cada uma.
+ *
+ * Os passos DENTRO da batalha (Battle Step, Damage Step) entram pelo mesmo
+ * motivo, e pesam ainda mais: eles se repetem a cada ataque.
+ */
+const FASES_RAPIDAS = new Set([
+  0x1,   // Draw Phase
+  0x2,   // Standby Phase
+  0x10,  // Battle Step
+  0x20,  // Damage Step
+  0x40,  // Damage Step (o motor usa os dois bits)
+]);
 
 // Uma visão de cada vez, na ordem de chegada. A regra e o porquê moram em
 // `web/js/filavisoes.js` (com testes em Node — o único jeito de provar
@@ -988,13 +1014,13 @@ const aplicarEmOrdem = (j) => filaVisoes.enfileirar(j);
  * ignorar a segunda chamada. Devolve a promessa que só resolve quando o aviso
  * saiu da tela.
  */
-function avisoFase(texto, { turno = false } = {}) {
+function avisoFase(texto, { turno = false, rapida = false } = {}) {
   // Com visão ESPERANDO na fila, a pausa dramática deixa de ser ritmo e vira
   // atraso: quem espera não é mais o jogador olhando a tela, é o duelo inteiro
   // (no multiplayer, o outro já jogou e a visão dele está parada na fila). O
   // aviso continua aparecendo — só não segura mais o laço.
   const segura = !filaVisoes.esperando;
-  const ms = turno ? AVISO_MS.turno : AVISO_MS.fase;
+  const ms = turno ? AVISO_MS.turno : rapida ? AVISO_MS.rapida : AVISO_MS.fase;
   const box = $('phase-toast');
   const s = document.createElement('span');
   if (turno) s.className = 'turno';
@@ -1743,8 +1769,11 @@ async function handle(ev) {
       phase = ev.phase;
       // O motor emite as fases iniciais em rajada; só anunciamos mudanças reais.
       // O `await` é o que faz o duelo respirar: até o aviso sair, o laço de
-      // eventos não anda e o jogador não consegue clicar em nada.
-      if (antes !== phase) await avisoFase(PHASE_NOME[phase] ?? `Fase ${phase}`);
+      // eventos não anda e o jogador não consegue clicar em nada. Quanto ele
+      // segura depende da fase — ver FASES_RAPIDAS.
+      if (antes !== phase)
+        await avisoFase(PHASE_NOME[phase] ?? `Fase ${phase}`,
+                        { rapida: FASES_RAPIDAS.has(phase) });
       break;
     }
     // Uma carta foi ATIVADA (qualquer uma: magia da mão, armadilha baixada,

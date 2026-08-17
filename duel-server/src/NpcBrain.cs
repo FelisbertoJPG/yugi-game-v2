@@ -37,6 +37,16 @@ namespace DuelServer
         // no inseto MAIS FRACO (não no melhor atacante — o ATK dele vira 0
         // enquanto durar), e depois Invocar Especialmente cada mariposa assim
         // que o motor a oferecer em `spSummonable`.
+        // Pacote Para & Dox (o Labirinto). Deck de corpos ENORMES que o jogo
+        // normal não deixa invocar — Nv7 aos montes e o Gate Guardian de 3750,
+        // que nem invocação normal tem. Todas estas cartas são atalhos: pagam um
+        // corpo qualquer e trazem um grande. Sem elas o NPC ficava com a mão
+        // cheia de Nv7 e um muro de 0 de ATK em campo.
+        const uint TRIBUTE_DOLL = 2903036;       // tributa 1 → Invoca Especialmente 1 Nv7 da mão
+        const uint MONSTER_GATE = 43040603;      // tributa 1 → cava o deck até um monstro
+        const uint METAMORPHOSIS = 46411259;     // tributa 1 → fusão de MESMO nível do Extra
+        const uint MAGICAL_LABYRINTH = 64389297; // equipa no muro → depois vira Wall Shadow
+
         const uint COCOON_OF_EVOLUTION = 40240595;
         const uint INSECT_ARMOR_LASER = 3492538;   // +700 ATK — o alvo default (maior ATK) já serve
         const uint INSECT_IMITATION = 96965364;    // tributa 1 inseto fraco, traz 1 mais forte do deck
@@ -995,6 +1005,94 @@ namespace DuelServer
             if (mariposaSp.Ok)
                 return new Play("spsummon", mariposaSp.Act.index,
                     $"casulo evoluiu: Invocacao Especial de {mariposaSp.Act.code} (ATK {mariposaSp.St.AtkValue})");
+
+            // ---------------- pacote Para & Dox (o Labirinto) ----------------
+            //
+            // O deck dos Irmãos Paradoxo é feito de corpos ENORMES que o jogo
+            // normal não deixa invocar: Nv7 aos montes e o Gate Guardian de
+            // 3750, que nem invocação normal tem. Ele vive de atalhos — tributa
+            // um corpo qualquer e traz um grande de graça. Sem estas regras o
+            // NPC ficava com a mão cheia de Nv7 e um Labyrinth Wall em campo.
+
+            // 5.91 GATE GUARDIAN e qualquer OUTRO corpo grande oferecido por
+            //      Invocação Especial. O motor só põe em `spSummonable` o que já
+            //      pode ser pago (o Gate Guardian exige Sanga + Kazejin + Suijin
+            //      em campo, e é o Lua dele que confere) — então aqui não há
+            //      condição a checar, só a escolha de qual.
+            //
+            //      A regra é genérica de propósito: qualquer deck que ganhe uma
+            //      Invocação Especial passa a usá-la, em vez de precisar de uma
+            //      linha por carta como o Toon e as mariposas acima. Elas
+            //      continuam antes porque são ESCOLHAS de combo (o Toon mais
+            //      forte, a mariposa que evoluiu), não "o maior da lista".
+            var corpoSp = Monstros(q.spSummonable)
+                .Where(c => c.St.AtkValue > MaiorAtkEmCampo(me))
+                .OrderByDescending(c => c.St.AtkValue)
+                .FirstOrDefault();
+            if (corpoSp.Ok)
+                return new Play("spsummon", corpoSp.Act.index,
+                    $"Invocacao Especial de {corpoSp.Act.code} (ATK {corpoSp.St.AtkValue}) — " +
+                    "o motor ja' confirmou que o custo esta' pago");
+
+            // 5.92 TRIBUTE DOLL: tributa 1 monstro e Invoca Especialmente um Nv7
+            //      da MÃO. É a porta de entrada dos guardiões (Sanga, Kazejin,
+            //      Suijin) e de todo Nv7 do deck — sem ela eles ficariam presos
+            //      na mão esperando dois tributos que nunca chegam.
+            //
+            //      A conferência da mão é a mesma cautela do Ancient Rules: o Lua
+            //      já exige o alvo, mas quando dá para saber, se sabe — e o log
+            //      explica a recusa em vez de deixar a carta parada sem motivo.
+            if (Ativavel(q, TRIBUTE_DOLL))
+            {
+                var nv7 = _handOf(me).Where(c => _cards.Stats(c).IsMonster && _cards.Stats(c).Level == 7)
+                    .OrderByDescending(c => _cards.Stats(c).AtkValue).FirstOrDefault();
+                if (nv7 != 0)
+                    return new Play("activate", IdxAtivavel(q, TRIBUTE_DOLL),
+                        $"Tribute Doll: troca um corpo qualquer pelo Nv7 {nv7} " +
+                        $"(ATK {_cards.Stats(nv7).AtkValue}) da mao");
+                _log("guarda Tribute Doll: nenhum monstro Nv7 na mao para trazer");
+            }
+
+            // 5.93 METAMORPHOSIS: tributa 1 monstro e traz do Extra uma FUSÃO do
+            //      MESMO nível. No deck do labirinto é o Labyrinth Tank (2400)
+            //      saindo de um Nv7 qualquer — e é a única forma dele aparecer,
+            //      porque os materiais da receita nem estão no deck.
+            //
+            //      A conta de "vale a pena" NÃO é feita aqui, e é de propósito:
+            //      o cérebro não enxerga o Extra Deck (nenhum acessador dá isso,
+            //      e inventar um só para esta carta seria uma via de mão única).
+            //      O que dá para saber com o que se tem: o motor só oferece a
+            //      carta quando existe fusão de nível compatível para trazer, e
+            //      quem escolhe o tributo é o `DecideSelect`, que sacrifica o
+            //      MENOR ATK. Falta só não ficar de campo vazio — daí o 2+.
+            if (Ativavel(q, METAMORPHOSIS))
+            {
+                if (QtdMonstros(me) >= 2)
+                    return new Play("activate", IdxAtivavel(q, METAMORPHOSIS),
+                        "Metamorphosis: troca o corpo mais fraco por uma fusao do Extra");
+                _log("guarda Metamorphosis: tenho um corpo so' em campo — tributa-lo deixaria o campo vazio");
+            }
+
+            // 5.94 MONSTER GATE: tributa 1 e cava o deck até achar um monstro
+            //      invocável, que entra de graça. Num deck cheio de Nv7 a cava
+            //      quase sempre paga o tributo — e o custo sai do corpo mais
+            //      fraco (quem escolhe é o DecideSelect).
+            //
+            //      Depois do Metamorphosis de propósito: os dois gastam o mesmo
+            //      corpo, e o Metamorphosis diz exatamente o que traz, enquanto
+            //      este é uma aposta na média do deck. O 2+ é a mesma trava:
+            //      cavar é bom, ficar de campo vazio para cavar não é.
+            if (Ativavel(q, MONSTER_GATE) && QtdMonstros(me) >= 2)
+                return new Play("activate", IdxAtivavel(q, MONSTER_GATE),
+                    "Monster Gate: tributa o corpo mais fraco e cava o deck por um monstro");
+
+            // 5.95 MAGICAL LABYRINTH: equipa no Labyrinth Wall e, depois,
+            //      tributa o muro para trazer o Wall Shadow (1600/3000) do DECK.
+            //      O muro é 0/3000 — trocar por um 1600/3000 é só ganho, e é o
+            //      combo assinatura da dupla.
+            if (Ativavel(q, MAGICAL_LABYRINTH))
+                return new Play("activate", IdxAtivavel(q, MAGICAL_LABYRINTH),
+                    "Magical Labyrinth: equipa o muro (e depois troca por Wall Shadow 1600/3000)");
 
             // 6. Beatdown: monstros grandes (sacrificando os fracos) ou beater Nv4.
             //    O filtro `TributoCompensa` impede o NPC de tributar um corpo

@@ -62,7 +62,14 @@ namespace DuelServer.Update
         // não traz nenhuma, que é justamente quando o campo já está no estado
         // final. O jogador equipava e o número só subia ao ir para a Battle
         // Phase. É decisão do motor: sem trocar o exe, a tela continua atrasada.
-        public const string InstallerVersion = "0.6.0";
+        //
+        // 0.7.0 (17/08/2026): o NpcBrain aprendeu o pacote Para & Dox (Tribute
+        // Doll, Monster Gate, Metamorphosis, Magical Labyrinth) e ganhou a
+        // Invocação Especial GENÉRICA — a que traz o Gate Guardian de 3750 e
+        // qualquer outro corpo que o motor ofereça. É cérebro, viaja só no exe:
+        // com o motor velho, o adversário do labirinto entra em campo com a mão
+        // cheia de Nv7 que ele não sabe invocar.
+        public const string InstallerVersion = "0.7.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

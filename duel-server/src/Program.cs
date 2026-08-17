@@ -317,6 +317,9 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-pegasus") >= 0)
                 return TestPegasus.Run(streamingAssets);
 
+            if (Array.IndexOf(args, "--test-paradox") >= 0)
+                return TestParadox.Run(streamingAssets);
+
             // Teste de aceitacao das cartas que os BOOSTERS ja vendiam e a
             // Lista 1 nao conhecia (De-Spell, Ritual Cage, Birthright, Swing of
             // Memories): o efeito roda no motor E o front sabe desenhar toda

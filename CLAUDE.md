@@ -113,6 +113,15 @@ Especialmente da mão — o NPC ativa as duas sozinho, na ordem que fecha o comb
 no MESMO turno, escolhe sempre o de maior ATK entre os oferecidos e guarda as
 Regras quando não há alvo Nv5+ na mão; o duelo real prova que o corpo chega ao
 campo, e que quem chega é o Ryu-Ran de 2200, não o Parrot Dragon de 2000),
+`--test-paradox` (o pacote **Para & Dox**, o Labirinto: um deck de corpos que o
+jogo normal não deixa invocar — Nv7 aos montes e o Gate Guardian de 3750, que
+nem invocação normal tem —, então ele vive de ATALHOS. Prova as quatro regras
+novas com a trava de cada uma: Tribute Doll só com um Nv7 na mão, Metamorphosis
+e Monster Gate só com 2+ corpos em campo (tributar o único deixaria o campo
+vazio), Magical Labyrinth equipando o muro, e a Invocação Especial GENÉRICA —
+que pega o Gate Guardian, mas recusa trocar um corpo em campo por um menor. No
+duelo real, os QUATRO atalhos disparam sozinhos com a mão que o embaralhamento
+dá),
 `--test-cartas-booster` (as cartas que os BOOSTERS já vendiam e a Lista 1 não
 conhecia — De-Spell, Ritual Cage, Birthright e Swing of Memories: os três duelos
 são dirigidos pelo jogador HUMANO, pelo mesmo `Respond` de `web/duel.html`, e

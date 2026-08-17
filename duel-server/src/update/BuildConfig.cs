@@ -112,7 +112,12 @@ namespace DuelServer.Update
         // migracao, porque dentro dessa pasta moram os decks e o store de quem
         // joga. Quem ja' tem o jogo instalado precisa DESTE exe para a pasta ser
         // movida: um exe antigo continuaria escrevendo no caminho velho.
-        public const string InstallerVersion = "0.11.0";
+        //
+        // 0.11.1 (17/08/2026): o icone do jogo virou a arte pixel-art de verdade
+        // (assets/icone-fonte.png), no lugar do desenho geometrico. E' recurso
+        // DENTRO do executavel — sem trocar o exe, quem ja' tem o jogo continua
+        // vendo o icone antigo na barra de tarefas e no atalho.
+        public const string InstallerVersion = "0.11.1";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 

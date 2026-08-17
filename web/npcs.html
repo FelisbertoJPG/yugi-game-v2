@@ -151,7 +151,7 @@
       deck). Quem sorteia é o servidor, no ato da vitória.
     </div>
     <label>Pool de cartas (o sorteio acontece aqui dentro)</label>
-    <input type="text" id="new-pool-busca" placeholder="digite parte do nome e clique para incluir">
+    <input type="text" id="new-pool-busca" placeholder="parte do nome — ou o ID da carta — e clique para incluir">
     <div id="new-pool-achados" class="achados"></div>
     <div id="new-pool" class="pool"></div>
 
@@ -413,7 +413,35 @@ function renderPool() {
 function buscarCartas() {
   const termo = $('new-pool-busca').value.trim();
   const achados = $('new-pool-achados');
-  if (!dbIndice || termo.length < 2) { achados.replaceChildren(); return; }
+
+  // Digitar o ID da carta funciona sem o índice. Existe porque a busca por nome
+  // depende de um arquivo de 2 MB que pode não ter carregado — e aí, sem esta
+  // saída, o pool ficaria impossível de montar sem nada explicar.
+  if (/^\d{4,10}$/.test(termo)) {
+    achados.replaceChildren(Object.assign(document.createElement('button'), {
+      textContent: `incluir #${termo}` + (dbIndice?.brief(Number(termo)) ? ` — ${nomeDaCarta(Number(termo))}` : ''),
+      onclick: () => {
+        const id = Number(termo);
+        if (!poolEditado.includes(id)) poolEditado.push(id);
+        $('new-pool-busca').value = '';
+        achados.replaceChildren();
+        renderPool();
+      },
+    }));
+    return;
+  }
+
+  // O silêncio é o inimigo aqui: sem o índice, digitar um nome não produzia
+  // NADA e não havia como descobrir por quê.
+  if (!dbIndice) {
+    achados.replaceChildren(Object.assign(document.createElement('span'), {
+      className: 'vazio',
+      style: 'font-size:10px; color:var(--red)',
+      textContent: termo.length < 2 ? '' : 'o índice de cartas não carregou — busque pelo ID da carta',
+    }));
+    return;
+  }
+  if (termo.length < 2) { achados.replaceChildren(); return; }
   // 12 é o que cabe sem virar rolagem dentro do modal. Quem não achou refina o
   // termo — é mais rápido que percorrer 13.728 cartas.
   const lista = dbIndice.search(termo, { limit: 12 });

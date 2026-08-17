@@ -205,7 +205,11 @@ export async function encerrarDuelo(dueloId, resultado) {
   });
   if (!r.ok) return { ok: false, error: r.error };
   const d = r.dados ?? {};
+  // `cartas` é a lista sorteada no pool do NPC (migration 0027); `carta` é o
+  // campo antigo, de uma carta só, mantido para um servidor que ainda não tenha
+  // essa migration — quem lê decide qual usar.
   return { ok: true, resultado: d.resultado, premio: d.premio?.premio ?? null,
+           cartas: Array.isArray(d.premio?.cartas) ? d.premio.cartas : null,
            carta: d.premio?.carta ?? null, recusado: d.premio_recusado ?? null };
 }
 

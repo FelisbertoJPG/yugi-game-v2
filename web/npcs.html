@@ -72,6 +72,25 @@
   }
   .modal input:disabled { opacity: .5; cursor: not-allowed; }
   .modal .err { color: var(--red); font-size: 11px; min-height: 14px; margin-top: 8px; }
+
+  /* ---------- pool de drop ---------- */
+  /* A busca lista poucos resultados de propósito: o índice tem 13.728 cartas e
+     rolar uma lista dessas dentro de um modal não é escolher, é procurar. */
+  .achados { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .achados button {
+    font-size: 10px; padding: 2px 6px; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .pool { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; max-height: 190px; overflow: auto; }
+  .pool .chip {
+    display: flex; align-items: center; gap: 5px; font-size: 10px;
+    background: var(--panel2, #232b41); border: 1px solid var(--line);
+    border-radius: 3px; padding: 2px 4px 2px 2px; max-width: 100%;
+  }
+  .pool .chip img { width: 22px; height: 32px; object-fit: cover; display: block; }
+  .pool .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+  .pool .chip button { font-size: 10px; padding: 0 4px; line-height: 1.4; }
+  .pool .vazio { font-size: 10px; color: var(--dim); }
   .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 </style>
 </head>
@@ -116,6 +135,20 @@
     <input type="text" id="new-campaign" maxlength="40" placeholder="ex.: Reino dos Duelistas">
     <label>Tabuleiro (opcional)</label>
     <select id="new-board"><option value="">— padrão —</option></select>
+
+    <!-- ---------------------------------------------------- drop por vitória -->
+    <label>Drops por vitória</label>
+    <input type="number" id="new-drops" min="0" max="20" step="1" value="0">
+    <div class="lead" style="margin:-4px 0 8px">
+      Quantas cartas o jogador leva ao vencer, sorteadas <b>dentro do pool</b>
+      abaixo — 0 desliga e volta ao prêmio antigo (a carta de assinatura do
+      deck). Quem sorteia é o servidor, no ato da vitória.
+    </div>
+    <label>Pool de cartas (o sorteio acontece aqui dentro)</label>
+    <input type="text" id="new-pool-busca" placeholder="digite parte do nome e clique para incluir">
+    <div id="new-pool-achados" class="achados"></div>
+    <div id="new-pool" class="pool"></div>
+
     <div class="err" id="new-err"></div>
     <div class="actions">
       <button id="new-cancel">cancelar</button>
@@ -133,10 +166,22 @@ import {
   hydrateCustomNpcs, createNpc, updateNpc, deleteNpc, npcLevel, npcLevelLabel,
 } from '/web/js/npcs.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
+import { carregarDrops, salvarDrops, MAX_DROPS } from '/web/js/drops.js';
+import { YgoDB } from '/ygo-data/src/ygodb.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 let toastTimer;
+
+// ---------------------------------------------------------------- drop por NPC
+// A configuração inteira (de todos os NPCs) vive numa chave só, e é ela que o
+// servidor lê na hora de premiar. Carregada uma vez no boot; o modal edita a
+// cópia em memória e publica ao salvar.
+let dropsCfg = {};
+let poolEditado = [];      // o pool do NPC que está aberto no modal
+let dbIndice = null;       // índice enxuto, só para buscar carta pelo nome
+
+const nomeDaCarta = (id) => dbIndice?.brief(id)?.name ?? String(id);
 
 // Cache dos tabuleiros salvos (boards/*.json) — usado no dropdown do modal e
 // pra mostrar o nome do tabuleiro escolhido no card do adversário.
@@ -287,6 +332,11 @@ function abrirCriarAdversario() {
   $('new-campaign').value = '';
   $('new-level').value = 'iniciante';
   fillBoardSelect('');
+  poolEditado = [];
+  $('new-drops').value = '0';
+  $('new-pool-busca').value = '';
+  $('new-pool-achados').replaceChildren();
+  renderPool();
   $('new-err').textContent = '';
   $('new-back').classList.add('show');
   $('new-name').focus();
@@ -307,11 +357,59 @@ function abrirEditarAdversario(npc) {
   $('new-campaign').value = npc.campaign || '';
   $('new-level').value = npcLevel(npc);
   fillBoardSelect(npc.board || '');
+  const cfg = dropsCfg[npc.id] ?? { quantidade: 0, pool: [] };
+  poolEditado = [...cfg.pool];
+  $('new-drops').value = String(cfg.quantidade ?? 0);
+  $('new-pool-busca').value = '';
+  $('new-pool-achados').replaceChildren();
+  renderPool();
   $('new-err').textContent = '';
   $('new-back').classList.add('show');
   (npc.custom ? $('new-name') : $('new-campaign')).focus();
 }
 function fecharCriarAdversario() { $('new-back').classList.remove('show'); }
+
+// ---------------------------------------------------------------- pool de drop
+function renderPool() {
+  const box = $('new-pool');
+  if (!poolEditado.length) {
+    box.innerHTML = '<span class="vazio">nenhuma carta no pool — sem ele, a vitória '
+                  + 'volta a dar a carta de assinatura do deck.</span>';
+    return;
+  }
+  box.replaceChildren(...poolEditado.map((id) => {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.innerHTML = `<img src="${ART(id)}" alt=""><span>${nomeDaCarta(id)}</span>`;
+    const x = document.createElement('button');
+    x.textContent = '×';
+    x.title = 'tirar do pool';
+    x.onclick = () => { poolEditado = poolEditado.filter((c) => c !== id); renderPool(); };
+    chip.append(x);
+    return chip;
+  }));
+}
+
+function buscarCartas() {
+  const termo = $('new-pool-busca').value.trim();
+  const achados = $('new-pool-achados');
+  if (!dbIndice || termo.length < 2) { achados.replaceChildren(); return; }
+  // 12 é o que cabe sem virar rolagem dentro do modal. Quem não achou refina o
+  // termo — é mais rápido que percorrer 13.728 cartas.
+  const lista = dbIndice.search(termo, { limit: 12 });
+  achados.replaceChildren(...lista.map((c) => {
+    const b = document.createElement('button');
+    b.textContent = c.name;
+    b.title = `incluir ${c.name} no pool`;
+    b.onclick = () => {
+      if (!poolEditado.includes(c.id)) poolEditado.push(c.id);
+      $('new-pool-busca').value = '';
+      achados.replaceChildren();
+      renderPool();
+    };
+    return b;
+  }));
+}
 
 $('new-cancel').onclick = fecharCriarAdversario;
 $('new-back').addEventListener('click', (e) => { if (e.target === $('new-back')) fecharCriarAdversario(); });
@@ -325,10 +423,24 @@ $('new-save').onclick = () => {
     ? updateNpc(editingId, { name: $('new-name').value, theme: $('new-theme').value, ...fields })
     : createNpc($('new-name').value, $('new-theme').value, fields);
   if (!r.ok) { $('new-err').textContent = r.error; return; }
+
+  // O drop vive numa chave PRÓPRIA (`conteudo/npc-drops`), fora do registro do
+  // NPC: os 3 fixos não estão no array de NPCs — são um `const` no código com
+  // um overlay à parte —, e uma chave por fora vale igual para fixo e
+  // customizado. Publicar é assíncrono; a tela não espera, mas avisa se falhar.
+  const qtd = Math.max(0, Math.min(MAX_DROPS, Number($('new-drops').value) || 0));
+  if (poolEditado.length && qtd > 0) dropsCfg[r.npc.id] = { quantidade: qtd, pool: [...poolEditado] };
+  else delete dropsCfg[r.npc.id];
+  salvarDrops(dropsCfg).then((res) => {
+    if (res?.banco && !res.banco.ok) toast(`drop não publicado: ${res.banco.erro}`);
+  }).catch(() => toast('drop não publicado (sem conexão)'));
+
   fecharCriarAdversario();
   toast(editingId ? `"${r.npc.name}" atualizado` : `adversário "${r.npc.name}" criado — monte o deck dele`);
   render();
 };
+
+$('new-pool-busca').addEventListener('input', buscarCartas);
 $('new-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('new-save').click(); });
 
 /** Deixa explícito onde os decks estão guardados — e avisa se ainda for local. */
@@ -376,6 +488,11 @@ $('btn-home').onclick = () => (location.href = '/web/index.html');
 await hydrateCustomNpcs();
 await loadNpcDecks();
 await loadBoardsCache();
+// A configuração de drop e o índice de cartas (só para a busca do pool). Nenhum
+// dos dois pode derrubar a página: sem eles o resto do editor funciona igual, e
+// só o campo de pool fica sem autocompletar.
+try { dropsCfg = await carregarDrops(); } catch { dropsCfg = {}; }
+YgoDB.load('/ygo-data/data', { full: false }).then((d) => { dbIndice = d; }).catch(() => {});
 render();
 </script>
 </body>

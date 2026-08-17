@@ -403,6 +403,42 @@
   .end-acts { display: flex; gap: 10px; justify-content: center; }
   .end-acts button { padding: 9px 16px; font-size: 13px; }
 
+  /* ---------- o drop: cartas viradas que você revela ---------- */
+  /* O prêmio já está na Coleção quando isto aparece — quem sorteia e credita é
+     o servidor. A virada é só o teatro de descobrir o que veio, e por isso ela
+     nunca pode ser o que decide alguma coisa: o [pular] revela tudo de uma vez
+     e o duelo segue igual. */
+  #end-drops { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 4px 0 16px; }
+  .drop {
+    width: 96px; aspect-ratio: 59/86; perspective: 700px; cursor: pointer;
+    background: none; border: 0; padding: 0;
+  }
+  .drop[disabled] { cursor: default; }
+  .drop .giro {
+    position: relative; width: 100%; height: 100%;
+    transform-style: preserve-3d; transition: transform .55s cubic-bezier(.2,.7,.3,1);
+  }
+  .drop.aberta .giro { transform: rotateY(180deg); }
+  .drop .face {
+    position: absolute; inset: 0; backface-visibility: hidden;
+    border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
+    background: #0a0f16;
+  }
+  .drop .face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .drop .frente {
+    transform: rotateY(180deg); border-color: var(--gold);
+    box-shadow: 0 0 14px #f1c40f55;
+  }
+  /* O verso é o mesmo `.back` do tabuleiro — a carta virada do jogo, não um
+     desenho novo só para esta tela. */
+  .drop .verso .back { width: 100%; height: 100%; }
+  .drop:not([disabled]):hover .verso { border-color: var(--gold); }
+  .drop-nome {
+    font-size: 10px; color: var(--gold); margin-top: 4px; min-height: 13px;
+    max-width: 96px; line-height: 1.2;
+  }
+  #end-pular { font-size: 11px; padding: 5px 12px; margin-bottom: 14px; }
+
   /* ---------- popup de sorteio de moeda 3D ---------- */
   #coin-overlay {
     position: fixed; inset: 0; background: #000c; z-index: 85;
@@ -510,6 +546,10 @@
     <div id="end-emoji">🏆</div>
     <h2 id="end-title"></h2>
     <div id="end-sub"></div>
+    <!-- As cartas que você tirou do duelo, viradas. Clique em cada uma para
+         revelar — ou pule e veja todas de uma vez. -->
+    <div id="end-drops"></div>
+    <button id="end-pular" hidden>pular e revelar tudo</button>
     <div class="end-acts">
       <button id="end-home" class="btn-primary">voltar para a home</button>
       <button id="end-again">novo duelo</button>
@@ -2718,22 +2758,95 @@ async function concederRecompensa(venci, empate = false) {
   const r = await encerrarDuelo(dueloId, empate ? 'empate' : venci ? 'vitoria' : 'derrota');
   if (!r.ok || !venci) return null;
   if (r.recusado) { log(`prêmio recusado pelo servidor: ${r.recusado}`); return null; }
-  return { dp: r.premio, cardId: r.carta };
+  // `cartas` é a lista sorteada (pool do NPC); `carta` é o campo antigo, de uma
+  // carta só — mantido para um servidor que ainda não tenha a migration 0027.
+  const cartas = Array.isArray(r.cartas) ? r.cartas : (r.carta ? [r.carta] : []);
+  for (const c of cartas) log(`🃏 drop: ${nameOf(c)}`, true);
+  return { dp: r.premio, cartas };
 }
 
-/** Popup de fim de duelo: quem venceu + recompensa + botão para voltar à home. */
+/**
+ * **As cartas que você tirou do duelo, viradas.**
+ *
+ * Elas JÁ estão na sua Coleção quando esta tela aparece: quem sorteia e credita
+ * é o servidor (`premiar_vitoria`), porque o duelo roda nesta máquina e sortear
+ * aqui seria escolher o próprio prêmio. A virada é teatro — e por isso o
+ * [pular] pode revelar tudo de uma vez sem consequência nenhuma.
+ *
+ * Os dois botões de saída ficam desligados até a última carta abrir. Não é
+ * para prender ninguém: é para o prêmio não passar despercebido atrás de um
+ * clique apressado em "novo duelo" — e o [pular] existe justamente para quem
+ * não quer a cerimônia.
+ */
+function renderDrops(cartas) {
+  const caixa = $('end-drops');
+  const pular = $('end-pular');
+  caixa.replaceChildren();
+
+  if (!cartas || !cartas.length) {
+    pular.hidden = true;
+    liberarSaidaDoFim(true);
+    return;
+  }
+
+  const abertas = new Set();
+  const abrir = (i, botao, nome) => {
+    if (abertas.has(i)) return;
+    abertas.add(i);
+    botao.classList.add('aberta');
+    botao.disabled = true;
+    nome.textContent = nameOf(cartas[i]);
+    if (abertas.size === cartas.length) { pular.hidden = true; liberarSaidaDoFim(true); }
+  };
+
+  const botoes = [];
+  cartas.forEach((code, i) => {
+    const cel = document.createElement('div');
+
+    const b = document.createElement('button');
+    b.className = 'drop';
+    b.title = 'clique para revelar';
+    b.innerHTML = '<div class="giro">'
+      + '<div class="face verso"><div class="back"></div></div>'
+      + `<div class="face frente"><img src="${ART(code)}" alt=""></div>`
+      + '</div>';
+
+    const nome = document.createElement('div');
+    nome.className = 'drop-nome';
+
+    b.onclick = () => abrir(i, b, nome);
+    cel.append(b, nome);
+    caixa.append(cel);
+    botoes.push({ b, nome });
+  });
+
+  liberarSaidaDoFim(false);
+  pular.hidden = false;
+  pular.onclick = () => botoes.forEach((x, i) => abrir(i, x.b, x.nome));
+}
+
+/** Liga/desliga [novo duelo] e [voltar para a home] enquanto há carta virada. */
+function liberarSaidaDoFim(pode) {
+  $('end-home').disabled = !pode;
+  $('end-again').disabled = !pode;
+}
+
+/** Popup de fim de duelo: quem venceu + recompensa + o drop para revelar. */
 function mostrarFimDuelo(venci, empate, premio) {
   const box = document.querySelector('#end-overlay .end-box');
   box.classList.toggle('lose', !venci && !empate);
   $('end-emoji').textContent = empate ? '🤝' : venci ? '🏆' : '💀';
   $('end-title').textContent = empate ? 'Duelo empatado' : venci ? 'Você venceu!' : 'Você perdeu';
   let sub = `LP — você ${Math.max(0, lp[0])} · oponente ${Math.max(0, lp[1])}`;
+  const cartas = premio?.cartas ?? [];
   if (premio) {
-    const carta = premio.cardId ? (nameOf(premio.cardId)) : null;
     sub += `<br><b style="color:var(--gold)">+${premio.dp} DP</b>`
-         + (carta ? ` e <b style="color:var(--gold)">${carta}</b> na Coleção!` : '');
+         + (cartas.length
+            ? ` e <b style="color:var(--gold)">${cartas.length} carta(s)</b> na Coleção — vire para ver:`
+            : '');
   }
   $('end-sub').innerHTML = sub;
+  renderDrops(cartas);
   $('end-overlay').hidden = false;
 }
 function fecharFimDuelo() { $('end-overlay').hidden = true; }

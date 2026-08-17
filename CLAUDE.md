@@ -18,6 +18,7 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
+node web/js/drops.test.mjs   # 11 testes da configuração de drop por NPC (pool + quantidade)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
 npm run data:check           # integridade do banco de cartas (5 checagens)
@@ -230,6 +231,27 @@ status quando a Lista 1 está marcada — pro jogador isso nunca pode ser
 ignorado, mas o modo NPC do builder tem um checkbox "ignorar banlist" (dá
 mais liberdade pros decks de adversário). Persiste em `store/banlist.json`
 via a API genérica `/__store/`, sem rota nova.
+
+**Drop por vitória** (`web/js/drops.js`, editado no modal de configurações de
+`web/npcs.html`): cada NPC pode ter um **pool** de cartas e uma **quantidade**
+por vitória — pool de 20, quantidade 3, e cada vitória sorteia 3 dentro dos 20.
+Antes a vitória dava sempre a mesma carta de assinatura, o que fazia a décima
+vitória entregar a décima cópia dela.
+
+Guardado em `conteudo/npc-drops` (espelhado em `store/npc-drops.json`) — chave
+PRÓPRIA, e não um campo dentro de `conteudo/npcs`, porque os 3 NPCs fixos não
+estão naquele array (são `const` no código com um overlay à parte) e uma chave
+por fora vale igual para fixo e customizado. **Quem sorteia é o servidor**
+(`premiar_vitoria`, migration 0027): o duelo roda na máquina do jogador, então
+sortear no navegador seria deixar escolher o próprio prêmio. Com repetição de
+propósito — é o que faz uma carta rara no meio de 20 comuns ser rara de verdade,
+e evita a pergunta sem resposta boa de "e quando o pool acabar?". Sem pool
+configurado, o prêmio é o de antes (a assinatura).
+
+Na tela de fim de duelo as cartas chegam VIRADAS: clique em cada uma para
+revelar, ou use o **[pular]**. Os botões de saída ficam desligados até a última
+abrir — não para prender ninguém, mas para o prêmio não passar despercebido
+atrás de um clique apressado em "novo duelo".
 
 `web/js/customcards.js` importa cartas de um "card maker" externo (nome, tipo,
 ATK/DEF, arte) para o Deck Builder. Isso só monta o **esqueleto** da carta —

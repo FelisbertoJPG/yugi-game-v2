@@ -81,6 +81,11 @@ export function uiZoneIds() {
     // do turno é ação do jogador, então fica do lado de onde ele já está
     // olhando (mão, deck), não no meio do campo.
     { id: 'acts', kind: 'area', label: 'Botões de fase' },
+    // O seletor de correntes (desligado/auto/sempre). Morava na barra do topo,
+    // que durante o duelo só atrapalhava — desceu para o tabuleiro pelo mesmo
+    // motivo dos botões de fase: é decisão que se toma olhando a mesa, e quem
+    // decide onde ela fica é quem monta o campo.
+    { id: 'correntes', kind: 'area', label: 'Correntes (modo)' },
   ];
 }
 
@@ -162,6 +167,11 @@ export function defaultLayout(name = 'Padrão') {
   // Sobra folga de canvas ali (a fileira termina em FIELD_X+FIELD_W = 1164 de
   // 1600), então a caixa cabe sem espremer nada do campo.
   zones.acts = { x: FIELD_X + FIELD_W + GAP, y: magiaY0, w: 160, h: 64 };
+
+  // Correntes: logo ACIMA dos botões de fase, na mesma coluna. As duas caixas
+  // são do mesmo dono (decisões suas, fora do campo) e ficam juntas em vez de
+  // espalhadas — quem quiser separar arrasta no editor.
+  zones.correntes = { x: FIELD_X + FIELD_W + GAP, y: magiaY0 - 46, w: 160, h: 38 };
 
   return { name, canvas: { ...CANVAS }, background: null, fieldSpell: null, zones };
 }

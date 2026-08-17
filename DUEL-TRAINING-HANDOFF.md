@@ -258,6 +258,22 @@ que o protocolo abaixo foi decifrado — use pra achar novos formatos).
 2 lados, cemitério clicável, LP), traduz eventos→estado e mostra as ações da carta
 selecionada (Invocar/Utilizar/Setar).
 
+### A barra do topo está quase vazia — de propósito
+
+Durante o duelo, o que importa está na MESA: fases e LP na `mid`, botões de
+fase e modo das correntes em caixas posicionáveis pelo editor de campo, nome e
+efeito da carta no inspetor à esquerda. Sobraram na barra **desistir** (só no
+multiplayer) e **← home** (a saída — sem ela um duelo de Treino não teria como
+ser abandonado antes de acabar).
+
+Saíram: título, indicador de conexão, "turno:", seletor de deck, "encerrar
+turno" e "novo duelo". Nenhum era insubstituível — `⏭ End Phase` na caixa de
+fases faz o que o "encerrar turno" fazia; o overlay de fim de duelo já oferece
+"novo duelo" e "voltar para a home"; o turno está escrito no meio do campo; e o
+deck do duelo passou a ser sempre o **ativo**, escolhido no Deck Builder (um
+lugar só para escolher deck é melhor que dois). `dot`/`conn` e `turn` continuam
+no DOM, escondidos, para o código que os atualiza não precisar de um `if` novo.
+
 ### Inspetor: a carta sob o mouse (`web/duel.html`)
 
 O painel do Tag Force / YGOPro, fixo à esquerda: passou o mouse, leu a carta —
@@ -311,7 +327,8 @@ Duas coisas que mudam o *como se joga*, não o que é jogado:
   armadilha já baixada e efeito de monstro em campo não acendiam nada e a jogada
   do oponente passava sem o jogador ver a causa, só o resultado.
 - **Modo das correntes** (`web/js/correntes.js`, preferência em
-  `ygo:chainMode`, seletor na barra de cima). Nasceu de uma Forgotten Temple of
+  `ygo:chainMode`, caixa no TABULEIRO — zona de UI `correntes`, posicionável no
+  editor de campo como os botões de fase). Nasceu de uma Forgotten Temple of
   the Deep perguntando a cada fase, todo turno, enquanto houvesse monstro em
   campo. Os três modos são **os do Master Duel/EDOPro**, com o mesmo sentido —
   e **nenhum deles ativa carta por você**: em jogo nenhum de Yu-Gi-Oh existe

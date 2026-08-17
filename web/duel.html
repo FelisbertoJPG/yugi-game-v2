@@ -180,27 +180,33 @@
      `.arena` de propósito — ela tem `zoom: 1.25` e um layout de tabuleiro que
      pode vir do editor de campo; um painel `fixed` aqui não entra nessa conta.
      `pointer-events: none` porque ele nunca deve roubar um clique da mesa. */
+  /* A largura acompanha a tela até um teto: num monitor grande sobra espaço à
+     esquerda e a arte pequena era desperdício; num monitor apertado ele encolhe
+     em vez de invadir o tabuleiro. A tipografia sobe junto — quadro grande com
+     letra miúda não se lê melhor que quadro pequeno. */
   #inspetor {
-    position: fixed; left: 10px; top: 76px; z-index: 56; width: 208px;
-    background: #0c1118f2; border: 1px solid var(--line); border-radius: 4px;
-    padding: 8px; pointer-events: none; display: none;
+    position: fixed; left: 12px; top: 76px; z-index: 56;
+    width: clamp(230px, 19vw, 300px);
+    max-height: calc(100vh - 96px); overflow: hidden;
+    background: #0c1118f2; border: 1px solid var(--line); border-radius: 5px;
+    padding: 10px; pointer-events: none; display: none;
     box-shadow: 0 6px 20px #0009;
   }
   #inspetor.show { display: block; }
   #inspetor img { width: 100%; display: block; border: 1px solid var(--line); background: #0a0f16; }
-  #inspetor .nome { color: var(--gold); font-size: 12px; margin: 6px 0 1px; line-height: 1.25; }
-  #inspetor .tipo { color: var(--blue); font-size: 10px; }
-  #inspetor .linha { font-size: 10px; color: var(--dim); margin-top: 3px; }
-  #inspetor .stats { font-size: 11px; margin-top: 3px; color: var(--ink); }
+  #inspetor .nome { color: var(--gold); font-size: 14px; margin: 8px 0 2px; line-height: 1.25; }
+  #inspetor .tipo { color: var(--blue); font-size: 11px; }
+  #inspetor .linha { font-size: 11px; color: var(--dim); margin-top: 4px; }
+  #inspetor .stats { font-size: 13px; margin-top: 4px; color: var(--ink); }
   #inspetor .stats b { color: var(--gold); }
   #inspetor .texto {
-    font-size: 10px; line-height: 1.35; white-space: pre-wrap; color: var(--ink);
-    margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
-    max-height: 32vh; overflow: hidden;
+    font-size: 11.5px; line-height: 1.4; white-space: pre-wrap; color: var(--ink);
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+    max-height: 34vh; overflow: hidden;
   }
-  #inspetor .virada { font-size: 10px; color: var(--dim); margin-top: 4px; }
+  #inspetor .virada { font-size: 11px; color: var(--dim); margin-top: 4px; }
   /* Tela estreita: o painel cobriria o tabuleiro, e aí atrapalha mais que ajuda. */
-  @media (max-width: 900px) { #inspetor { display: none !important; } }
+  @media (max-width: 1000px) { #inspetor { display: none !important; } }
 
   /* ---------- revelação da carta ativada ---------- */
   /* O momento do Tag Force: a carta acende na zona, a arte vem grande ao centro

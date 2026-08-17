@@ -249,7 +249,45 @@ Kazejin de 2400 completa o trio, o Garnecia de 2400 não completa nada. E a magi
 de campo ajuda **os dois lados** (`EFFECT_FLAG_BOTH_SIDE`), então sem Nv5+ na mão
 ela fica guardada — abrir o campo à toa é presentear o oponente.
 
-Teste: `duel-server.exe --test-paradox` — 32 checagens.
+### O preço de um tributo é o que o corpo FAZ
+
+O custo de um tributo era medido pelo **ATK**, e só. Um Labyrinth Wall de
+**0/3000 deitado** aparecia então como o corpo mais barato do campo — sendo a
+única coisa que segurava o duelo. Visto num duelo real: o NPC tributou esse muro
+(3200 de defesa, com o equipamento) para pôr um Garnecia de 2400 diante de um
+campo de 2600.
+
+`ValorDoMeuCorpo` passa a usar a MESMA conta que já se fazia com os monstros do
+oponente (`ValorNaBatalha`): **ATK de pé, DEF deitado**, sempre pelo número de
+agora. Ela entra nos três lugares que precisavam concordar entre si:
+
+- `DecideSelect` (quem é sacrificado) — o desempate deixou de ser por ATK;
+- `TributoCompensa` (o portão da invocação por tributo);
+- a regra do **Tribute Doll**, que não passava por `TributoCompensa` nenhum e
+  agora recusa a troca quando o corpo que sairia vale mais que o Nv7 que entra.
+  O Lua ainda proíbe o recém-chegado de atacar no turno, o que torna a troca
+  ruim ainda pior.
+
+> **Uma regra que autoriza pensando num corpo e um `DecideSelect` que paga com
+> outro decidem coisas diferentes.** Por isso `ValorDoTributoQueSai` repete
+> exatamente a ordem do `DecideSelect` (peça por último, depois o menor valor) —
+> se as duas divergirem, o log vai dizer uma coisa e o campo mostrar outra.
+
+**A armadilha da "escolha uma carta da mão".** O Tribute Doll pergunta isso para
+saber quem ele Invoca Especialmente (`Duel.SelectMatchingCard(... LOCATION_HAND
+...)`) — a MESMA pergunta de um custo de descarte, querendo o oposto dela. Com a
+fila de descarte empurrando as peças para o fim (regra acima), ele passou a
+trazer o **Garnecia de 2400 no lugar do Sanga de 2600** que a própria regra tinha
+escolhido e anunciado no log. A marca `_alvoDaInvocacaoDaMao`, posta por quem
+ativa e consumida pelo `DecideSelect`, é o que faz a jogada ser a que foi
+decidida — vale para o Tribute Doll e para o efeito do Mausoléu.
+
+> Toda carta nova que **invoque da mão** cai nessa mesma pergunta. Sem pôr a
+> marca, ela vai trazer o que o critério de DESCARTE escolher, e o sintoma é
+> silencioso: a jogada acontece, só que com a carta errada — o log do `Why`
+> continua anunciando a certa.
+
+Teste: `duel-server.exe --test-paradox` — 36 checagens.
 
 > **Compile com o servidor parado.** O `.exe` fica travado enquanto roda e o
 > `dotnet build` falha — mas o teste seguinte roda o binário ANTIGO e parece que

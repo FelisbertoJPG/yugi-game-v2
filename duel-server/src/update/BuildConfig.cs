@@ -87,7 +87,15 @@ namespace DuelServer.Update
         // opcao onde o motor manda 8 — com duas opcoes a segunda sumia, e a
         // moeda do Mago do Tempo mostrava "Cara" e "Opcao 2" em vez de "Coroa".
         // Tudo isto e' motor: sem o exe novo, nada disso existe para quem joga.
-        public const string InstallerVersion = "0.9.0";
+        //
+        // 0.9.1 (17/08/2026): o preco de um tributo passou a ser o que o corpo
+        // FAZ, e nao o ATK impresso — um Labyrinth Wall de 0/3000 deitado era o
+        // corpo "mais barato" do campo e virava tributo de qualquer coisa,
+        // trocando a parede que segurava o duelo por um corpo de 2400. Junto,
+        // o Tribute Doll voltou a trazer o Nv7 que a regra escolheu: a pergunta
+        // "escolha uma carta da mao" e' a mesma de um custo de descarte, e a
+        // fila do descarte (0.9.0) passou a jogar as pecas para o fim.
+        public const string InstallerVersion = "0.9.1";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

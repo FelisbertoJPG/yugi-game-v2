@@ -128,9 +128,12 @@ peças ficam abaixo até de "não é monstro" na fila do descarte, e os atalhos 
 cobram um tributo se recusam a sair quando em campo só há peça. E o **Mausoléu
 do Imperador**, que é como as peças chegam ao campo: paga LP no lugar dos dois
 tributos, escolhendo a opção de 2000 (o Nv7) em vez da de 1000 (o muro de 0 de
-ATK), e subindo a peça que FALTA em vez do Nv7 de ATK igual. No duelo real, os
-atalhos disparam sozinhos com a mão que o embaralhamento dá, o Mausoléu sai da
-mão e uma peça chega ao campo),
+ATK), e subindo a peça que FALTA em vez do Nv7 de ATK igual. E prova o **preço
+de um tributo**: um Labyrinth Wall de 0/3000 deitado não é o corpo mais barato
+do campo — medir por ATK fazia o NPC trocar a parede que segurava o duelo por um
+corpo de 2400 —, com o par controle de um corpo de 1200, onde a mesma jogada TEM
+de sair. No duelo real, os atalhos disparam sozinhos com a mão que o
+embaralhamento dá, o Mausoléu sai da mão e uma peça chega ao campo),
 `--test-cartas-booster` (as cartas que os BOOSTERS já vendiam e a Lista 1 não
 conhecia — De-Spell, Ritual Cage, Birthright e Swing of Memories: os três duelos
 são dirigidos pelo jogador HUMANO, pelo mesmo `Respond` de `web/duel.html`, e

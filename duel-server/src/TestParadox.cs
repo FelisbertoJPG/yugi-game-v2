@@ -74,12 +74,26 @@ namespace DuelServer
             var minhaMao = new List<uint>();   // mão do NPC
 
             var minhasSt = new List<uint>();   // magias/armadilhas minhas com a face pra cima
+            // Posição de cada corpo meu. Vazio = tudo em ATAQUE, que é o que os
+            // testes de campo montado só com códigos sempre assumiram — mas a
+            // POSIÇÃO é o que decide o preço de um tributo (um muro deitado
+            // custa a DEF dele), então quem testa isso precisa dizer.
+            var posDe = new Dictionary<uint, int>();
+            IReadOnlyList<(uint code, int pos, int seq)> CampoComPos(int p)
+            {
+                var outp = new List<(uint, int, int)>();
+                if (p != 1) return outp;
+                for (int i = 0; i < meuCampo.Count; i++)
+                    outp.Add((meuCampo[i], posDe.TryGetValue(meuCampo[i], out int po) ? po : 0x1, i));
+                return outp;
+            }
 
             var brain = new NpcBrain(db,
                 fieldOf: p => p == 1 ? meuCampo : new List<uint>(),
                 log: _ => { },
                 handOf: p => p == 1 ? minhaMao : new List<uint>(),
-                faceUpStOf: p => p == 1 ? minhasSt : new List<uint>());
+                faceUpStOf: p => p == 1 ? minhasSt : new List<uint>(),
+                todoFieldPosOf: CampoComPos);
 
             // `local` é de onde a carta é ativada — a MÃO (0x2) ou a zona de
             // magia (0x8). Não é detalhe: o Mausoléu aparece nas duas, e são
@@ -292,6 +306,58 @@ namespace DuelServer
             var sobe = brain.DecideSelect(Selecao(0x2, GARNECIA, KAZEJIN), 1);
             Check("Mausoleu: sobe a peca que falta, nao o Nv7 de ATK igual",
                   sobe.Count == 1 && sobe[0] == 1, $"(escolheu idx {string.Join(",", sobe)})");
+
+            // ================================================================
+            // O PRECO DE UM TRIBUTO E' O QUE O CORPO FAZ, NAO O ATK IMPRESSO
+            //
+            // Visto num duelo real: o NPC tributou o Labyrinth Wall (0/3000,
+            // deitado) para pôr um Garnecia de 2400 diante de um campo de 2600.
+            // Pelo ATK o muro era o corpo "mais barato" que ele tinha — sendo a
+            // unica coisa que segurava o duelo.
+            // ================================================================
+            meuCampo.Clear(); minhasSt.Clear(); minhaMao.Clear();
+            meuCampo.Add(LABYRINTH_WALL); meuCampo.Add(GUARDIAN_LAB);
+            posDe.Clear(); posDe[LABYRINTH_WALL] = 0x4;    // deitado: vale os 3000 de DEF
+            var custo = brain.DecideSelect(new InteractiveDuel.Question
+            {
+                kind = "selecttribute", player = 1, selMin = 1,
+                choices =
+                {
+                    new InteractiveDuel.Sel { code = LABYRINTH_WALL, index = 0, location = 0x4, sequence = 0, release = 1 },
+                    new InteractiveDuel.Sel { code = GUARDIAN_LAB, index = 1, location = 0x4, sequence = 1, release = 1 },
+                },
+            }, 1);
+            Check("tributo: o muro deitado de 3000 de DEF nao e' o corpo mais barato do campo",
+                  custo.Count == 1 && custo[0] == 1, $"(escolheu idx {string.Join(",", custo)})");
+
+            // ...e o Tribute Doll nem chega a pedir o tributo quando o unico
+            // corpo que ele tem vale mais que o Nv7 que entraria.
+            meuCampo.Clear(); meuCampo.Add(LABYRINTH_WALL);
+            minhaMao.Clear(); minhaMao.Add(SANGA);
+            p = brain.Decide(Idle(ativaveis: new[] { TRIBUTE_DOLL }), 1);
+            Check("Tribute Doll: nao troca um muro de 3000 de DEF por um Nv7 de 2600",
+                  p.Action != "activate", $"(veio {p.Action} — {p.Why})");
+
+            // Controle: com um corpo de 1200 no lugar do muro, a mesma jogada TEM
+            // de sair — senao "nao ativou" nao provaria nada.
+            meuCampo.Clear(); meuCampo.Add(GUARDIAN_LAB);
+            posDe.Clear(); posDe[GUARDIAN_LAB] = 0x4;
+            p = brain.Decide(Idle(ativaveis: new[] { TRIBUTE_DOLL }), 1);
+            Check("Tribute Doll: troca um corpo de 1200 pelo Nv7 de 2600 (controle)",
+                  p.Action == "activate", $"(veio {p.Action} — {p.Why})");
+
+            // ...e quem SOBE e' o que a regra escolheu. A pergunta que o Lua faz
+            // ("escolha uma carta da mao") e' a MESMA de um custo de descarte, e
+            // a fila do descarte hoje joga as pecas para o fim — sem a marca, o
+            // Tribute Doll traria o Garnecia de 2400 no lugar do Sanga de 2600,
+            // que foi exatamente o que aconteceu no duelo.
+            minhaMao.Clear(); minhaMao.Add(GARNECIA); minhaMao.Add(SANGA);
+            p = brain.Decide(Idle(ativaveis: new[] { TRIBUTE_DOLL }), 1);
+            var trazido = brain.DecideSelect(Selecao(0x2, GARNECIA, SANGA), 1);
+            Check("Tribute Doll: sobe o Nv7 que a regra anunciou, nao o que o descarte escolheria",
+                  trazido.Count == 1 && trazido[0] == 1, $"(escolheu idx {string.Join(",", trazido)})");
+
+            posDe.Clear();
 
             // Sem a magia em campo o LP nao e' gasto a toa: um custo que fura o
             // piso de vida faz o efeito ser guardado.

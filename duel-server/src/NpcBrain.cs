@@ -753,7 +753,7 @@ namespace DuelServer
             // que a jogada acabou — deixar a marca de pé faria a PRÓXIMA escolha
             // da mão (um custo de descarte, por exemplo) jogar fora justamente a
             // carta que ele ia invocar.
-            _alvoDoMausoleu = 0;
+            _alvoDaInvocacaoDaMao = 0;
 
             // 0. BUSCA ESPECÍFICA antes da compra. Comprar primeiro pode trazer a
             //    carta que a busca traria — e aí a busca vira carta morta. Buscar
@@ -1086,7 +1086,7 @@ namespace DuelServer
                     // descarte: as duas chegam lá como "escolha uma carta da
                     // mão" e querem exatamente o oposto uma da outra. Mesmo
                     // padrão do `_proximoAlvoEquipFraco`.
-                    _alvoDoMausoleu = plano.alvo;
+                    _alvoDaInvocacaoDaMao = plano.alvo;
                     return new Play("activate", mausoleuEmCampo.index,
                         $"Mausoleu: paga {plano.custo} LP e invoca {plano.alvo} " +
                         $"(ATK {_cards.Stats(plano.alvo).AtkValue}) da mao, sem tributo");
@@ -1148,15 +1148,33 @@ namespace DuelServer
                     .ThenByDescending(c => _cards.Stats(c).AtkValue)
                     .ToList();
                 var nv7 = nv7Mao.FirstOrDefault();
+                int sai = ValorDoTributoQueSai(me);
+                int entra = nv7 == 0 ? 0 : _cards.Stats(nv7).AtkValue;
                 if (nv7 == 0)
                     _log("guarda Tribute Doll: nenhum monstro Nv7 na mao para trazer");
                 else if (!TemCorpoDispensavel(me))
                     _log("guarda Tribute Doll: so' tenho peca do Gate Guardian em campo — " +
                          "o tributo comeria justamente o que estou juntando");
+                else if (entra <= sai)
+                    // O que sai é medido pelo que ele FAZ: um Labyrinth Wall
+                    // deitado vale os 3000 de DEF dele, não os 0 de ATK. Sem
+                    // isto o NPC trocou, num duelo real, um muro de 3200 de
+                    // defesa por um corpo de 2400 diante de um campo de 2600 —
+                    // e o Lua ainda proíbe o recém-chegado de atacar no turno.
+                    _log($"guarda Tribute Doll: o corpo que eu tributaria vale {sai} " +
+                         $"em campo e o Nv7 que entra so' {entra}");
                 else
+                {
+                    // Quem sobe é a marca, não o acaso: a pergunta que vem em
+                    // seguida ("escolha uma carta da mão") é a MESMA de um custo
+                    // de descarte, e sem isto o critério de descarte escolheria
+                    // — trazendo justamente a carta que a fila joga fora por
+                    // último.
+                    _alvoDaInvocacaoDaMao = nv7;
                     return new Play("activate", IdxAtivavel(q, TRIBUTE_DOLL),
-                        $"Tribute Doll: troca um corpo dispensavel pelo Nv7 {nv7} " +
-                        $"(ATK {_cards.Stats(nv7).AtkValue}) da mao");
+                        $"Tribute Doll: troca um corpo de {sai} pelo Nv7 {nv7} " +
+                        $"(ATK {entra}) da mao");
+                }
             }
 
             // 5.93 METAMORPHOSIS: tributa 1 monstro e traz do Extra uma FUSÃO do
@@ -1339,10 +1357,16 @@ namespace DuelServer
                 // proibição — pedindo mais tributos do que eu tenho de sobra, a
                 // peça entra: recusar aqui deixaria o motor esperando por uma
                 // resposta que nunca viria.
+                //
+                // E o preço de cada corpo é o que ele FAZ na zona em que está,
+                // não o ATK impresso: um Labyrinth Wall de 0/3000 deitado era o
+                // "mais barato" do campo por ter 0 de ATK, e virava tributo de
+                // qualquer coisa — inclusive de um corpo de 2400 que entra e
+                // perde a batalha seguinte.
                 int soma = 0;
                 foreach (var c in fonte
                              .OrderBy(c => PECAS_GATE_GUARDIAN.Contains(c.code) ? 1 : 0)
-                             .ThenBy(c => _cards.Stats(c.code).AtkValue))
+                             .ThenBy(c => ValorDoMeuCorpo(me, c.code, c.sequence)))
                 {
                     if (soma >= need) break;
                     picks.Add(c.index);
@@ -1434,10 +1458,10 @@ namespace DuelServer
             // A INVOCAÇÃO do Mausoléu chega aqui como "escolha uma carta da mão",
             // exatamente igual a um custo de descarte — e quer o oposto dele. A
             // regra já decidiu quem sobe (`PlanoDoMausoleu`); aqui é só cumprir.
-            if (loc == HAND && _alvoDoMausoleu != 0)
+            if (loc == HAND && _alvoDaInvocacaoDaMao != 0)
             {
-                uint alvo = _alvoDoMausoleu;
-                _alvoDoMausoleu = 0;
+                uint alvo = _alvoDaInvocacaoDaMao;
+                _alvoDaInvocacaoDaMao = 0;
                 var escolhido = q.choices.FirstOrDefault(c => c.code == alvo);
                 if (escolhido.code == alvo)
                 {
@@ -1543,6 +1567,45 @@ namespace DuelServer
         /// completa o trio, e por isso vale mais que um Nv7 de ATK igual.</summary>
         bool PecaQueFalta(int me, uint code) =>
             PECAS_GATE_GUARDIAN.Contains(code) && !_fieldOf(me).Contains(code);
+
+        /// <summary>
+        /// **O que um corpo MEU vale onde ele está** — a mesma conta que já se
+        /// fazia com os monstros do oponente (<see cref="ValorNaBatalha"/>): ATK
+        /// de pé, DEF deitado, e sempre pelo número de AGORA (equipamento, magia
+        /// de campo).
+        ///
+        /// O preço de um tributo era o ATK, e só. Um Labyrinth Wall de 0/3000
+        /// setado aparecia então como o corpo mais barato do campo — quando ele
+        /// é justamente a parede que está segurando o duelo. Num duelo real o
+        /// NPC trocou esse muro (3200 de defesa com o equipamento) por um corpo
+        /// de 2400, diante de um campo de 2600.
+        /// </summary>
+        int ValorDoMeuCorpo(int me, uint code, int seq)
+        {
+            foreach (var m in _todoFieldPosOf(me))
+                if (m.seq == seq && m.code == code) return ValorNaBatalha(code, m.pos, me, seq);
+            // Sem casar a zona (testes de decisão isolada, campo montado só com
+            // códigos), cai no ATK impresso — o comportamento de antes.
+            return ValorNaBatalha(code, POS_ATAQUE, me, seq);
+        }
+
+        /// <summary>
+        /// Quanto vale o corpo que um atalho de 1 tributo tiraria de mim — o
+        /// MENOR entre os dispensáveis, que é exatamente o que o
+        /// <see cref="DecideSelect"/> vai sacrificar. As duas pontas têm de usar
+        /// a mesma conta: uma regra que autoriza pensando num corpo e um
+        /// `DecideSelect` que paga com outro decidem coisas diferentes.
+        /// </summary>
+        int ValorDoTributoQueSai(int me)
+        {
+            int menor = int.MaxValue;
+            foreach (var m in AbertosDe(me))
+            {
+                if (PECAS_GATE_GUARDIAN.Contains(m.code)) continue;
+                menor = Math.Min(menor, ValorNaBatalha(m.code, m.pos, me, m.seq));
+            }
+            return menor == int.MaxValue ? 0 : menor;
+        }
 
         /// <summary>
         /// **O plano do Mausoléu**: quem sobe da mão, e por quantos LP.
@@ -2060,16 +2123,19 @@ namespace DuelServer
         uint _proximoAlvoStPerigosa;
 
         /// <summary>
-        /// A carta da MÃO que o Mausoléu vai Invocar Normalmente, decidida por
-        /// `PlanoDoMausoleu` na hora de ativar o efeito e consumida pelo
-        /// `DecideSelect`.
+        /// A carta da MÃO que a jogada em curso vai pôr em campo — decidida pela
+        /// regra que ativou a carta e consumida pelo `DecideSelect`.
         ///
-        /// Sem isto a escolha cairia no critério genérico da mão, que é o de
-        /// DESCARTE — e o descarte quer o oposto de uma invocação: ele joga fora
-        /// o maior, e desde a regra do Gate Guardian empurra as peças para o
-        /// FIM da fila. O NPC pagaria 2000 LP para invocar a pior carta da mão.
+        /// Vale para TODA carta que invoca da mão pedindo "escolha uma carta da
+        /// mão": o efeito do Mausoléu e o Tribute Doll. Essa pergunta é
+        /// idêntica à de um custo de DESCARTE, e quer o oposto dela — o descarte
+        /// joga fora o maior, e desde a regra do Gate Guardian empurra as peças
+        /// para o fim da fila. Sem esta marca, o Tribute Doll pagava um corpo
+        /// para trazer justamente a pior carta da mão: foi o que aconteceu num
+        /// duelo real, com o Garnecia (2400) entrando no lugar do Sanga (2600)
+        /// que a própria regra tinha escolhido e anunciado no log.
         /// </summary>
-        uint _alvoDoMausoleu;
+        uint _alvoDaInvocacaoDaMao;
 
         /// <summary>
         /// Já equipei um Cocoon of Evolution nesta partida? O Lua dele
@@ -2467,11 +2533,13 @@ namespace DuelServer
             int n = TributosPara(entra.Level);
             if (n == 0) return true;                       // Nv1-4: não custa nada
 
-            // Pelo ATK de AGORA: tributar o monstro que está segurando o
-            // equipamento custa o valor COM o bônus, não o impresso na carta.
+            // Pelo valor de AGORA e na POSIÇÃO de agora: tributar o monstro que
+            // está segurando o equipamento custa o valor COM o bônus, e tributar
+            // uma parede deitada custa a DEF dela — não os 0 de ATK que um muro
+            // tem impressos. Mesma conta do `DecideSelect`, que é quem escolhe.
             var sacrificados = AbertosDe(me)
-                .Select(m => AtkEmCampo(m.code, me, m.seq))
-                .OrderBy(atk => atk)                       // os mais fracos vão primeiro
+                .Select(m => ValorNaBatalha(m.code, m.pos, me, m.seq))
+                .OrderBy(v => v)                           // os mais baratos vão primeiro
                 .Take(n)
                 .ToList();
 

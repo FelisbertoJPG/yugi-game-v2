@@ -439,26 +439,25 @@
 <body>
 
 <!--
-  A barra do topo é quase toda VAZIA de propósito. Durante o duelo o que
-  importa está na mesa: as fases e os LP na `mid`, os botões de fase e o
-  seletor de correntes em caixas posicionáveis no editor de campo, o nome e o
-  efeito da carta no inspetor à esquerda. Sobrou o que não cabe em lugar
-  nenhum: sair do duelo.
+  A barra do topo guarda INFORMAÇÃO (conexão, turno) e um botão só: desistir.
 
-  O `dot`/`conn` e o `turn` continuam no DOM, escondidos: a queda de conexão
-  já grita na barra vermelha (`warn`) e o turno já está escrito no meio do
-  campo, mas o código que os atualiza é o mesmo de sempre e não precisou de
-  um `if` novo para viver sem eles.
+  Os controles desceram para a mesa — botões de fase e modo das correntes são
+  caixas posicionáveis no editor de campo, as fases e os LP moram na `mid`, e o
+  nome/efeito da carta no inspetor à esquerda. O que sobrou aqui em cima é o
+  que não é jogada: saber se está conectado, de quem é o turno, e sair.
+
+  "Desistir" é a ÚNICA saída, e de propósito: ela encerra o duelo direito
+  (registra a derrota, fecha a partida online) e só então a tela de fim oferece
+  [novo duelo] ou [voltar para a home]. Um "← home" solto aqui pulava esse
+  encerramento e deixava duelo pendurado no servidor.
 -->
 <div class="topbar">
+  <h1>▚ TREINO</h1>
+  <span class="status-line"><span class="dot" id="dot"></span><span id="conn">—</span></span>
   <span class="spacer"></span>
-  <span hidden><span class="dot" id="dot"></span><span id="conn">—</span><b id="turn">—</b></span>
-  <!-- Só no multiplayer: contra o NPC quem encerra é o fim do duelo. -->
-  <button id="btn-desistir" class="btn-danger" hidden
-          title="encerra o duelo — seu adversário vence">desistir</button>
-  <!-- A saída. Não é botão de duelo, é a porta: sem ela um duelo de Treino não
-       teria como ser abandonado antes de acabar. -->
-  <button id="btn-home">← home</button>
+  <span class="status-line">turno: <b id="turn">—</b></span>
+  <button id="btn-desistir" class="btn-danger"
+          title="encerra o duelo — no multiplayer, seu adversário vence">desistir</button>
 </div>
 
 <div class="hint" id="prompt-bar"><span class="prompt" id="prompt">—</span></div>
@@ -2741,21 +2740,33 @@ function fecharFimDuelo() { $('end-overlay').hidden = true; }
 
 
 /**
- * Desistir. É a única saída honesta de um duelo online que emperrou — o outro
- * fechou o navegador, a máquina caiu, a rede sumiu. Sem isto a partida ficava
- * em 'em_andamento' e trancava os DOIS jogadores, porque criar sala ou entrar
- * na fila recusa quem já está numa partida.
+ * Desistir — a saída do duelo, nos DOIS modos.
+ *
+ * No online é a única saída honesta quando a partida emperra (o outro fechou o
+ * navegador, a máquina caiu, a rede sumiu): sem ela a partida fica em
+ * 'em_andamento' e tranca os DOIS jogadores, porque criar sala ou entrar na
+ * fila recusa quem já está numa partida.
+ *
+ * No Treino ela é o que substitui o antigo "← home" da barra: em vez de sair
+ * pela porta deixando o duelo pendurado no servidor, encerra o registro e cai
+ * na tela de fim, que é quem oferece [novo duelo] ou [voltar para a home].
+ * Uma saída só, e ela sempre fecha o que abriu.
  */
 $('btn-desistir').onclick = async () => {
-  if (!ehMultiplayer() || !sala) return;
-  if (!confirm('Desistir do duelo?\n\nSeu adversário vence.')) return;
+  if (ended) return;
+  if (!confirm('Desistir do duelo?' + (ehMultiplayer() ? '\n\nSeu adversário vence.' : ''))) return;
   $('btn-desistir').disabled = true;
   try {
-    await encerrarPartida(sala.id);          // sem vencedor = o outro ganha
+    if (ehMultiplayer() && sala) {
+      await encerrarPartida(sala.id);        // sem vencedor = o outro ganha
+      ponte?.fechar();
+    } else {
+      encerrarDueloNoServidor();             // solta o motor; sem prêmio, é derrota
+    }
     ended = true;
-    ponte?.fechar();
     log('=== você desistiu do duelo ===', true);
-    location.href = '/web/multiplayer.html';
+    render();
+    mostrarFimDuelo(false, false, null);
   } catch (e) {
     warn(`não consegui desistir: ${e.message}`);
     $('btn-desistir').disabled = false;
@@ -2784,10 +2795,14 @@ function encerrarDueloNoServidor() {
 // Fecha tanto na navegação por botão quanto no X da aba.
 window.addEventListener('pagehide', encerrarDueloNoServidor);
 
-$('btn-home').onclick = () => { encerrarDueloNoServidor(); location.href = '/web/index.html'; };
 $('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
 $('end-home').onclick = () => { encerrarDueloNoServidor(); location.href = '/web/index.html'; };
-$('end-again').onclick = () => { fecharFimDuelo(); start(); };
+// No online a sala ja' acabou: "novo duelo" e' procurar OUTRA partida, nao
+// reabrir a que fechou (o `start()` tentaria carregar uma partida encerrada).
+$('end-again').onclick = () => {
+  if (ehMultiplayer()) { encerrarDueloNoServidor(); location.href = '/web/multiplayer.html'; return; }
+  fecharFimDuelo(); start();
+};
 $('gv-close').onclick = () => $('gv-back').classList.remove('show');
 $('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $('gv-back').classList.remove('show'); });
 $('log-fab').onclick = () => $('log').classList.toggle('show');
@@ -2831,7 +2846,6 @@ if (partidaId) {
 
     // "novo duelo" não faz sentido aqui (o deck vem congelado da sala e o outro
     // jogador não seria consultado); "desistir" faz.
-    $('btn-desistir').hidden = false;
 
     ponte = abrirPonte(sala, (visao) => {
       // Toda visão que chega da ponte entra pela MESMA fila do modo NPC —

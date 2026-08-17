@@ -258,21 +258,24 @@ que o protocolo abaixo foi decifrado — use pra achar novos formatos).
 2 lados, cemitério clicável, LP), traduz eventos→estado e mostra as ações da carta
 selecionada (Invocar/Utilizar/Setar).
 
-### A barra do topo está quase vazia — de propósito
+### A barra do topo: informação, e um botão só
 
-Durante o duelo, o que importa está na MESA: fases e LP na `mid`, botões de
-fase e modo das correntes em caixas posicionáveis pelo editor de campo, nome e
-efeito da carta no inspetor à esquerda. Sobraram na barra **desistir** (só no
-multiplayer) e **← home** (a saída — sem ela um duelo de Treino não teria como
-ser abandonado antes de acabar).
+Ela guarda **informação** (conexão e turno) e **um** botão: `desistir`. Os
+CONTROLES desceram para a mesa — botões de fase e modo das correntes são caixas
+posicionáveis no editor de campo, fases e LP moram na `mid`, e o nome/efeito da
+carta no inspetor à esquerda.
 
-Saíram: título, indicador de conexão, "turno:", seletor de deck, "encerrar
-turno" e "novo duelo". Nenhum era insubstituível — `⏭ End Phase` na caixa de
-fases faz o que o "encerrar turno" fazia; o overlay de fim de duelo já oferece
-"novo duelo" e "voltar para a home"; o turno está escrito no meio do campo; e o
-deck do duelo passou a ser sempre o **ativo**, escolhido no Deck Builder (um
-lugar só para escolher deck é melhor que dois). `dot`/`conn` e `turn` continuam
-no DOM, escondidos, para o código que os atualiza não precisar de um `if` novo.
+Saíram os botões que repetiam algo ou não serviam no meio de um duelo:
+`encerrar turno` (o `⏭ End Phase` da caixa de fases faz o mesmo), `novo duelo`
+(a tela de fim já oferece) e o seletor de deck — o duelo passou a usar sempre o
+deck **ativo**, escolhido no Deck Builder, que é um lugar só em vez de dois que
+podiam discordar.
+
+**`desistir` é a única saída, e isso é a regra**: ela encerra o duelo direito
+(registra a derrota no servidor, fecha a partida online) e só então a tela de
+fim oferece `[novo duelo]` ou `[voltar para a home]`. O `← home` que existia
+solto na barra pulava esse encerramento e deixava duelo pendurado. No online,
+"novo duelo" leva ao matchmaking em vez de reabrir a sala que acabou de fechar.
 
 ### Inspetor: a carta sob o mouse (`web/duel.html`)
 

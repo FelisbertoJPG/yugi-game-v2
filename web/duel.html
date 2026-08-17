@@ -413,7 +413,11 @@
     width: 96px; aspect-ratio: 59/86; perspective: 700px; cursor: pointer;
     background: none; border: 0; padding: 0;
   }
-  .drop[disabled] { cursor: default; }
+  /* Revelada, a carta vira `disabled` para não ser clicada de novo — e o
+     `button:disabled { opacity: .4 }` de `ui.css` apagava justamente o prêmio
+     que o jogador acabou de ganhar (mal dava para enxergar a arte). Aqui
+     "desligado" quer dizer só "não aceita mais clique". */
+  .drop[disabled] { cursor: default; opacity: 1; }
   .drop .giro {
     position: relative; width: 100%; height: 100%;
     transform-style: preserve-3d; transition: transform .55s cubic-bezier(.2,.7,.3,1);
@@ -428,6 +432,35 @@
   .drop .frente {
     transform: rotateY(180deg); border-color: var(--gold);
     box-shadow: 0 0 14px #f1c40f55;
+  }
+  /* A moldura toma a cor da RARIDADE — o mesmo código de cores da revelação da
+     Loja (`loja.html`), para uma UR de drop parecer a mesma coisa que uma UR de
+     pacote. Sem raridade (servidor sem a migration 0029) fica o dourado acima. */
+  .drop .frente.UR { border-color: #e8c46a; box-shadow: 0 0 20px #e8c46a88; }
+  .drop .frente.SR { border-color: #cbb7ff; box-shadow: 0 0 16px #cbb7ff66; }
+  .drop .frente.R  { border-color: #7fd0ff; box-shadow: 0 0 14px #7fd0ff55; }
+  .drop .frente.N  { border-color: #cfd6de; box-shadow: 0 0 10px #cfd6de33; }
+  /* O selo de raridade e o de novidade ficam DENTRO da face da frente: viram
+     com a carta, então não aparecem antes da revelação. */
+  .drop .rar {
+    position: absolute; top: 3px; right: 3px; font-size: 9px; font-weight: bold;
+    padding: 2px 4px; border-radius: 2px; background: #04121fdd; letter-spacing: .5px;
+  }
+  .drop .frente.UR .rar { color: #e8c46a; }
+  .drop .frente.SR .rar { color: #cbb7ff; }
+  .drop .frente.R  .rar { color: #7fd0ff; }
+  .drop .frente.N  .rar { color: #cfd6de; }
+  /* "NEW!!" — a carta que ENTROU na Coleção agora, e não a décima cópia de uma
+     que já estava lá. Quem responde isso é o servidor, antes de creditar. */
+  .drop .nova {
+    position: absolute; top: 3px; left: 3px; font-size: 9px; font-weight: 800;
+    padding: 2px 4px; border-radius: 2px; letter-spacing: .5px;
+    background: #c0392b; color: #fff; box-shadow: 0 0 10px #e74c3ccc;
+    animation: novapisca 1.1s ease-in-out infinite;
+  }
+  @keyframes novapisca {
+    0%, 100% { box-shadow: 0 0 6px #e74c3c88; }
+    50%      { box-shadow: 0 0 14px #e74c3c; }
   }
   /* O verso é o mesmo `.back` do tabuleiro — a carta virada do jogo, não um
      desenho novo só para esta tela. */
@@ -2793,8 +2826,18 @@ async function concederRecompensa(venci, empate = false) {
   // `cartas` é a lista sorteada (pool do NPC); `carta` é o campo antigo, de uma
   // carta só — mantido para um servidor que ainda não tenha a migration 0027.
   const cartas = Array.isArray(r.cartas) ? r.cartas : (r.carta ? [r.carta] : []);
-  for (const c of cartas) log(`🃏 drop: ${nameOf(c)}`, true);
-  return { dp: r.premio, cartas };
+  // `drops` (migration 0029) traz a GAVETA de onde cada carta saiu e se ela é
+  // NOVA na Coleção. Nenhuma das duas dá para calcular aqui: a raridade do drop
+  // é a gaveta gravada no `npc-drops` e não a dos boosters, e a novidade só
+  // existe ANTES do crédito — a carteira que voltou já tem a carta dentro.
+  // Servidor sem a 0029 devolve `null`, e a tela mostra a carta sem selo.
+  const drops = Array.isArray(r.drops) && r.drops.length
+    ? r.drops.map((d) => ({ id: Number(d.id), raridade: d.raridade ?? null, nova: !!d.nova }))
+    : cartas.map((id) => ({ id: Number(id), raridade: null, nova: false }));
+  for (const d of drops) {
+    log(`🃏 drop: ${nameOf(d.id)}${d.raridade ? ` [${d.raridade}]` : ''}${d.nova ? ' — NOVA' : ''}`, true);
+  }
+  return { dp: r.premio, cartas, drops };
 }
 
 /**
@@ -2809,13 +2852,20 @@ async function concederRecompensa(venci, empate = false) {
  * para prender ninguém: é para o prêmio não passar despercebido atrás de um
  * clique apressado em "novo duelo" — e o [pular] existe justamente para quem
  * não quer a cerimônia.
+ *
+ * Cada carta revelada mostra a RARIDADE (a gaveta do pool de onde ela saiu, o
+ * que gradua o prêmio: a UR de assinatura não pode chegar com a mesma cara do
+ * Normal de enchimento) e, quando for o caso, o selo **NEW!!** — a carta que
+ * entrou na Coleção agora, e não a enésima cópia de uma que já estava lá. As
+ * duas informações vêm do servidor (`drops`); sem elas, a carta aparece sem
+ * selo nenhum, como antes.
  */
-function renderDrops(cartas) {
+function renderDrops(drops) {
   const caixa = $('end-drops');
   const pular = $('end-pular');
   caixa.replaceChildren();
 
-  if (!cartas || !cartas.length) {
+  if (!drops || !drops.length) {
     pular.hidden = true;
     liberarSaidaDoFim(true);
     return;
@@ -2827,21 +2877,26 @@ function renderDrops(cartas) {
     abertas.add(i);
     botao.classList.add('aberta');
     botao.disabled = true;
-    nome.textContent = nameOf(cartas[i]);
-    if (abertas.size === cartas.length) { pular.hidden = true; liberarSaidaDoFim(true); }
+    nome.textContent = nameOf(drops[i].id);
+    if (abertas.size === drops.length) { pular.hidden = true; liberarSaidaDoFim(true); }
   };
 
   const botoes = [];
-  cartas.forEach((code, i) => {
+  drops.forEach((drop, i) => {
     const cel = document.createElement('div');
+    // A raridade vira classe da FACE da frente: ela pinta a moldura e o selo de
+    // uma vez só, e some sozinha quando o servidor não mandou raridade.
+    const rar = ['UR', 'SR', 'R', 'N'].includes(drop.raridade) ? drop.raridade : null;
 
     const b = document.createElement('button');
     b.className = 'drop';
     b.title = 'clique para revelar';
     b.innerHTML = '<div class="giro">'
       + '<div class="face verso"><div class="back"></div></div>'
-      + `<div class="face frente"><img src="${ART(code)}" alt=""></div>`
-      + '</div>';
+      + `<div class="face frente${rar ? ' ' + rar : ''}"><img src="${ART(drop.id)}" alt="">`
+      + (rar ? `<span class="rar">${rar}</span>` : '')
+      + (drop.nova ? '<span class="nova">NEW!!</span>' : '')
+      + '</div></div>';
 
     const nome = document.createElement('div');
     nome.className = 'drop-nome';
@@ -2870,15 +2925,20 @@ function mostrarFimDuelo(venci, empate, premio) {
   $('end-emoji').textContent = empate ? '🤝' : venci ? '🏆' : '💀';
   $('end-title').textContent = empate ? 'Duelo empatado' : venci ? 'Você venceu!' : 'Você perdeu';
   let sub = `LP — você ${Math.max(0, lp[0])} · oponente ${Math.max(0, lp[1])}`;
-  const cartas = premio?.cartas ?? [];
+  const drops = premio?.drops ?? [];
   if (premio) {
+    const novas = drops.filter((d) => d.nova).length;
     sub += `<br><b style="color:var(--gold)">+${premio.dp} DP</b>`
-         + (cartas.length
-            ? ` e <b style="color:var(--gold)">${cartas.length} carta(s)</b> na Coleção — vire para ver:`
+         + (drops.length
+            ? ` e <b style="color:var(--gold)">${drops.length} carta(s)</b> na Coleção`
+              // Quantas são inéditas é a informação que decide se valeu a pena
+              // duelar de novo — vale mais que o total.
+              + (novas ? ` <b style="color:#ff8a7a">(${novas} nova(s))</b>` : '')
+              + ' — vire para ver:'
             : '');
   }
   $('end-sub').innerHTML = sub;
-  renderDrops(cartas);
+  renderDrops(drops);
   $('end-overlay').hidden = false;
 }
 function fecharFimDuelo() { $('end-overlay').hidden = true; }

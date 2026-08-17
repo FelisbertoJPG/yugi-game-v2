@@ -232,26 +232,61 @@ ignorado, mas o modo NPC do builder tem um checkbox "ignorar banlist" (dá
 mais liberdade pros decks de adversário). Persiste em `store/banlist.json`
 via a API genérica `/__store/`, sem rota nova.
 
-**Drop por vitória** (`web/js/drops.js`, editado no modal de configurações de
-`web/npcs.html`): cada NPC pode ter um **pool** de cartas e uma **quantidade**
-por vitória — pool de 20, quantidade 3, e cada vitória sorteia 3 dentro dos 20.
-Antes a vitória dava sempre a mesma carta de assinatura, o que fazia a décima
-vitória entregar a décima cópia dela.
+**Drop por vitória** (`web/js/drops.js`): cada NPC pode ter um **pool** de
+cartas e uma **quantidade** por vitória — pool de 20, quantidade 3, e cada
+vitória sorteia 3 dentro dos 20. Antes a vitória dava sempre a mesma carta de
+assinatura, o que fazia a décima vitória entregar a décima cópia dela.
+
+O pool é **dividido em quatro gavetas por raridade** (UR/SR/R/N) e o sorteio
+tem dois passos: primeiro a raridade, pelos pesos de `DROP_ODDS` renormalizados
+entre as gavetas que REALMENTE têm carta (senão um pool só de N teria 48% de
+chance de não dar nada), depois uma carta uniforme dentro dela.
+
+Editado no **Deck Builder do NPC** (`deck.html?npc=<id>`), na aba **DROPS** da
+coluna da esquerda — a mesma coluna do deck, alternada por abas. Cada raridade
+é um **quadro** com moldura própria: clicar abre um (e fecha os outros), e o
+quadro aberto é o alvo do clique nas cartas do pool da direita; arrastar
+funciona igual, para qualquer quadro, aberto ou fechado, inclusive de um quadro
+para o outro (troca a raridade da carta ali). Antes disto o pool era uma tira de
+34vh no rodapé da coluna, com as quatro raridades misturadas na mesma janela — e
+as cartas de que o adversário joga 3 cópias, justamente as que mais se quer dar
+de prêmio, nasciam **sem `draggable`** no pool da direita (`el.draggable =
+!full`, uma regra do DECK aplicada a um alvo que não é o deck). Não havia aviso
+nenhum: o gesto simplesmente não começava. Hoje, no modo NPC, a miniatura arrasta
+mesmo no limite de cópias, e o clique é um caminho que não depende do arrasto.
+
+A raridade dos boosters (`reprintsOf`) virou **sugestão**: o quadro
+correspondente se destaca durante o arrasto, mas quem manda é onde a carta foi
+solta — o servidor lê a gaveta gravada, sem reconsultar booster nenhum. É o que
+deixa um adversário largar um Normal como prêmio raro sem mexer na Loja.
 
 Guardado em `conteudo/npc-drops` (espelhado em `store/npc-drops.json`) — chave
 PRÓPRIA, e não um campo dentro de `conteudo/npcs`, porque os 3 NPCs fixos não
 estão naquele array (são `const` no código com um overlay à parte) e uma chave
 por fora vale igual para fixo e customizado. **Quem sorteia é o servidor**
-(`premiar_vitoria`, migration 0027): o duelo roda na máquina do jogador, então
-sortear no navegador seria deixar escolher o próprio prêmio. Com repetição de
-propósito — é o que faz uma carta rara no meio de 20 comuns ser rara de verdade,
-e evita a pergunta sem resposta boa de "e quando o pool acabar?". Sem pool
-configurado, o prêmio é o de antes (a assinatura).
+(`premiar_vitoria`, migrations 0027/0028): o duelo roda na máquina do jogador,
+então sortear no navegador seria deixar escolher o próprio prêmio. Com repetição
+de propósito — é o que faz uma carta rara no meio de 20 comuns ser rara de
+verdade, e evita a pergunta sem resposta boa de "e quando o pool acabar?". Sem
+pool configurado, o prêmio é o de antes (a assinatura).
 
 Na tela de fim de duelo as cartas chegam VIRADAS: clique em cada uma para
 revelar, ou use o **[pular]**. Os botões de saída ficam desligados até a última
 abrir — não para prender ninguém, mas para o prêmio não passar despercebido
 atrás de um clique apressado em "novo duelo".
+
+A carta revelada mostra a **raridade** (moldura + selo, mesmo código de cores da
+revelação da Loja) e, quando for o caso, o selo **NEW!!**. As duas coisas vêm do
+campo `drops` do servidor (migration 0029), e nenhuma delas o navegador consegue
+calcular: a raridade do prêmio é a **gaveta** de onde a carta saiu — não a que
+ela tem nos boosters, que é justamente o que deixa um adversário largar um
+Normal como prêmio raro —, e "é nova" só existe **antes** do crédito (a carteira
+que volta na resposta já tem a carta dentro). Servidor sem a 0029 devolve
+`cartas` sem `drops` e a tela mostra a carta sem selo nenhum, como antes.
+A carta revelada também ficava quase invisível: `renderDrops` marca o botão como
+`disabled` para não virar de novo, e o `button:disabled { opacity: .4 }` de
+`web/css/ui.css` apagava o prêmio recém-ganho — daí o `opacity: 1` explícito em
+`.drop[disabled]`.
 
 `web/js/customcards.js` importa cartas de um "card maker" externo (nome, tipo,
 ATK/DEF, arte) para o Deck Builder. Isso só monta o **esqueleto** da carta —

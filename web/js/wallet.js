@@ -208,8 +208,14 @@ export async function encerrarDuelo(dueloId, resultado) {
   // `cartas` é a lista sorteada no pool do NPC (migration 0027); `carta` é o
   // campo antigo, de uma carta só, mantido para um servidor que ainda não tenha
   // essa migration — quem lê decide qual usar.
+  //
+  // `drops` é o MESMO sorteio com duas coisas que só o servidor sabe (migration
+  // 0029): a GAVETA de onde a carta saiu — que é a raridade de verdade do
+  // prêmio, e não a que ela tem nos boosters — e se ela é NOVA na Coleção, o que
+  // só dá para responder antes do crédito. Vem `null` de um servidor sem a 0029.
   return { ok: true, resultado: d.resultado, premio: d.premio?.premio ?? null,
            cartas: Array.isArray(d.premio?.cartas) ? d.premio.cartas : null,
+           drops: Array.isArray(d.premio?.drops) ? d.premio.drops : null,
            carta: d.premio?.carta ?? null, recusado: d.premio_recusado ?? null };
 }
 

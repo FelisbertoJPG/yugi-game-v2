@@ -76,6 +76,11 @@ let npcSignature = null;
 let dropsCfg = {};              // a configuração de TODOS os NPCs (é uma chave só)
 let dropPool = poolVazio();     // a do NPC aberto aqui
 let dropQtd = 0;
+// Qual QUADRO de raridade está aberto. O quadro aberto é o alvo do clique nas
+// cartas do pool da direita — é o que dá um caminho que não depende de arrastar.
+let dropAberto = null;
+// Qual aba da coluna da esquerda está à vista: 'deck' ou 'drops'.
+let abaAtual = 'deck';
 
 // Modo Coleção (?owned=1): o pool mostra só as cartas que o jogador POSSUI —
 // é o Deck Builder "real". Sem a flag (Área de Teste), o pool é o banco inteiro.
@@ -297,16 +302,24 @@ function renderPool() {
     const avail = availableCopies(c.id);       // quantas o jogador pode usar
     const full = copies >= avail;
     const rar = rarIdx.get(c.id)?.rarity;
+    const paraDrop = abaAtual === 'drops' && !!dropAberto;   // clique alimenta o pool de drop
     const el = document.createElement('div');
     el.className = 'thumb' + (full ? ' full' : '') + (c.custom ? ' custom' : '');
-    el.draggable = !full;
+    // No modo NPC a carta arrasta MESMO no limite de cópias: o destino pode ser
+    // um quadro do pool de drop, que não tem nada a ver com quantas cópias o
+    // deck já tem. Era exatamente isto que travava o gesto — as cartas de que o
+    // adversário joga 3, as que mais se quer dar de prêmio, nasciam sem
+    // `draggable` e nenhum aviso dizia por quê.
+    el.draggable = !full || !!npcMode;
     el.dataset.id = c.id;
     el.title = `${c.name}\n${c.tl}` +
       (rar ? `\nraridade: ${rar}` : '') +
       (ownedMode ? `\nvocê pode usar: ${avail}` : '') +
       (c.custom ? '\n(carta customizada — sem efeito em duelo)' : '') +
       banlistTooltip(c.id) +
-      (full ? `\n(no limite: ${avail})` : '\nclique ou arraste para adicionar') +
+      (paraDrop
+        ? `\nclique: mandar para o quadro ${dropAberto} do pool de drop`
+        : (full ? `\n(no limite: ${avail})` : '\nclique ou arraste para adicionar')) +
       '\nsegurar: ver detalhes';
     el.innerHTML = (c.custom ? '<span class="badge">CST</span>' : '') +
                    (rar ? `<span class="rarity ${rar}">${rar}</span>` : '') +
@@ -323,10 +336,13 @@ function renderPool() {
     el.onclick = () => {
       if (segurou()) return;            // acabou de abrir o detalhe: não adiciona
       if (tryPickCover(c.id)) return;   // escolhendo moldura: não adiciona
+      // Com a aba DROPS aberta, o clique alimenta o quadro aberto. É o caminho
+      // que não depende de arrastar — e o arrasto continua valendo do mesmo jeito.
+      if (paraDrop) return void porNoQuadro(c.id, dropAberto);
       addCard(c);
     };
     el.oncontextmenu = (e) => { e.preventDefault(); showDetail(c.id); };
-    if (!full) wireDragSource(el, c.id, 'pool');
+    if (el.draggable) wireDragSource(el, c.id, 'pool');
     frag.append(el);
   }
   $('pool-grid').replaceChildren(frag);
@@ -361,7 +377,12 @@ function refresh() {
 /** Ajusta a UI para editar um deck de um NPC. */
 function enterNpcModeUI() {
   $('npc-bar').hidden = false;
-  $('drop-sec').hidden = false;
+  $('deck-tabs').hidden = false;
+  $('tab-deck').onclick = () => mostrarAba('deck');
+  $('tab-drops').onclick = () => mostrarAba('drops');
+  // Abre o quadro que já tem carta; sem nenhuma, o primeiro. Um quadro aberto
+  // desde o começo é o que faz o clique no pool da direita ter para onde ir.
+  dropAberto = RARIDADES.find((r) => dropPool[r].length) ?? RARIDADES[0];
   $('npc-name').textContent = npcMode.name;
   // o campo de nome passa a ser o nome DESTE deck do NPC (editável).
   for (const id of ['deck-select', 'btn-new', 'btn-delete']) $(id).hidden = true;
@@ -391,28 +412,59 @@ function enterNpcModeUI() {
   };
 }
 
+/** Troca a aba da coluna da esquerda ('deck' | 'drops'). */
+function mostrarAba(qual) {
+  abaAtual = qual;
+  $('aba-deck').hidden = qual !== 'deck';
+  $('aba-drops').hidden = qual !== 'drops';
+  $('tab-deck').classList.toggle('is-on', qual === 'deck');
+  $('tab-drops').classList.toggle('is-on', qual === 'drops');
+  // O clique numa carta do pool da direita muda de significado com a aba, então
+  // as miniaturas precisam ser redesenhadas (título e cursor).
+  renderPool();
+  atualizaAlvoDeClique();
+}
+
+/** Liga/desliga o cursor que avisa que o clique alimenta o pool de drop. */
+function atualizaAlvoDeClique() {
+  document.body.classList.toggle('drop-alvo', abaAtual === 'drops' && !!dropAberto);
+}
+
 /**
- * A raridade de uma carta vem dos BOOSTERS — a mesma fonte que a Loja e o
- * servidor usam (`raridade_da_carta`). Carta que não está em booster nenhum é
- * N, que é o padrão do servidor também.
+ * A raridade que os BOOSTERS dão para esta carta — a mesma fonte que a Loja usa
+ * (`rarityIndex`, e no servidor `raridade_da_carta`). Carta que não está em
+ * booster nenhum é N.
  *
- * Isso é o que permite o pool de drop se dividir sozinho: o usuário arrasta a
- * carta e ela cai na gaveta certa, sem uma segunda tela para dizer "esta é UR".
- * O preço é que mudar a raridade de uma carta num booster muda o pool de todo
- * NPC que a tenha — e isso é o certo: raridade é uma propriedade da carta no
- * jogo, não de cada adversário.
+ * Aqui ela é só uma SUGESTÃO: ao arrastar, o quadro correspondente se destaca.
+ * Quem manda é o quadro em que a carta foi solta, porque é a gaveta gravada que
+ * o servidor lê no sorteio (`premiar_vitoria`) — o mesmo adversário pode querer
+ * largar uma Normal como prêmio raro, e o contrário também.
  */
 const raridadeDe = (id) => reprintsOf(Number(id))?.rarity ?? 'N';
 
-/** Está em alguma gaveta do pool de drop? */
-const noDropPool = (id) => RARIDADES.some((r) => dropPool[r].includes(Number(id)));
-
-/** Põe no pool, na gaveta da raridade dela. Devolve false se já estava. */
-function addAoDropPool(id) {
+/** Em qual quadro esta carta está, ou `null`. */
+function raridadeNoPool(id) {
   id = Number(id);
-  if (!id || noDropPool(id)) return false;
-  dropPool[raridadeDe(id)].push(id);
-  return true;
+  return RARIDADES.find((r) => dropPool[r].includes(id)) ?? null;
+}
+
+/**
+ * Põe a carta no quadro `rar`. Já estando em OUTRO quadro, é uma troca de
+ * raridade (arrastar de um quadro para o outro), não uma segunda cópia: a mesma
+ * carta em duas gavetas viciaria a chance dela.
+ */
+function porNoQuadro(id, rar) {
+  id = Number(id);
+  if (!id || !RARIDADES.includes(rar)) return;
+  const nome = brief(id)?.name ?? id;
+  const atual = raridadeNoPool(id);
+  if (atual === rar) return void toast(`"${nome}" ja' esta' no quadro ${rar}`);
+  if (atual) tiraDoDropPool(id);
+  dropPool[rar].push(id);
+  dropAberto = rar;
+  markDirty();
+  renderDropPool();
+  toast(atual ? `${nome}: ${atual} -> ${rar}` : `+ ${nome} -> ${rar}`);
 }
 
 function tiraDoDropPool(id) {
@@ -420,27 +472,52 @@ function tiraDoDropPool(id) {
   for (const r of RARIDADES) dropPool[r] = dropPool[r].filter((c) => c !== id);
 }
 
-/** Desenha as quatro gavetas com a chance real de cada uma. */
+/**
+ * Desenha os quatro QUADROS de raridade. Cada um é o seu próprio alvo de
+ * arrasto (aberto ou fechado) e, quando aberto, o alvo do clique nas cartas do
+ * pool da direita. A % ao lado é a chance real daquele quadro.
+ */
 function renderDropPool() {
   const caixa = $('drop-buckets');
+  if (!caixa) return;
   const chances = chancesDe(dropPool);
   const total = totalDoPool(dropPool);
   const frag = document.createDocumentFragment();
 
   for (const r of RARIDADES) {
     const ids = dropPool[r];
-    const sec = document.createElement('div');
-    sec.className = 'bucket';
+    const aberto = dropAberto === r;
 
-    const head = document.createElement('div');
-    head.className = 'bucket-head';
-    head.innerHTML = `<b class="${r}">${r}</b><span>${ids.length} carta${ids.length === 1 ? '' : 's'}</span>`
+    const quadro = document.createElement('section');
+    quadro.className = 'quadro' + (aberto ? ' aberto' : '');
+    quadro.dataset.rar = r;
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'quadro-head';
+    head.title = aberto
+      ? `quadro ${r} aberto — clicar numa carta da direita manda ela para ca'`
+      : `abrir o quadro ${r}`;
+    head.innerHTML = `<span class="seta">${aberto ? '▾' : '▸'}</span>`
+      + `<b class="${r}">${r}</b>`
+      + `<span class="qtd">${ids.length} carta${ids.length === 1 ? '' : 's'}</span>`
       + `<span class="chance${chances[r] ? '' : ' zero'}">${chances[r]}% de chance</span>`;
-    sec.append(head);
+    // Um aberto por vez: é o que faz "o quadro aberto" ser um alvo sem dúvida.
+    head.onclick = () => {
+      dropAberto = aberto ? null : r;
+      renderDropPool();
+      renderPool();
+    };
+    quadro.append(head);
 
+    const corpo = document.createElement('div');
+    corpo.className = 'quadro-corpo';
     if (!ids.length) {
-      sec.append(Object.assign(document.createElement('div'),
-        { className: 'vazio', textContent: 'nenhuma' }));
+      corpo.append(Object.assign(document.createElement('div'), {
+        className: 'quadro-vazio',
+        textContent: 'nenhuma carta aqui — arraste uma para este quadro, '
+                   + 'ou clique numa do pool da direita com ele aberto.',
+      }));
     } else {
       const grid = document.createElement('div');
       grid.className = 'deck-grid';
@@ -448,23 +525,39 @@ function renderDropPool() {
         const c = brief(id);
         const el = document.createElement('div');
         el.className = 'thumb';
+        el.draggable = true;
         el.dataset.id = id;
-        el.title = `${c?.name ?? id}\nclique para tirar do pool`;
-        el.innerHTML = `<img src="${ART(id)}" alt="" draggable="false">`;
-        el.onclick = () => { tiraDoDropPool(id); markDirty(); renderDropPool(); };
+        el.title = `${c?.name ?? id}\nclique: tirar do pool`
+                 + '\narraste para outro quadro: trocar a raridade';
+        el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">`;
+        el.onclick = () => {
+          tiraDoDropPool(id);
+          markDirty();
+          renderDropPool();
+          toast(`− ${c?.name ?? id} (pool de drop)`);
+        };
+        el.oncontextmenu = (e) => { e.preventDefault(); showDetail(id); };
+        wireDragSource(el, id, 'drop', r);
         grid.append(el);
       }
-      sec.append(grid);
+      corpo.append(grid);
     }
-    frag.append(sec);
+    quadro.append(corpo);
+    setupQuadroZone(quadro, r);
+    frag.append(quadro);
   }
 
   caixa.replaceChildren(frag);
   $('drop-count').textContent = String(total);
-  $('drop-empty').hidden = total > 0;
-  $('drop-resumo').textContent = dropQtd > 0
-    ? `${dropQtd} carta(s) por vitória`
-    : 'quantidade 0 — nada é sorteado';
+  $('tab-drops-n').textContent = String(total);
+  $('drop-resumo').innerHTML = total === 0
+    ? 'Sem carta nenhuma nos quadros, a vitória entrega a <b>carta de assinatura</b> '
+      + 'deste adversário, como era antes de existir pool.'
+    : dropQtd > 0
+      ? `Cada vitória entrega <b>${dropQtd} carta(s)</b>, sorteadas entre as <b>${total}</b> `
+        + 'destes quadros: primeiro a raridade, pela % de cada quadro, depois uma carta dentro dela.'
+      : 'Quantidade <b>0</b> — nada é sorteado. Ajuste "por vitória" aí em cima.';
+  atualizaAlvoDeClique();
 }
 
 /* ---------------------------------------------------------------- moldura
@@ -561,18 +654,31 @@ async function saveNpcDeckFromUI() {
  */
 let drag = null;
 
-function wireDragSource(el, id, from) {
+/**
+ * `rar` só existe para as cartas que já estão num quadro do pool de drop: é de
+ * qual quadro ela saiu, para arrastar de um quadro para o outro poder trocar a
+ * raridade em vez de duplicar.
+ */
+function wireDragSource(el, id, from, rar = null) {
   el.addEventListener('dragstart', (e) => {
-    drag = { id: Number(id), from };
+    drag = { id: Number(id), from, rar };
     el.classList.add('dragging');
     e.dataTransfer.effectAllowed = from === 'pool' ? 'copy' : 'move';
     e.dataTransfer.setData('text/plain', String(id));   // exigido pelo Firefox
+    // Destaca o quadro que os boosters SUGEREM para esta carta. É só sugestão:
+    // quem manda é onde ela for solta.
+    if (npcMode && from !== 'drop') {
+      document.querySelector(`.quadro[data-rar="${raridadeDe(id)}"]`)
+        ?.classList.add('sugerido');
+    }
   });
   el.addEventListener('dragend', () => {
     el.classList.remove('dragging');
     drag = null;
-    document.querySelectorAll('.dropzone.over, .dropzone.reject')
+    document.querySelectorAll('.dropzone.over, .dropzone.reject, .quadro.over, .quadro.reject')
       .forEach((z) => z.classList.remove('over', 'reject'));
+    document.querySelectorAll('.quadro.sugerido')
+      .forEach((q) => q.classList.remove('sugerido'));
     document.querySelectorAll('.thumb.drop-before')
       .forEach((t) => t.classList.remove('drop-before'));
   });
@@ -581,12 +687,61 @@ function wireDragSource(el, id, from) {
 /** O alvo aceita o que está sendo arrastado? */
 function accepts(zone) {
   if (!drag) return false;
-  if (zone === 'pool') return drag.from !== 'pool';          // devolver ao pool
-  // O pool de DROP aceita de qualquer lugar: ele nao e' parte do deck, e' a
-  // lista de premios. Arrastar uma carta do Main para ca' NAO a tira do deck —
-  // a carta que o adversario joga costuma ser a mesma que ele larga.
-  if (zone === 'drop') return drag.from !== 'drop';
+  // Devolver ao pool = remover: uma cópia do deck, ou a carta do pool de drop.
+  if (zone === 'pool') return drag.from !== 'pool';
   return drag.from === 'pool' || drag.from === zone;          // adicionar ou reordenar
+}
+
+/**
+ * Cada QUADRO de raridade é um alvo por si — aberto ou fechado, porque um
+ * quadro fechado precisa aceitar a carta também. Ele aceita de qualquer origem
+ * (pool da direita, deck, outro quadro): o pool de drop não é parte do deck,
+ * então arrastar uma carta do Main para cá NÃO a tira do deck — a carta que o
+ * adversário joga costuma ser a mesma que ele larga.
+ */
+function setupQuadroZone(el, rar) {
+  const ok = () => !!drag && !(drag.from === 'drop' && drag.rar === rar);
+
+  el.addEventListener('dragover', (e) => {
+    if (!drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = ok() ? 'copy' : 'none';
+    el.classList.add('over');
+    el.classList.toggle('reject', !ok());
+  });
+  el.addEventListener('dragleave', (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove('over', 'reject');
+  });
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('over', 'reject');
+    if (!ok()) return;
+    porNoQuadro(drag.id, rar);
+  });
+}
+
+/**
+ * Soltar DENTRO da aba de drops mas FORA de um quadro: a carta cai no quadro que
+ * os boosters sugerem. Sem isto o espaço em volta dos quadros seria um alvo
+ * morto que engole o gesto sem dizer nada — que é a versão pequena do bug que
+ * esta tela toda veio consertar. Os quadros param a propagação, então um gesto
+ * que acertou um quadro nunca chega aqui.
+ *
+ * Carta que já está num quadro é EXCEÇÃO: um solto desleixado no vão não pode
+ * mudar a raridade que alguém escolheu a dedo.
+ */
+function setupAutoDropZone(el) {
+  el.addEventListener('dragover', (e) => {
+    if (!drag || drag.from === 'drop') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+  el.addEventListener('drop', (e) => {
+    if (!drag || drag.from === 'drop') return;
+    e.preventDefault();
+    porNoQuadro(drag.id, raridadeDe(drag.id));
+  });
 }
 
 function setupDropZone(el, zone) {
@@ -620,16 +775,15 @@ function setupDropZone(el, zone) {
 
     const { id, from } = drag;
 
-    if (zone === 'drop') {
-      const c = brief(id);
-      if (!addAoDropPool(id)) return void toast(`"${c?.name ?? id}" ja' esta' no pool de drop`);
-      markDirty();
-      renderDropPool();
-      toast(`+ ${c?.name ?? id} -> pool de drop (${raridadeDe(id)})`);
-      return;
-    }
-
     if (zone === 'pool') {
+      // Veio de um quadro de raridade: devolver ao pool é tirar do pool de drop.
+      if (from === 'drop') {
+        tiraDoDropPool(id);
+        markDirty();
+        renderDropPool();
+        toast(`− ${brief(id)?.name ?? id} (pool de drop)`);
+        return;
+      }
       // devolver ao pool = remover uma cópia
       if (deck.remove(id, from)) {
         markDirty();
@@ -1208,7 +1362,10 @@ document.addEventListener('keydown', (e) => {
 setupDropZone($('main-zone'), 'main');
 setupDropZone($('extra-zone'), 'extra');
 setupDropZone($('pool-zone'), 'pool');
-setupDropZone($('drop-zone'), 'drop');
+// Os quadros de raridade do pool de drop são ligados em `renderDropPool`: eles
+// nascem e morrem a cada desenho, e cada um é o seu próprio alvo. O que sobra
+// da aba (o vão em volta dos quadros) cai na raridade sugerida pelos boosters.
+setupAutoDropZone($('drop-scroll'));
 
 window.addEventListener('beforeunload', (e) => {
   if (dirty) { e.preventDefault(); e.returnValue = ''; }

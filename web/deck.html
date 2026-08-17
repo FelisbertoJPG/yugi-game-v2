@@ -103,29 +103,83 @@
   /* O anel do "segurar" é injetado por web/js/interact.js. */
   .thumb { user-select: none; -webkit-user-select: none; }
 
-  /* ---------- pool de drop (modo NPC) ---------- */
-  /* Uma faixa por raridade, com a chance ao lado. A chance é CALCULADA
-     (`chancesDe`, em drops.js) e renormalizada entre as raridades que têm
-     carta — prometer 4% de UR num pool sem UR seria mentira na tela. */
-  .bucket { margin-bottom: 8px; }
-  .bucket-head {
-    display: flex; align-items: baseline; gap: 6px; font-size: 10px;
-    color: var(--dim); letter-spacing: 1px; margin-bottom: 3px;
+  /* ---------- abas da coluna da esquerda (modo NPC) ----------
+     O pool de drop era uma faixa espremida no rodapé desta coluna (34vh, com
+     rolagem própria). Duas coisas davam errado ali: o alvo do arrasto virava
+     uma tira fina, e as quatro raridades dividiam a MESMA janela, então o
+     gesto não tinha para onde mirar. Agora DECK e DROPS são abas: cada uma
+     ocupa a coluna inteira, no mesmo canto de sempre. */
+  .col-tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .col-tabs .tab {
+    flex: 1; padding: 7px 10px; font-size: 11px; letter-spacing: 1px;
+    background: transparent; color: var(--dim);
+    border: none; border-bottom: 2px solid transparent; cursor: pointer;
   }
-  .bucket-head b { font-size: 11px; }
-  .bucket-head .UR { color: #e8c46a; }
-  .bucket-head .SR { color: #c0c0d8; }
-  .bucket-head .R  { color: #6fa8dc; }
-  .bucket-head .N  { color: var(--dim); }
-  .bucket-head .chance { margin-left: auto; color: var(--ink); }
-  .bucket-head .chance.zero { color: var(--dim); }
-  .bucket .vazio { font-size: 10px; color: var(--line2, #4a5570); font-style: italic; }
-  /* FORA da `.deck-scroll` de proposito, com rolagem propria: dentro dela, um
-     main de 40+ cartas empurrava o pool para longe da tela — e arrastar NAO
-     rola container, entao a area existia e era inalcancavel no meio do gesto.
-     Aqui ela fica sempre a' vista, encostada no rodape da coluna do deck. */
-  #drop-sec { flex: none; max-height: 34vh; overflow-y: auto; padding: 0 12px 10px; }
-  #drop-sec .sec-head { position: sticky; top: 0; z-index: 1; }
+  .col-tabs .tab:hover { color: var(--ink); }
+  .col-tabs .tab.is-on {
+    color: var(--gold); background: var(--bg2); border-bottom-color: var(--gold);
+  }
+  .col-tabs .tab .n { color: var(--ink); font-size: 10px; }
+  .aba { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ---------- quadros de raridade do pool de drop ----------
+     Um QUADRO por raridade, com moldura própria: cada um é o seu próprio alvo
+     de arrasto e o seu próprio alvo de clique. Clicar no cabeçalho abre o
+     quadro (e fecha os outros) — o quadro aberto é onde a carta clicada no
+     pool da direita cai. A chance é CALCULADA (`chancesDe`, em drops.js) e
+     renormalizada entre as raridades que têm carta: prometer 4% de UR num
+     pool sem UR seria mentira na tela. */
+  .drop-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 16px; }
+  .drop-topo {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--line);
+    font-size: 11px; color: var(--dim);
+  }
+  .drop-topo input[type="number"] { width: 62px; font-size: 11px; }
+  .drop-topo .spacer { flex: 1; }
+  .drop-ajuda { font-size: 10px; color: var(--dim); margin: 0 0 10px; line-height: 1.6; }
+  .drop-ajuda b { color: var(--ink); }
+
+  .quadro {
+    border: 1px solid var(--line); background: var(--panel); margin-bottom: 8px;
+    transition: background .12s, outline-color .12s;
+  }
+  .quadro.aberto { border-color: var(--line2); }
+  .quadro-head {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 8px 9px; background: transparent; border: none; cursor: pointer;
+    font: inherit; font-size: 11px; letter-spacing: 1px; color: var(--dim);
+    text-align: left;
+  }
+  .quadro-head:hover { background: #ffffff08; }
+  .quadro-head .seta { width: 10px; font-size: 9px; color: var(--dim); }
+  .quadro-head b { font-size: 12px; }
+  .quadro-head b.UR { color: #e8c46a; }
+  .quadro-head b.SR { color: #cbb7ff; }
+  .quadro-head b.R  { color: #7fd0ff; }
+  .quadro-head b.N  { color: #cfd6de; }
+  .quadro-head .qtd { color: var(--ink); font-size: 10px; }
+  .quadro-head .chance { margin-left: auto; font-size: 10px; color: var(--ink); }
+  .quadro-head .chance.zero { color: var(--dim); }
+  .quadro.aberto .quadro-head { color: var(--ink); }
+  .quadro-corpo { border-top: 1px solid var(--line); padding: 8px; min-height: 76px; }
+  .quadro:not(.aberto) .quadro-corpo { display: none; }
+  .quadro-vazio {
+    font-size: 10px; color: var(--line2); font-style: italic; padding: 8px 2px;
+  }
+  /* Fechado TAMBÉM aceita — o alvo é o quadro inteiro, não o corpo, senão
+     arrastar para um quadro fechado não teria onde acertar. */
+  .quadro.over { outline: 2px dashed var(--gold); outline-offset: -2px; background: #e8c46a12; }
+  .quadro.reject.over { outline-color: var(--red); background: #e2707a12; }
+  /* A raridade que os boosters dariam a esta carta, destacada durante o arrasto.
+     É só sugestão: quem manda é o quadro em que ela for solta. */
+  .quadro.sugerido { border-color: var(--gold); }
+  .quadro.sugerido .quadro-head::after {
+    content: "sugerido"; margin-left: 8px; font-size: 9px; color: var(--gold);
+  }
+  /* Com a aba DROPS aberta, clicar no pool da direita alimenta o quadro
+     aberto em vez do deck — o cursor avisa antes do clique. */
+  body.drop-alvo .pool-scroll .thumb { cursor: copy; }
 
   /* ---------- arrastar e soltar ---------- */
   .dropzone { min-height: 74px; transition: background .12s, outline-color .12s; }
@@ -240,12 +294,6 @@
     <span id="npc-cover" class="cover-slot" tabindex="0"
           title="clique e depois escolha uma carta do deck"></span>
   </label>
-  <label style="display:flex; gap:5px; align-items:center"
-         title="quantas cartas o jogador leva ao vencer, sorteadas no pool de drop (abaixo do Extra Deck)">
-    quantidade do drop:
-    <input type="number" id="npc-drop-qtd" min="0" max="20" step="1" placeholder="0"
-           style="width:60px; font-size:11px">
-  </label>
   <label style="display:flex; gap:5px; align-items:center" title="quanto DP o jogador ganha ao vencer este deck (vazio = padrão 100)">
     prêmio:
     <input type="number" id="npc-reward" min="0" step="50" placeholder="100"
@@ -262,6 +310,17 @@
 <div class="workspace">
   <!-- ESQUERDA: o deck -->
   <div class="col deck">
+    <!-- ABAS — só no modo NPC. O pool de drop não é parte do deck (mora em
+         `conteudo/npc-drops`, por NPC), então ele ganhou a coluna inteira
+         quando é a vez dele, em vez da tira de rodapé de antes. -->
+    <div class="col-tabs" id="deck-tabs" hidden>
+      <button type="button" class="tab is-on" id="tab-deck">DECK</button>
+      <button type="button" class="tab" id="tab-drops">
+        DROPS <span class="n" id="tab-drops-n">0</span>
+      </button>
+    </div>
+
+    <div class="aba" id="aba-deck">
     <div class="sec-head">
       <span>MAIN DECK</span>
       <span class="n" id="main-count">0</span>
@@ -294,25 +353,34 @@
       </div>
 
     </div>
+    </div><!-- /aba-deck -->
 
-    <!-- POOL DE DROP — só no modo NPC. Não é parte do deck: são as cartas que
-         ESTE adversário pode largar ao ser derrotado. A raridade de cada uma
-         vem dos boosters (a mesma fonte que a Loja usa), então a gaveta é
-         escolhida sozinha e a % ao lado é a chance real daquela raridade. -->
-    <div id="drop-sec" hidden>
-      <div class="sec-head" style="margin:0 -12px 8px; border-top:1px solid var(--line)">
+    <!-- POOL DE DROP — aba própria, só no modo NPC. Não é parte do deck: são
+         as cartas que ESTE adversário pode largar ao ser derrotado, cada
+         raridade no seu quadro. O sorteio é do servidor (`premiar_vitoria`) e
+         ele confia na gaveta gravada aqui: pesa a raridade primeiro, depois
+         sorteia uma carta dentro dela. -->
+    <div class="aba" id="aba-drops" hidden>
+      <div class="drop-topo">
         <span>POOL DE DROP</span>
-        <span class="n" id="drop-count">0</span>
+        <span class="n" id="drop-count" style="color:var(--ink)">0</span>
         <span class="spacer"></span>
-        <span id="drop-resumo" style="font-size:10px; color:var(--dim)"></span>
+        <label style="display:flex; gap:5px; align-items:center"
+               title="quantas cartas o jogador leva ao vencer, sorteadas nos quadros abaixo">
+          por vitória:
+          <input type="number" id="npc-drop-qtd" min="0" max="20" step="1" placeholder="0">
+        </label>
       </div>
-      <div class="dropzone" id="drop-zone">
+      <div class="drop-scroll" id="drop-scroll">
+        <p class="drop-ajuda" id="drop-ajuda">
+          Clique num quadro para <b>abri-lo</b>. Com ele aberto, clicar numa carta
+          do pool da direita a manda para <b>aquela raridade</b> — ou arraste a
+          carta para cima do quadro, aberto ou fechado. Clique numa carta já no
+          quadro para tirá-la; arraste-a para outro quadro para trocar a raridade
+          dela. Nada disto mexe no deck.
+        </p>
         <div id="drop-buckets"></div>
-        <div class="zone-empty" id="drop-empty">
-          Arraste cartas para cá — do deck ou da direita. Elas não entram no
-          deck: são o que o adversário pode largar ao perder, sorteadas por
-          raridade. Clique numa carta daqui para tirá-la.
-        </div>
+        <div id="drop-resumo" class="drop-ajuda" style="margin:10px 0 0"></div>
       </div>
     </div>
   </div>

@@ -175,6 +175,33 @@
     100% { opacity: 0; transform: translateX(70px); }
   }
 
+  /* ---------- inspetor: a carta sob o mouse ---------- */
+  /* O painel do Tag Force / YGOPro: passou o mouse, leu a carta. Fica FORA da
+     `.arena` de propósito — ela tem `zoom: 1.25` e um layout de tabuleiro que
+     pode vir do editor de campo; um painel `fixed` aqui não entra nessa conta.
+     `pointer-events: none` porque ele nunca deve roubar um clique da mesa. */
+  #inspetor {
+    position: fixed; left: 10px; top: 76px; z-index: 56; width: 208px;
+    background: #0c1118f2; border: 1px solid var(--line); border-radius: 4px;
+    padding: 8px; pointer-events: none; display: none;
+    box-shadow: 0 6px 20px #0009;
+  }
+  #inspetor.show { display: block; }
+  #inspetor img { width: 100%; display: block; border: 1px solid var(--line); background: #0a0f16; }
+  #inspetor .nome { color: var(--gold); font-size: 12px; margin: 6px 0 1px; line-height: 1.25; }
+  #inspetor .tipo { color: var(--blue); font-size: 10px; }
+  #inspetor .linha { font-size: 10px; color: var(--dim); margin-top: 3px; }
+  #inspetor .stats { font-size: 11px; margin-top: 3px; color: var(--ink); }
+  #inspetor .stats b { color: var(--gold); }
+  #inspetor .texto {
+    font-size: 10px; line-height: 1.35; white-space: pre-wrap; color: var(--ink);
+    margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
+    max-height: 32vh; overflow: hidden;
+  }
+  #inspetor .virada { font-size: 10px; color: var(--dim); margin-top: 4px; }
+  /* Tela estreita: o painel cobriria o tabuleiro, e aí atrapalha mais que ajuda. */
+  @media (max-width: 900px) { #inspetor { display: none !important; } }
+
   /* ---------- revelação da carta ativada ---------- */
   /* O momento do Tag Force: a carta acende na zona, a arte vem grande ao centro
      por um instante e só então o efeito resolve. Não intercepta clique — quem
@@ -498,6 +525,7 @@
 
 <div id="phase-toast"></div>
 <div id="reveal" hidden></div>
+<div id="inspetor"></div>
 
 <div id="fx"></div>
 
@@ -582,6 +610,27 @@ const nameOf = (id) => db?.brief(id)?.name ?? String(id);
 injectHoldStyles(HOLD_MS);
 configureCardDetail({ db });
 
+// ---------- o banco COMPLETO, em segundo plano ----------
+// O índice enxuto já traz nome, tipo, ATK/DEF, nível, atributo e raça — tudo o
+// que o inspetor mostra de cara. Falta só o TEXTO do efeito, que mora no
+// `cards.json` inteiro (~14 MB). Carregar aqui, sem esperar, é o que deixa o
+// painel completo sem travar o boot: até ele chegar, o inspetor mostra o resto
+// e o texto entra sozinho depois.
+//
+// Assim que chega, ele é entregue à janela de detalhes também — senão ela
+// carregaria uma SEGUNDA cópia dos mesmos 14 MB no primeiro toque longo.
+let dbFull = null;
+// Declarada AQUI, e não junto do inspetor lá embaixo: o `.then` abaixo pode
+// rodar enquanto o módulo ainda está suspenso num `await` de topo, e `let` não
+// é içado — tocar `inspecionada` antes da declaração seria ReferenceError em
+// execução, com a sintaxe passando limpa. Já aconteceu uma vez hoje.
+let inspecionada = null;
+YgoDB.load('/ygo-data/data', { full: true }).then((completo) => {
+  dbFull = completo;
+  configureCardDetail({ db, full: completo });
+  if (inspecionada) inspecionar(inspecionada);   // repinta com o efeito
+}).catch(() => { /* sem o texto o inspetor continua útil */ });
+
 // estado do duelo no cliente
 let hand = { 0: [], 1: 0 };                 // p0: lista de codes; p1: só contagem
 let field = { 0: fresh(), 1: fresh() };
@@ -589,6 +638,11 @@ let question = null, ended = false, turn = 0, phase = 0, turnNo = 0;
 let lp = { 0: 8000, 1: 8000 };               // pontos de vida
 let deckCount = { 0: 0, 1: 0 };              // cartas restantes no deck de cada um
 let extraCount = { 0: 0, 1: 0 };             // cartas restantes no Extra Deck de cada um
+// O CONTEÚDO do Extra, que o motor nunca manda (para o oponente é informação
+// escondida). Sai do deck carregado no `/start` e depois só acompanha o `move`:
+// quem foi invocada sai, quem voltou entra. Serve para o jogador consultar o
+// próprio Extra no meio do duelo, como faria com a pilha na mesa.
+let extraCards = { 0: [], 1: [] };
 let extraPicker = null;                       // { acts } quando a pilha do Extra foi clicada
 let selectedHand = null;                      // índice da carta da mão selecionada
 let deckName = '';                            // deck em uso
@@ -798,6 +852,61 @@ async function loadActiveBoard() {
 
 function log(msg, big=false){ const e=document.createElement('div'); e.className='l'+(big?' big':''); e.textContent=msg; $('log').append(e); $('log').scrollTop=1e9; }
 
+// ---------- inspetor: a carta sob o mouse ----------
+//
+// O painel do Tag Force / YGOPro. Ele não pede clique nenhum: passou o mouse,
+// leu a carta — inclusive as SUAS cartas viradas e as do cemitério dos dois,
+// que é justamente onde ficava o que ninguém conseguia consultar no meio do
+// duelo sem abrir janela.
+//
+// **O que ele mostra é decidido por quem CHAMA**, e essa é a regra de sigilo:
+// `espiar` só é ligado onde o código da carta é conhecido de direito. A carta
+// virada do oponente chega ao front com `code: 0` (a `Projetar` do servidor
+// apaga na saída, uma vez por espectador), então não há o que mostrar mesmo se
+// alguém esquecer — mas o gancho também não é ligado nela.
+//
+// A última carta continua na tela depois que o mouse sai, de propósito: é o
+// comportamento do YGOPro, e serve para ler com calma o que passou.
+// (`inspecionada` é declarada junto do `dbFull`, lá em cima — o porquê está lá.)
+
+function inspecionar(code) {
+  const id = Number(code);
+  const b = db?.brief(id);
+  if (!b) return;
+  inspecionada = id;
+
+  const cheia = dbFull?.get(id);
+  const box = $('inspetor');
+  const linhas = [];
+  const ehMonstro = /Monster/i.test(b.tl || '');
+  if (ehMonstro) {
+    const nivel = b.lv ? `Nv ${b.lv}` : '';
+    const perfil = [nivel, b.at, b.r].filter(Boolean).join(' · ');
+    if (perfil) linhas.push(`<div class="linha">${perfil}</div>`);
+    linhas.push(`<div class="stats">ATK <b>${b.atk ?? '?'}</b> / DEF <b>${b.def ?? '?'}</b></div>`);
+  }
+
+  box.innerHTML =
+      `<img src="${ART(id)}" alt="">`
+    + `<div class="nome">${b.name}</div>`
+    + `<div class="tipo">${b.tl ?? ''}</div>`
+    + linhas.join('')
+    + (cheia?.desc ? `<div class="texto">${cheia.desc.replace(/</g, '&lt;')}</div>` : '');
+  box.classList.add('show');
+}
+
+/**
+ * Liga o inspetor a um elemento de carta. Devolve o próprio elemento, para
+ * poder ser encadeado na criação.
+ *
+ * `pointerenter` cobre mouse e caneta; no toque não dispara, e é o certo —
+ * quem joga no celular usa o toque longo, que abre a janela de detalhes.
+ */
+function espiar(el, code) {
+  if (el && code) el.addEventListener('pointerenter', () => inspecionar(code));
+  return el;
+}
+
 /**
  * Quanto tempo cada aviso fica na tela — e, por consequência, quanto o duelo
  * fica PARADO. O aviso é `await`-ado dentro do laço de eventos (`apply`), que
@@ -928,6 +1037,7 @@ async function start() {
   // Adversário, senão cai pro mesmo Extra do jogador (npcExtra ?? extra).
   const npcExtraIds = (advNpc && advExtra && advExtra.length) ? advExtra : extraIds;
   extraCount = { 0: extraIds.length, 1: npcExtraIds.length };
+  extraCards = { 0: [...extraIds], 1: [...npcExtraIds] };
   extraPicker = null;
   try {
     const body = { deck: ids };
@@ -1000,6 +1110,7 @@ async function startMultiplayer() {
   deckName = 'multiplayer';
   deckCount = { 0: deckA.main.length, 1: deckB.main.length };
   extraCount = { 0: deckA.extra.length, 1: deckB.extra.length };
+  extraCards = { 0: [...deckA.extra], 1: [...deckB.extra] };
   extraPicker = null;
 
   if (!ponte.souAnfitriao) {
@@ -1166,6 +1277,7 @@ function renderSelection() {
         : `<img src="${ART(c.code)}" alt="">`)
       + (soma ? `<span class="lvl">Nv ${c.param ?? '?'}</span>` : '');
     el.title = oculta ? 'carta virada' : `código ${c.code}` + (soma ? ` — nível ${c.param}` : '');
+    espiar(el, oculta ? 0 : c.code);   // carta virada do oponente nao mostra nada
     el.onclick = () => {
       if (incremental) { act('pick', c.index, `pick ${c.code}`); picked.clear(); return; }
       picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
@@ -1284,6 +1396,7 @@ function renderChain() {
     el.className = 'chain-card';
     el.innerHTML = `<img src="${ART(c.code)}" alt="">`;
     el.title = `ativar ${nameOf(c.code)}`;
+    espiar(el, c.code);
     el.onclick = () => { box.hidden = true; act('chain', c.index, `ativar ${nameOf(c.code)}`); };
     frag.append(el);
   }
@@ -1710,6 +1823,16 @@ async function handle(ev) {
       // 0x40 = LOCATION_EXTRA. Fusão/Sincro/Xyz saindo do Extra Deck pro campo.
       if (ev.fromLoc === 0x40) {
         extraCount[ev.fromCtrl] = Math.max(0, extraCount[ev.fromCtrl] - 1);
+        const lista = extraCards[ev.fromCtrl];
+        const i = lista ? lista.indexOf(ev.code) : -1;
+        if (i >= 0) lista.splice(i, 1);
+      }
+      // ...e voltando PARA ele (fusão que retorna ao Extra). Sem este ramo a
+      // lista consultável mentiria: a carta estaria de volta na pilha e não
+      // apareceria ao abrir.
+      if (ev.loc === 0x40 && ev.code) {
+        extraCount[ev.controller] = (extraCount[ev.controller] ?? 0) + 1;
+        (extraCards[ev.controller] ??= []).push(ev.code);
       }
       break;
     }
@@ -1769,6 +1892,11 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
     if (cls === 'mz' && (cell.pos & 0xc)) el.style.transform = 'rotate(90deg) scale(.82)';
     el.title = facedown ? 'carta virada' : nameOf(cell.code) + '\nsegurar: ver detalhes';
     z.append(el);
+    // O inspetor vale inclusive para a carta VIRADA — quando ela é sua. O
+    // código só chega ao front quando o dono é quem está olhando (`Projetar`),
+    // então `cell.code` já é a permissão: o setado do oponente vem 0 e não liga
+    // gancho nenhum. Saber o que você mesmo baixou não é vantagem, é memória.
+    espiar(z, cell.code);
     // Selo de estatística alterada — só aparece quando um evento `stats` já
     // mexeu no valor (equip ou entrar em campo sob um Bônus de Campo). Verde/
     // azul quando sobe, vermelho quando desce (o ciclo de equipamento por
@@ -2311,6 +2439,7 @@ function render() {
     // Segurar abre os detalhes — vale para toda carta da mão, jogável ou não.
     const segurou = wireLongPress(c, HOLD_MS, () => showCardDetail(code));
     c.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(code); };
+    espiar(c, code);
 
     if (actionsFor(h).length) {
       c.classList.add('playable', 'draggable');
@@ -2458,14 +2587,23 @@ function extraEl(player, isYou) {
   const disponiveis = (isYou && question && question.kind === 'idle' && question.player === 0)
     ? (question.spSummonable || []).filter((a) => a.controller === player)
     : [];
+  // Ver o PRÓPRIO Extra é direito de quem joga: no papel a pilha fica ali do
+  // lado e você consulta quando quiser. O do oponente continua fechado — ali
+  // sim é informação escondida pelas regras, até a carta ser invocada.
+  const podeAbrir = isYou && !disponiveis.length && extraCards[player].length > 0;
   d.title = `Extra Deck de ${player === 0 ? 'você' : 'oponente'}: ${n} carta(s)`
-    + (disponiveis.length ? ` — ${disponiveis.length} pronta(s) para Invocação Especial` : '');
+    + (disponiveis.length ? ` — ${disponiveis.length} pronta(s) para Invocação Especial` : '')
+    + (podeAbrir ? ' — clique para ver' : '');
   if (n > 0) {
     d.style.borderStyle = 'solid';
     d.style.borderColor = '#6b4a1e';
     d.innerHTML = `<span class="n">${n}</span>EXTRA`;
   } else {
     d.innerHTML = `<span class="n" style="color:var(--red)">0</span>EXTRA`;
+  }
+  if (podeAbrir) {
+    d.classList.add('has');
+    d.onclick = () => openExtra(player);
   }
   if (disponiveis.length) {
     d.classList.add('has');
@@ -2479,13 +2617,36 @@ function extraEl(player, isYou) {
   return d;
 }
 
+/** Miniatura de uma janela de pilha (cemitério, Extra), já com o inspetor. */
+function thumbEl(code) {
+  const t = document.createElement('div');
+  t.className = 'thumb';
+  t.title = nameOf(code) + '\nsegurar: ver detalhes';
+  t.innerHTML = `<img src="${ART(code)}" alt="">`;
+  wireLongPress(t, HOLD_MS, () => showCardDetail(code));
+  t.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(code); };
+  return espiar(t, code);
+}
+
 function openGrave(player) {
   const cards = field[player].g;
   $('gv-title').textContent = `Cemitério — ${player === 0 ? 'você' : 'oponente'} (${cards.length} cartas)`;
-  $('gv-grid').replaceChildren(...cards.map((code) => {
-    const t = document.createElement('div'); t.className = 'thumb'; t.title = nameOf(code);
-    t.innerHTML = `<img src="${ART(code)}" alt="">`; return t;
-  }));
+  $('gv-grid').replaceChildren(...cards.map(thumbEl));
+  $('gv-back').classList.add('show');
+}
+
+/**
+ * O PRÓPRIO Extra Deck, aberto para consulta.
+ *
+ * A lista não vem do motor: ele nunca manda o conteúdo do Extra (e faz bem —
+ * para o oponente aquilo é informação escondida). Quem sabe é a própria tela,
+ * que carregou o deck para começar o duelo; daí em diante `extraCards` só
+ * acompanha quem SAI (invocada) e quem VOLTA, pelo `move`.
+ */
+function openExtra(player) {
+  const cards = extraCards[player] ?? [];
+  $('gv-title').textContent = `Extra Deck — você (${cards.length} cartas)`;
+  $('gv-grid').replaceChildren(...cards.map(thumbEl));
   $('gv-back').classList.add('show');
 }
 

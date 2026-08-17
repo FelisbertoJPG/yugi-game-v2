@@ -258,6 +258,28 @@ que o protocolo abaixo foi decifrado — use pra achar novos formatos).
 2 lados, cemitério clicável, LP), traduz eventos→estado e mostra as ações da carta
 selecionada (Invocar/Utilizar/Setar).
 
+### Inspetor: a carta sob o mouse (`web/duel.html`)
+
+O painel do Tag Force / YGOPro, fixo à esquerda: passou o mouse, leu a carta —
+sem clique, sem janela. Vale para a mão, o campo dos dois, o cemitério, o Extra
+e as janelas de seleção/corrente.
+
+- **A regra de sigilo é o próprio dado.** `espiar(el, code)` só é ligado onde o
+  código é conhecido de direito, e o código da carta virada do OPONENTE chega ao
+  front como `0` (a `Projetar` do servidor apaga na saída, uma vez por
+  espectador). A sua carta virada chega inteira — e mostrá-la não é vantagem, é
+  memória. Não há decisão de sigilo na tela: ela mostra o que recebeu.
+- **O texto do efeito exige o banco completo** (~14 MB); o índice enxuto já traz
+  nome, tipo, ATK/DEF, nível, atributo e raça. O `duel.html` carrega o completo
+  em SEGUNDO PLANO no boot e o entrega à janela de detalhes
+  (`configureCardDetail({ full })`) — sem isso a mesma página carregaria os
+  mesmos 14 MB duas vezes, uma para o inspetor e outra no primeiro toque longo.
+- **O Extra Deck consultável** (`openExtra`) não vem do motor: ele nunca manda o
+  conteúdo do Extra, e faz bem — para o oponente aquilo é informação escondida.
+  Quem sabe é a tela, que carregou o deck no `/start`; daí em diante
+  `extraCards` acompanha o `move` nas duas direções (quem é invocada sai, quem
+  volta entra). Só o SEU Extra abre; o do oponente continua fechado.
+
 ### Ritmo e correntes (`web/duel.html`)
 
 Duas coisas que mudam o *como se joga*, não o que é jogado:

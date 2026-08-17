@@ -13,13 +13,16 @@ import { YgoDB } from '/ygo-data/src/ygodb.js';
 const ART = (id, small = false) =>
   `https://images.ygoprodeck.com/images/cards${small ? '_small' : ''}/${id}.jpg`;
 
-let cfg = { db: null, artOf: null, descOf: null };
+let cfg = { db: null, artOf: null, descOf: null, full: null };
 let fullDb = null;
 let dlg = null;
 
 /**
  * @param {object} o
  * @param {YgoDB}  o.db      índice já carregado pela tela (evita recarregar)
+ * @param {YgoDB} [o.full]   banco COMPLETO já carregado pela tela, se ela tiver
+ *                           um (o duelo tem, por causa do inspetor lateral) —
+ *                           evita a segunda cópia dos mesmos 14 MB
  * @param {Function} [o.artOf]  (id) => url, para cartas customizadas
  * @param {Function} [o.descOf] (id) => texto, para cartas customizadas
  */
@@ -113,6 +116,11 @@ export async function showCardDetail(id) {
     return;
   }
 
+  // A tela pode ENTREGAR o banco completo já carregado (`configureCardDetail
+  // ({ full })`) — é o que a tela de duelo faz, porque o inspetor lateral
+  // precisa do texto de qualquer jeito. Sem isso seriam dois carregamentos dos
+  // mesmos 14 MB na mesma página.
+  if (cfg.full) fullDb = cfg.full;
   if (!fullDb) {
     q('.desc').textContent = 'carregando…';
     try { fullDb = await YgoDB.load('/ygo-data/data', { full: true }); }

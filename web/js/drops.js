@@ -24,7 +24,7 @@
 // Relativo, e não `/web/js/...`: assim o módulo carrega igual no navegador e no
 // Node, que é o que permite o `drops.test.mjs` existir. Caminho absoluto é para
 // o que o HTML importa.
-import { pullFile, pushFile } from './projectstore.js';
+import { pullFile, pushFile, aoGravar } from './projectstore.js';
 
 const ARQUIVO = 'npc-drops';
 
@@ -77,7 +77,19 @@ export async function carregarDrops() {
   return normalizarDrops(await pullFile(ARQUIVO));
 }
 
-/** Publica. Só admin — a RLS de `conteudo` recusa o resto. */
-export async function salvarDrops(cfg) {
-  return pushFile(ARQUIVO, normalizarDrops(cfg));
+/**
+ * Publica. Só admin — a RLS de `conteudo` recusa o resto.
+ *
+ * Devolve o RESULTADO (`{banco:{ok,erro}, disco:{ok}}`), e isso não é detalhe:
+ * `pushFile` não devolve nada (ele guarda a promessa numa fila interna para
+ * poder descartar gravações atropeladas), então quem chamava direto ficava sem
+ * saber se a publicação falhou — e uma configuração de drop que não chegou ao
+ * banco é exatamente uma que "não funciona" sem dizer por quê. `aoGravar` é a
+ * porta que o `projectstore` abre para isso.
+ */
+export function salvarDrops(cfg) {
+  return new Promise((resolve) => {
+    aoGravar(ARQUIVO, (r) => { aoGravar(ARQUIVO, null); resolve(r); });
+    pushFile(ARQUIVO, normalizarDrops(cfg));
+  });
 }

@@ -59,9 +59,15 @@
     align-items: center; justify-content: center; background: #000a; padding: 16px;
   }
   .modal-back.show { display: flex; }
+  /* `max-height` + rolagem NÃO é zelo: o `.modal-back` centraliza com flex, e
+     um item centralizado que estoura a altura fica com as pontas FORA da tela,
+     sem barra de rolagem nenhuma para alcançá-las. Enquanto o formulário era
+     curto isso não aparecia; ao ganhar o pool de drop, o editor passou a nascer
+     com metade inacessível — inclusive o botão de salvar. */
   .modal {
     background: var(--panel); border: 2px solid var(--gold);
     width: min(360px, 100%); padding: 16px; box-shadow: 0 8px 32px #000c;
+    max-height: calc(100vh - 32px); overflow-y: auto;
   }
   .modal h2 { margin: 0 0 4px; font-size: 14px; color: var(--gold); letter-spacing: 1px; }
   .modal .lead { font-size: 10px; color: var(--dim); margin-bottom: 12px; }
@@ -183,6 +189,20 @@ let dbIndice = null;       // índice enxuto, só para buscar carta pelo nome
 
 const nomeDaCarta = (id) => dbIndice?.brief(id)?.name ?? String(id);
 
+/**
+ * O que o card do NPC mostra no lugar de "dropa:". `null` quando não há pool
+ * configurado — aí a linha volta a mostrar a carta de assinatura, que é o que
+ * o servidor vai dar.
+ *
+ * Existe para ser CONFIRMAÇÃO: sem isto, publicar um pool e não ver nada mudar
+ * na tela é indistinguível de publicar e falhar.
+ */
+function dropResumo(npc) {
+  const cfg = dropsCfg[npc.id];
+  if (!cfg) return null;
+  return `${cfg.quantidade} carta(s) sorteada(s) de um pool de ${cfg.pool.length}`;
+}
+
 // Cache dos tabuleiros salvos (boards/*.json) — usado no dropdown do modal e
 // pra mostrar o nome do tabuleiro escolhido no card do adversário.
 let boardsCache = [];
@@ -269,7 +289,7 @@ function render() {
         </div>
       </div>
       <div class="body">
-        <div class="drop">dropa: <b>${sig ?? '—'}</b></div>
+        <div class="drop">dropa: <b>${dropResumo(npc) ?? sig ?? '—'}</b></div>
         ${nivelInfo}
         ${campoInfo}
         ${pickHtml}
@@ -431,13 +451,18 @@ $('new-save').onclick = () => {
   const qtd = Math.max(0, Math.min(MAX_DROPS, Number($('new-drops').value) || 0));
   if (poolEditado.length && qtd > 0) dropsCfg[r.npc.id] = { quantidade: qtd, pool: [...poolEditado] };
   else delete dropsCfg[r.npc.id];
-  salvarDrops(dropsCfg).then((res) => {
-    if (res?.banco && !res.banco.ok) toast(`drop não publicado: ${res.banco.erro}`);
-  }).catch(() => toast('drop não publicado (sem conexão)'));
-
   fecharCriarAdversario();
   toast(editingId ? `"${r.npc.name}" atualizado` : `adversário "${r.npc.name}" criado — monte o deck dele`);
   render();
+
+  // O resultado da publicação é ESPERADO e dito na tela. Uma configuração de
+  // drop que não chegou ao banco é exatamente uma que "não funciona" sem
+  // explicar por quê — e quem sorteia lê do banco, não daqui.
+  salvarDrops(dropsCfg).then((res) => {
+    if (res?.banco && !res.banco.ok) toast(`drop NÃO publicado: ${res.banco.erro}`);
+    else if (qtd > 0) toast(`drop do "${r.npc.name}": ${qtd} carta(s) de um pool de ${poolEditado.length}`);
+    render();
+  }).catch(() => toast('drop NÃO publicado (sem conexão)'));
 };
 
 $('new-pool-busca').addEventListener('input', buscarCartas);

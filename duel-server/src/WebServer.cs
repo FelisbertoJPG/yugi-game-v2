@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -80,6 +80,25 @@ namespace DuelServer
         /// Sobe o servidor. Devolve `false` se nem chegou a escutar — quem chama
         /// precisa saber, para poder AVISAR o jogador em vez de sair calado.
         /// </summary>
+        /// <summary>
+        /// As URLs que o servidor REALMENTE abriu. Quando a porta pedida esta'
+        /// ocupada por OUTRO programa, o servidor anda para a proxima — e quem
+        /// abre o navegador precisa saber para onde ir.
+        /// </summary>
+        public static string UrlDuelo { get; private set; }
+        public static string UrlFront { get; private set; }
+
+        /// <summary>Quantas portas seguintes tentar antes de desistir.</summary>
+        const int PORTAS_TENTADAS = 10;
+
+        /// <summary>Troca a porta de uma URL `http://host:porta/`.</summary>
+        static string ComPorta(string url, int porta)
+        {
+            if (url == null) return null;
+            var u = new Uri(url);
+            return $"{u.Scheme}://{u.Host}:{porta}/";
+        }
+
         public static bool Run(string streamingAssets, string url = "http://localhost:8770/",
                                string webRoot = null, string extraUrl = null,
                                Action onReady = null)
@@ -91,11 +110,15 @@ namespace DuelServer
             // ObjectDisposedException, que nao e' HttpListenerException — passava
             // reto pelo catch e derrubava o processo SEM logar nada. O sintoma
             // era o pior possivel: o jogo sumia da tela e o log parava no meio.
+            // As portas EFETIVAS. Comecam nas pedidas e andam se estiverem
+            // ocupadas — ver o laco de `PORTAS_TENTADAS` mais abaixo.
+            string urlAtual = url, extraAtual = extraUrl;
+
             HttpListener Novo()
             {
                 var l = new HttpListener();
-                l.Prefixes.Add(url);
-                if (extraUrl != null) l.Prefixes.Add(extraUrl);
+                l.Prefixes.Add(urlAtual);
+                if (extraAtual != null) l.Prefixes.Add(extraAtual);
                 return l;
             }
 
@@ -109,7 +132,7 @@ namespace DuelServer
                 // ORFAO NOSSO: um duel-server que ficou vivo sem jogo aberto (o
                 // usuario matou a janela, o processo sobreviveu). Ele responde
                 // /__shutdown; qualquer outra coisa ignora e o erro segue.
-                bool pediu = PedirParaSair(url) | PedirParaSair(extraUrl);
+                bool pediu = PedirParaSair(urlAtual) | PedirParaSair(extraAtual);
 
                 // Insistir, em vez de esperar um tempo fixo: a instancia antiga
                 // ainda precisa sair do laco, soltar o ocgcore e devolver o
@@ -132,7 +155,33 @@ namespace DuelServer
                     }
                 }
             }
-            if (ultimo != null) return NaoSubiu(url, extraUrl, ultimo);
+            // AINDA ocupada, e nao era orfao nosso: e' outro programa. A 8080 e'
+            // das portas mais disputadas de qualquer maquina (Tomcat, Jenkins,
+            // outro servidor de dev, Docker), e MATAR quem a ocupa poderia
+            // derrubar trabalho de alguem — por isso a saida e' andar para a
+            // proxima porta, nao brigar por esta. O unico processo que este
+            // servidor pede para sair e' um duel-server ORFAO, que responde ao
+            // /__shutdown do bloco acima e sabe que esta' sendo substituido.
+            for (int passo = 1; ultimo != null && passo < PORTAS_TENTADAS; passo++)
+            {
+                urlAtual = ComPorta(url, new Uri(url).Port + passo);
+                extraAtual = ComPorta(extraUrl, extraUrl == null ? 0 : new Uri(extraUrl).Port + passo);
+                try { listener.Close(); } catch { }
+                listener = Novo();
+                try
+                {
+                    listener.Start();
+                    ultimo = null;
+                    Log.Info($"porta ocupada por outro programa — subindo em {urlAtual}" +
+                             (extraAtual != null ? $" / {extraAtual}" : ""));
+                }
+                catch (Exception ex) { ultimo = ex; }
+            }
+
+            if (ultimo != null) return NaoSubiu(urlAtual, extraAtual, ultimo);
+
+            UrlDuelo = urlAtual;
+            UrlFront = extraAtual ?? urlAtual;
 
             // Solta o registro do http.sys e a memoria nativa em QUALQUER forma de
             // fechamento — X da janela, Ctrl+C, logoff. Sem isto, fechar no X
@@ -140,8 +189,8 @@ namespace DuelServer
             // ocupada sem haver jogo nenhum aberto.
             ArmarFechamentoLimpo(listener);
 
-            Log.Info($"Servidor de duelo (treino W2) em {url}");
-            if (_webRoot != null) Log.Info($"Servidor do front em {extraUrl}  (raiz: {_webRoot})");
+            Log.Info($"Servidor de duelo (treino W2) em {urlAtual}");
+            if (_webRoot != null) Log.Info($"Servidor do front em {extraAtual}  (raiz: {_webRoot})");
             Log.Info("  POST /start · POST /respond · GET /health · POST /shutdown · Ctrl+C para sair");
             if (Log.FilePath != null) Log.Info($"  log da sessao: {Log.FilePath}");
 

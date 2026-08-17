@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Reflection;
 
@@ -69,7 +69,14 @@ namespace DuelServer.Update
         // qualquer outro corpo que o motor ofereça. É cérebro, viaja só no exe:
         // com o motor velho, o adversário do labirinto entra em campo com a mão
         // cheia de Nv7 que ele não sabe invocar.
-        public const string InstallerVersion = "0.7.0";
+        //
+        // 0.8.0 (17/08/2026): tres coisas de motor. O drop por vitoria virou
+        // sorteio POR RARIDADE no `premiar_vitoria`; o NpcBrain aprendeu a nao
+        // desperdicar quem vale 2 tributos (Double Coston, Kaiser Sea Horse,
+        // os Effigy); e o servidor passou a ANDAR para a proxima porta livre
+        // quando a 8080/8770 esta ocupada por outro programa, em vez de nao
+        // abrir. Sem o exe novo, o jogo continua morrendo com a porta ocupada.
+        public const string InstallerVersion = "0.8.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

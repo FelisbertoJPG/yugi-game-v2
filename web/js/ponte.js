@@ -23,10 +23,14 @@
 // `node web/js/ponte.test.mjs` rodar. Absoluto vira `C:\web\js\...` em Node.
 import { req } from './supabase.js';
 
-const SRV = 'http://localhost:8770';
+// O endereco do motor e' PROCURADO (a porta pode ter andado). Aqui ele e'
+// resolvido na primeira chamada em vez de no import: este modulo e'
+// carregado por telas que nem sempre falam com o motor.
+import { acharServidor } from './servidor.js';
 const INTERVALO_MS = 900;
 
 async function rpcLocal(caminho, corpo) {
+  const SRV = await acharServidor();
   const r = await fetch(`${SRV}${caminho}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

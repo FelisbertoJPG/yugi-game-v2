@@ -18,7 +18,7 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 11 testes da configuração de drop por NPC (pool + quantidade)
+node web/js/drops.test.mjs   # 15 testes do drop por NPC (pool por raridade + a % de cada uma)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
 npm run data:check           # integridade do banco de cartas (5 checagens)

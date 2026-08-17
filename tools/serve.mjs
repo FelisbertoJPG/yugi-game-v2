@@ -383,6 +383,26 @@ async function handleStore(name, req, res) {
   }
 }
 
-server.listen(PORT, () => {
-  console.log(`\n  yugi-game-v2 em http://localhost:${PORT}\n`);
-});
+/**
+ * Sobe na porta pedida — e, se ela estiver ocupada por OUTRO programa, anda
+ * para a próxima em vez de morrer.
+ *
+ * A 8080 é das portas mais disputadas de uma máquina de desenvolvedor (Tomcat,
+ * Jenkins, outro servidor de dev, Docker). Matar quem a ocupa poderia derrubar
+ * trabalho alheio; andar de porta não custa nada, e o endereço sai no console.
+ * O `duel-server` faz o mesmo com a 8770 (ver `WebServer.Run`).
+ */
+function subir(porta, tentativasRestantes = 10) {
+  server.once('error', (e) => {
+    if (e.code !== 'EADDRINUSE' || tentativasRestantes <= 0) throw e;
+    console.log(`  porta ${porta} ocupada — tentando a ${porta + 1}`);
+    subir(porta + 1, tentativasRestantes - 1);
+  });
+  server.listen(porta, () => {
+    console.log(`
+  yugi-game-v2 em http://localhost:${porta}
+`);
+  });
+}
+
+subir(PORT);

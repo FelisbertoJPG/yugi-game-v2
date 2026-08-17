@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using YGO;
@@ -36,6 +36,7 @@ namespace DuelServer
         const uint DUST_TORNADO = 60082869;         // remocao de S/T (Armadilha Normal)
         const uint CALL_HAUNTED = 97077563;        // continua ABERTA: alvo que vale remocao
         const uint MYSTERY_SHELL_DRAGON = 18108166;// Nv4 2000/0 — ameaca que os Nv4 do NPC nao superam
+        const uint DOUBLE_COSTON = 44436472;       // 1700/1650 Nv4 DARK — vale 2 tributos p/ DARK
         const uint RYU_RAN = 2964201;              // Nv7 2200/2600 — o corpo do relato: parede no papel,
                                                    // beatstick na mesa
         const uint ISLAND_TURTLE = 4042268;        // 1100/2000 — o alvo fraco do caso Aqua Madoor
@@ -342,6 +343,40 @@ namespace DuelServer
             p = brainLe.Decide(Idle(new[] { AQUA_MADOOR }, settable: new[] { AQUA_MADOOR }), 1);
             Check("controle: sem nada que quebre a DEF 2000 na mao dele, o Aqua Madoor SETA",
                   p.Action == "setmonster", $"(veio {p.Action} — {p.Why})");
+
+            // --- tributo: quem vale DOIS nao se gasta a' toa -----------------
+            //
+            // Double Coston (DARK), Kaiser Sea Horse (LIGHT) e os Effigy contam
+            // como 2 tributos. Quem manda nisso e' o motor, que ja' devolve
+            // `release = 2` na opcao — o cerebro so' precisa nao desperdicar.
+            // Como esses corpos sao FRACOS de proposito (o Earth Effigy tem 100
+            // de ATK), a ordem por ATK os escolhia primeiro e eles viravam
+            // tributo comum de uma invocacao que qualquer monstro pagaria.
+            InteractiveDuel.Question Tributo(int precisa, params (uint code, int release)[] ops)
+            {
+                var qq = new InteractiveDuel.Question { kind = "selecttribute", player = 1, selMin = precisa };
+                int i = 0;
+                foreach (var (code, rel) in ops)
+                    qq.choices.Add(new InteractiveDuel.Sel { code = code, index = i++, release = (byte)rel });
+                return qq;
+            }
+
+            // precisa de 1, e um corpo comum paga: o que vale dois fica.
+            var escolha = brain.DecideSelect(Tributo(1, (DOUBLE_COSTON, 2), (BATTLE_OX, 1)), 1);
+            Check("tributo de 1: guarda o Double Coston e paga com o corpo comum",
+                  escolha.Count == 1 && escolha[0] == 1, $"(escolheu {string.Join(",", escolha)})");
+
+            // precisa de 2 e SO' o que vale dois existe: usa ele, com uma carta so'.
+            escolha = brain.DecideSelect(Tributo(2, (DOUBLE_COSTON, 2)), 1);
+            Check("tributo de 2 com so' o Coston: paga com UMA carta",
+                  escolha.Count == 1 && escolha[0] == 0, $"(escolheu {string.Join(",", escolha)})");
+
+            // precisa de 2 e ha' dois corpos comuns: paga com eles, na ordem do
+            // ATK, e o que vale dois continua guardado.
+            escolha = brain.DecideSelect(Tributo(2, (DOUBLE_COSTON, 2), (BATTLE_OX, 1), (CELTIC, 1)), 1);
+            Check("tributo de 2 com dois corpos comuns: nao encosta no Coston",
+                  escolha.Count == 2 && !escolha.Contains(0),
+                  $"(escolheu {string.Join(",", escolha)})");
 
             // mao vazia
             campo.Clear();

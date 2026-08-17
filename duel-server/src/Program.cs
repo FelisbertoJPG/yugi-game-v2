@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -169,7 +169,11 @@ namespace DuelServer
                     {
                         if (lan) ImprimeEnderecosLan();
                         if (Array.IndexOf(args, "--no-browser") >= 0) return;
-                        AbrirNavegador(FrontUrl + (temUpdate ? "web/atualizando.html" : "web/index.html"));
+                        // A porta pode NAO ser a 8080: se ela estava ocupada por
+                        // outro programa, o servidor andou para a proxima. Abrir
+                        // a URL fixa levaria o jogador ao programa do outro.
+                        string baseFront = (WebServer.UrlFront ?? FrontUrl).Replace("://+:", "://localhost:");
+                        AbrirNavegador(baseFront + (temUpdate ? "web/atualizando.html" : "web/index.html"));
                     });
 
                 // Nao subiu: ate' agora o processo saia com 0 e a janela fechava

@@ -196,9 +196,10 @@ import {
   listProjectBoards, saveProjectBoard, deleteProjectBoard, slugify,
 } from '/web/js/projectboards.js';
 import { createEditor } from '/web/js/campoeditor.js';
+import { acharServidor } from '/web/js/servidor.js';
 
 const $ = (id) => document.getElementById(id);
-const SRV = 'http://localhost:8770';
+const SRV = await acharServidor();
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 
 let boards = [];          // [{path, board}] vindos do projeto

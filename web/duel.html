@@ -614,6 +614,7 @@ import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
 import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
 import { decidirCorrente, normalizarModo, MODOS, MODO_PADRAO } from '/web/js/correntes.js';
 import { criarFilaDeVisoes } from '/web/js/filavisoes.js';
+import { acharServidor } from '/web/js/servidor.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -641,7 +642,9 @@ let sala = null;           // dados da partida (quem sou eu, quem hospeda, os yd
 let ponte = null;          // canal com a outra máquina
 const ehMultiplayer = () => !!ponte;
 
-const SRV = 'http://localhost:8770';
+// Onde o motor esta' — procurado, nao assumido (ver web/js/servidor.js): a
+// porta pode ter andado se a 8770 estivesse ocupada por outro programa.
+const SRV = await acharServidor();
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 // Nome por bit de fase. Cobre mais casos que os 6 "oficiais" porque o motor

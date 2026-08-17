@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -1193,14 +1193,33 @@ namespace DuelServer
             if (q.choices.Count == 0) return picks;
 
             // Tributo por sacrifício: os mais FRACOS até somar os releases pedidos.
+            //
+            // O `release` de cada opção é quanto ELA vale em tributos — o motor
+            // já resolve as cartas que "contam como dois" (Double Coston para
+            // DARK, Kaiser Sea Horse para LIGHT, os Effigy para Normal). Contar
+            // por `release` em vez de por cabeça é o que faz o NPC invocar um
+            // Nv7 com uma carta só quando tem uma dessas em campo.
+            //
+            // A armadilha é a outra ponta: quem vale dois costuma ser um corpo
+            // FRACO de propósito (o Earth Effigy tem 100 de ATK), então a ordem
+            // por ATK o escolhia primeiro — e ele virava tributo comum de uma
+            // invocação que qualquer monstro pagaria. Gastar o que vale dois
+            // onde um bastava é jogar fora meia invocação futura.
             if (q.choices[0].release > 0)
             {
+                int Vale(InteractiveDuel.Sel c) => Math.Max(1, (int)c.release);
+
+                // Primeiro tenta pagar SÓ com quem vale um. Se der, o que vale
+                // dois fica guardado para o corpo grande que ele sozinho paga.
+                var simples = q.choices.Where(c => Vale(c) == 1).ToList();
+                var fonte = simples.Sum(Vale) >= need ? simples : q.choices;
+
                 int soma = 0;
-                foreach (var c in q.choices.OrderBy(c => _cards.Stats(c.code).AtkValue))
+                foreach (var c in fonte.OrderBy(c => _cards.Stats(c.code).AtkValue))
                 {
                     if (soma >= need) break;
                     picks.Add(c.index);
-                    soma += Math.Max(1, (int)c.release);
+                    soma += Vale(c);
                 }
                 return picks;
             }

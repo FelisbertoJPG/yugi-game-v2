@@ -120,6 +120,12 @@
   .bucket-head .chance { margin-left: auto; color: var(--ink); }
   .bucket-head .chance.zero { color: var(--dim); }
   .bucket .vazio { font-size: 10px; color: var(--line2, #4a5570); font-style: italic; }
+  /* FORA da `.deck-scroll` de proposito, com rolagem propria: dentro dela, um
+     main de 40+ cartas empurrava o pool para longe da tela — e arrastar NAO
+     rola container, entao a area existia e era inalcancavel no meio do gesto.
+     Aqui ela fica sempre a' vista, encostada no rodape da coluna do deck. */
+  #drop-sec { flex: none; max-height: 34vh; overflow-y: auto; padding: 0 12px 10px; }
+  #drop-sec .sec-head { position: sticky; top: 0; z-index: 1; }
 
   /* ---------- arrastar e soltar ---------- */
   .dropzone { min-height: 74px; transition: background .12s, outline-color .12s; }
@@ -287,24 +293,25 @@
         </div>
       </div>
 
-      <!-- POOL DE DROP — só no modo NPC. Não é parte do deck: são as cartas que
-           ESTE adversário pode largar ao ser derrotado. A raridade de cada uma
-           vem dos boosters (a mesma fonte que a Loja usa), então a gaveta é
-           escolhida sozinha e a % ao lado é a chance real daquela raridade. -->
-      <div id="drop-sec" hidden>
-        <div class="sec-head" style="margin:16px -12px 8px; border-top:1px solid var(--line)">
-          <span>POOL DE DROP</span>
-          <span class="n" id="drop-count">0</span>
-          <span class="spacer"></span>
-          <span id="drop-resumo" style="font-size:10px; color:var(--dim)"></span>
-        </div>
-        <div class="dropzone" id="drop-zone">
-          <div id="drop-buckets"></div>
-          <div class="zone-empty" id="drop-empty">
-            Arraste cartas para cá — do deck ou da direita. Elas não entram no
-            deck: são o que o adversário pode largar ao perder, sorteadas por
-            raridade. Clique numa carta daqui para tirá-la.
-          </div>
+    </div>
+
+    <!-- POOL DE DROP — só no modo NPC. Não é parte do deck: são as cartas que
+         ESTE adversário pode largar ao ser derrotado. A raridade de cada uma
+         vem dos boosters (a mesma fonte que a Loja usa), então a gaveta é
+         escolhida sozinha e a % ao lado é a chance real daquela raridade. -->
+    <div id="drop-sec" hidden>
+      <div class="sec-head" style="margin:0 -12px 8px; border-top:1px solid var(--line)">
+        <span>POOL DE DROP</span>
+        <span class="n" id="drop-count">0</span>
+        <span class="spacer"></span>
+        <span id="drop-resumo" style="font-size:10px; color:var(--dim)"></span>
+      </div>
+      <div class="dropzone" id="drop-zone">
+        <div id="drop-buckets"></div>
+        <div class="zone-empty" id="drop-empty">
+          Arraste cartas para cá — do deck ou da direita. Elas não entram no
+          deck: são o que o adversário pode largar ao perder, sorteadas por
+          raridade. Clique numa carta daqui para tirá-la.
         </div>
       </div>
     </div>

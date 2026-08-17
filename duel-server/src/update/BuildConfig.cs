@@ -76,7 +76,18 @@ namespace DuelServer.Update
         // os Effigy); e o servidor passou a ANDAR para a proxima porta livre
         // quando a 8080/8770 esta ocupada por outro programa, em vez de nao
         // abrir. Sem o exe novo, o jogo continua morrendo com a porta ocupada.
-        public const string InstallerVersion = "0.8.0";
+        //
+        // 0.9.0 (17/08/2026): o Para & Dox parou de jogar fora o proprio deck. O
+        // Gate Guardian nao volta do cemiterio (precisa ter sido corretamente
+        // invocado antes) e a regra de descarte, que joga fora o MAIOR monstro
+        // da mao, rasgava a carta toda vez; agora ele e as tres pecas ficam no
+        // fim da fila, e os atalhos que cobram um tributo se recusam a sair com
+        // o campo so' de pecas. Junto veio o Mausoleu do Imperador (paga LP no
+        // lugar dos tributos) e a correcao do SELECT_OPTION, que lia 4 bytes por
+        // opcao onde o motor manda 8 — com duas opcoes a segunda sumia, e a
+        // moeda do Mago do Tempo mostrava "Cara" e "Opcao 2" em vez de "Coroa".
+        // Tudo isto e' motor: sem o exe novo, nada disso existe para quem joga.
+        public const string InstallerVersion = "0.9.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

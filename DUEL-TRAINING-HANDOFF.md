@@ -201,6 +201,56 @@ dois duelos reais (negar uma invocação e negar um Raigeki). Os duelos reais es
 lá por um motivo específico: se o contexto da janela parar de chegar, nenhuma
 regra acusa nada — o sintoma seria só "ele nunca mais usou Solemn Judgment".
 
+### O Gate Guardian: cartas que o NPC não pode gastar
+
+O deck do Para & Dox tem uma peça que **não volta de lugar nenhum**. O Gate
+Guardian (3750/3400, Nv11) só existe por Invocação Especial tributando Sanga +
+Kazejin + Suijin em campo; sem ter sido corretamente invocado antes, nenhuma
+reanimação o aceita de volta do cemitério. E a regra de descarte do
+`DecideSelect` joga fora **o maior monstro da mão** — porque monstro grande no
+cemitério é monstro grande de volta pelo Monster Reborn. Num deck qualquer isso
+é certo; aqui, o maior monstro de qualquer mão é justamente o Gate Guardian, e o
+descarte (o custo do Tribute to The Doomed, por exemplo) **rasgava a carta**.
+
+Três regras, todas no mesmo lugar em que o problema nasceu:
+
+1. `ValorDescarte` põe o Gate Guardian (−3) e as três peças (−2) **abaixo de "não
+   é monstro"** (−1). Entre jogar fora uma magia e jogar fora o rei do deck, vai a
+   magia. Não é proibição: obrigado a escolher entre rei e peça, sai a peça.
+2. Os atalhos que cobram **um tributo** (Tribute Doll, Metamorphosis, Monster
+   Gate) só saem se houver em campo um corpo que **não** seja peça
+   (`TemCorpoDispensavel`). Quem escolhe o tributo é o `DecideSelect`, e com o
+   campo só de peças o custo sairia de uma delas por falta de opção —
+   desmontando o que o deck passou o duelo inteiro montando. Cada peça sozinha já
+   é uma parede que zera o ATK de quem ataca; a fusão que o Metamorphosis traz
+   (Labyrinth Tank, 2400) vale menos que isso.
+3. No `DecideSelect`, o tributo prefere quem não é peça **como desempate** — o
+   caso real é Kazejin e Garnecia com os mesmos 2400, onde a ordem decidia por
+   acaso qual dos dois virava custo.
+
+E o **Mausoléu do Imperador** é como as peças chegam ao campo: o deck é feito de
+Nv7 preso na mão esperando dois tributos que nunca chegam, e ele paga 1000 LP por
+tributo no lugar deles. Duas armadilhas aqui:
+
+- o efeito **não** é uma invocação alternativa da carta da mão (o monstro nunca
+  aparece em `summonable`): é um **efeito de ignição do próprio Mausoléu**, que
+  aparece em `activatable` com o mesmo código da magia na mão. Quem separa "pôr a
+  magia em campo" de "usar o efeito dela" é o **`location`** (mão 0x2 × zona de
+  magia 0x8);
+- a escolha de **quem sobe** chega como "escolha uma carta da mão" — a MESMA
+  pergunta de um custo de descarte, querendo o oposto dela. Por isso
+  `PlanoDoMausoleu` decide o alvo na hora de ativar e deixa a marca
+  `_alvoDoMausoleu` para o `DecideSelect` cumprir (mesmo padrão do
+  `_proximoAlvoEquipFraco`). Sem isso o NPC pagaria 2000 LP para invocar a **pior**
+  carta da mão, já que a fila de descarte agora empurra as peças para o fim.
+
+A preferência é sempre a peça que **falta em campo**, mesmo com menos ATK: o
+Kazejin de 2400 completa o trio, o Garnecia de 2400 não completa nada. E a magia
+de campo ajuda **os dois lados** (`EFFECT_FLAG_BOTH_SIDE`), então sem Nv5+ na mão
+ela fica guardada — abrir o campo à toa é presentear o oponente.
+
+Teste: `duel-server.exe --test-paradox` — 32 checagens.
+
 > **Compile com o servidor parado.** O `.exe` fica travado enquanto roda e o
 > `dotnet build` falha — mas o teste seguinte roda o binário ANTIGO e parece que
 > a mudança não funcionou. Use `npm run duel:build` / `npm run duel:test`, que
@@ -486,6 +536,24 @@ posição NÃO emite MSG_MOVE — sem tratar o 53, a carta vira no motor e não 
 Medido com `--probe-pos`.
 **MSG_DRAW (90):** `player(1) count(4)` + por carta `code(4) status(4)` (bit 0x80000000=oculta).
 **MSG_DAMAGE(91)/RECOVER(92)/PAY_LPCOST(100):** `player(1) amount(4)`. LP começa 8000.
+**SELECT_OPTION (14):** `player(1) count(1)` + por opção **8 bytes** (`description`,
+uint64). Resposta = `int32` com o índice (0-based) na lista oferecida.
+⚠️ Eram **4** aqui, e o erro era silencioso do jeito mais caro: com UMA opção o
+valor sai certo (a metade baixa vem primeiro, little-endian) e nada denuncia o
+problema. Com duas, a lista lida vira `[metade baixa da 1ª, metade ALTA da 1ª]` —
+a segunda opção **some**, e mesmo assim a contagem de botões na tela fecha. Foi
+assim que a moeda do Mago do Tempo passou a mostrar "👑 Cara" + "Opção 2" em vez
+de "Cara" + "Coroa". Medido pelo `len` da mensagem: **11** bytes para uma opção
+(1+1+1+8), **19** para duas.
+
+> **A descrição é de 64 bits porque o `aux.Stringid` deste core é
+> `(indice & 0xfffff) | code << 20`** (`scripts/core/utility.lua`) — e não o
+> `code * 16 + indice` dos cores antigos. O deslocamento de 20 bits joga
+> qualquer id de carta real para fora dos 32. Isso é o que permite ao NPC
+> escolher a opção pelo que ela SIGNIFICA: o Mausoléu do Imperador manda
+> `0x4D2C3BD00001` ("pago 1000 por 1 tributo") e `…0002` ("2000 por 2"), e sem
+> ler isso a resposta fixa "índice 0" invocaria sempre o corpo menor.
+
 **MSG_TOSS_COIN (115):** `player(1) count(1) res(count bytes)` (1 = Cara / Heads, 0 = Coroa / Tails). Emitido em efeitos como o Mago do Tempo.
 **MSG_TOSS_DICE (116):** `player(1) count(1) res(count bytes)` (resultados de 1 a 6).
 NEW_TURN=40, NEW_PHASE=41 (int16), SUMMONING=60, SUMMONED=61.

@@ -47,6 +47,42 @@ namespace DuelServer
         const uint METAMORPHOSIS = 46411259;     // tributa 1 → fusão de MESMO nível do Extra
         const uint MAGICAL_LABYRINTH = 64389297; // equipa no muro → depois vira Wall Shadow
 
+        // **O trio e o rei.** O Gate Guardian não tem invocação normal NEM
+        // reanimação: o Lua dele exige tributar Sanga + Kazejin + Suijin em
+        // campo, e uma carta que precisa ser "corretamente invocada" antes não
+        // volta do cemitério nunca. Então descartá-lo mata a carta para sempre —
+        // e era exatamente o que o NPC fazia, porque a regra de descarte joga
+        // fora o MAIOR monstro da mão (Nv11, 3750 de ATK: sempre ele).
+        //
+        // As três peças são o caminho até ele, e cada uma sozinha já é uma
+        // parede boa (a habilidade delas zera o ATK de quem ataca, uma vez por
+        // duelo). Gastá-las como custo de Metamorphosis/Monster Gate/Tribute
+        // Doll é jogar fora as duas coisas de uma vez: o efeito e o rei.
+        const uint GATE_GUARDIAN = 25833572;     // 3750/3400 Nv11 — só tributando as 3 peças
+        const uint SANGA = 25955164;             // 2600/2200 Nv7 (LIGHT/Thunder)
+        const uint SUIJIN = 98434877;            // 2500/2400 Nv7 (WATER/Aqua)
+        const uint KAZEJIN = 62340868;           // 2400/2200 Nv7 (WIND/Spellcaster)
+        static readonly HashSet<uint> PECAS_GATE_GUARDIAN = new() { SANGA, SUIJIN, KAZEJIN };
+
+        // Magia de CAMPO. O efeito não é uma invocação alternativa da carta que
+        // está na mão (então o monstro NÃO aparece em `summonable`): é um efeito
+        // de IGNIÇÃO do próprio Mausoléu, que aparece em `activatable` com
+        // `location` na zona de magia. Pagando 1000 LP por tributo exigido, ele
+        // Invoca Normalmente um monstro da mão sem tributo nenhum — que é como um
+        // deck de Nv7 preso na mão finalmente põe corpo em campo.
+        const uint MAUSOLEUM = 80921533;
+        // As duas opções que o Lua oferece ao ativar: 1000 LP para quem pede 1
+        // tributo (Nv5/6) e 2000 para quem pede 2 (Nv7+). O motor manda os ids
+        // de texto na pergunta, então dá para escolher pelo que a opção
+        // SIGNIFICA em vez de chutar a primeira da lista.
+        //
+        // A conta é a do `aux.Stringid` DESTE core (`utility.lua`):
+        // `(indice & 0xfffff) | code << 20` — 64 bits, não o `code * 16 + i` dos
+        // cores antigos. Conferido contra o motor: o Mausoléu manda
+        // 0x3BD00001/0x3BD00002 nas duas opções.
+        const ulong MAUSOLEU_1_TRIBUTO = ((ulong)MAUSOLEUM << 20) | 1;
+        const ulong MAUSOLEU_2_TRIBUTOS = ((ulong)MAUSOLEUM << 20) | 2;
+
         const uint COCOON_OF_EVOLUTION = 40240595;
         const uint INSECT_ARMOR_LASER = 3492538;   // +700 ATK — o alvo default (maior ATK) já serve
         const uint INSECT_IMITATION = 96965364;    // tributa 1 inseto fraco, traz 1 mais forte do deck
@@ -712,6 +748,13 @@ namespace DuelServer
         {
             int foe = 1 - me;
 
+            // Alvo do Mausoléu que não foi consumido: a ativação foi negada, ou
+            // o motor nunca chegou a perguntar quem sobe. Chegar aqui significa
+            // que a jogada acabou — deixar a marca de pé faria a PRÓXIMA escolha
+            // da mão (um custo de descarte, por exemplo) jogar fora justamente a
+            // carta que ele ia invocar.
+            _alvoDoMausoleu = 0;
+
             // 0. BUSCA ESPECÍFICA antes da compra. Comprar primeiro pode trazer a
             //    carta que a busca traria — e aí a busca vira carta morta. Buscar
             //    primeiro nunca desperdiça. O Pote continua logo abaixo, então na
@@ -1014,6 +1057,58 @@ namespace DuelServer
             // um corpo qualquer e traz um grande de graça. Sem estas regras o
             // NPC ficava com a mão cheia de Nv7 e um Labyrinth Wall em campo.
 
+            // 5.90 MAUSOLÉU DO IMPERADOR — a magia de campo que resolve o
+            //      problema-raiz deste deck: um Nv7 na mão pede DOIS tributos, e
+            //      até eles chegarem o NPC não põe corpo nenhum. Pagando LP, o
+            //      Mausoléu invoca esse Nv7 sem tributo — e é assim que as peças
+            //      do Gate Guardian chegam ao campo sem gastar outro corpo.
+            //
+            //      São dois passos, e por isso duas regras: primeiro a magia sai
+            //      da MÃO para a zona de campo; depois, já em campo, o efeito de
+            //      IGNIÇÃO dela é que invoca. As duas aparecem em `activatable`
+            //      com o mesmo código — quem separa é o `location`.
+            var mausoleuNaMao = q.activatable.FirstOrDefault(
+                a => a.code == MAUSOLEUM && a.location == HAND);
+            var mausoleuEmCampo = q.activatable.FirstOrDefault(
+                a => a.code == MAUSOLEUM && a.location == SZONE);
+
+            //      O efeito primeiro: com a magia já em campo, usá-la é sempre
+            //      melhor que pôr outra cópia no lugar. O `PlanoDoMausoleu` diz
+            //      quem sobe e quanto custa — e o plano é o mesmo que o
+            //      `DecideOption` e o `DecideSelect` vão seguir logo em seguida.
+            var plano = PlanoDoMausoleu(me);
+            if (mausoleuEmCampo.code == MAUSOLEUM)
+            {
+                if (plano.alvo != 0)
+                {
+                    // A flag é o que avisa o `DecideSelect` de que a pergunta da
+                    // mão que vem aí é uma INVOCAÇÃO, e não um custo de
+                    // descarte: as duas chegam lá como "escolha uma carta da
+                    // mão" e querem exatamente o oposto uma da outra. Mesmo
+                    // padrão do `_proximoAlvoEquipFraco`.
+                    _alvoDoMausoleu = plano.alvo;
+                    return new Play("activate", mausoleuEmCampo.index,
+                        $"Mausoleu: paga {plano.custo} LP e invoca {plano.alvo} " +
+                        $"(ATK {_cards.Stats(plano.alvo).AtkValue}) da mao, sem tributo");
+                }
+                _log($"guarda o efeito do Mausoleu: nenhum Nv5+ na mao que eu consiga " +
+                     $"pagar sem cair abaixo do piso de {LP_PISO} LP");
+            }
+
+            //      A magia da mão só vale a pena com um corpo grande esperando —
+            //      e ela ajuda OS DOIS lados (`EFFECT_FLAG_BOTH_SIDE`), então
+            //      abrir o campo sem ter o que invocar é presentear o oponente.
+            if (mausoleuNaMao.code == MAUSOLEUM)
+            {
+                if (_faceUpStOf(me).Contains(MAUSOLEUM))
+                    _log("guarda a 2a copia do Mausoleu: ja' tenho um em campo");
+                else if (plano.alvo == 0)
+                    _log("guarda o Mausoleu: sem Nv5+ na mao ele so' ajudaria o oponente");
+                else
+                    return new Play("activate", mausoleuNaMao.index,
+                        $"Mausoleu do Imperador: abre a invocacao de {plano.alvo}, preso na mao");
+            }
+
             // 5.91 GATE GUARDIAN e qualquer OUTRO corpo grande oferecido por
             //      Invocação Especial. O motor só põe em `spSummonable` o que já
             //      pode ser pago (o Gate Guardian exige Sanga + Kazejin + Suijin
@@ -1044,13 +1139,24 @@ namespace DuelServer
             //      explica a recusa em vez de deixar a carta parada sem motivo.
             if (Ativavel(q, TRIBUTE_DOLL))
             {
-                var nv7 = _handOf(me).Where(c => _cards.Stats(c).IsMonster && _cards.Stats(c).Level == 7)
-                    .OrderByDescending(c => _cards.Stats(c).AtkValue).FirstOrDefault();
-                if (nv7 != 0)
+                // Quem entra: entre os Nv7 da mão, uma PEÇA que falta em campo
+                // vem antes do resto mesmo tendo menos ATK — o Kazejin de 2400
+                // completa o Gate Guardian, o Garnecia de 2400 não completa nada.
+                var nv7Mao = _handOf(me)
+                    .Where(c => _cards.Stats(c).IsMonster && _cards.Stats(c).Level == 7)
+                    .OrderByDescending(c => PecaQueFalta(me, c) ? 1 : 0)
+                    .ThenByDescending(c => _cards.Stats(c).AtkValue)
+                    .ToList();
+                var nv7 = nv7Mao.FirstOrDefault();
+                if (nv7 == 0)
+                    _log("guarda Tribute Doll: nenhum monstro Nv7 na mao para trazer");
+                else if (!TemCorpoDispensavel(me))
+                    _log("guarda Tribute Doll: so' tenho peca do Gate Guardian em campo — " +
+                         "o tributo comeria justamente o que estou juntando");
+                else
                     return new Play("activate", IdxAtivavel(q, TRIBUTE_DOLL),
-                        $"Tribute Doll: troca um corpo qualquer pelo Nv7 {nv7} " +
+                        $"Tribute Doll: troca um corpo dispensavel pelo Nv7 {nv7} " +
                         $"(ATK {_cards.Stats(nv7).AtkValue}) da mao");
-                _log("guarda Tribute Doll: nenhum monstro Nv7 na mao para trazer");
             }
 
             // 5.93 METAMORPHOSIS: tributa 1 monstro e traz do Extra uma FUSÃO do
@@ -1067,10 +1173,17 @@ namespace DuelServer
             //      MENOR ATK. Falta só não ficar de campo vazio — daí o 2+.
             if (Ativavel(q, METAMORPHOSIS))
             {
-                if (QtdMonstros(me) >= 2)
+                if (QtdMonstros(me) < 2)
+                    _log("guarda Metamorphosis: tenho um corpo so' em campo — tributa-lo deixaria o campo vazio");
+                else if (!TemCorpoDispensavel(me))
+                    // A fusão que ela traz aqui é o Labyrinth Tank, 2400 — menos
+                    // que Sanga e Suijin, e sem a habilidade que zera o ATK de
+                    // quem ataca. Trocar peça por Tank é perder duas vezes.
+                    _log("guarda Metamorphosis: em campo so' tenho peca do Gate Guardian, " +
+                         "e o efeito de cada uma vale mais que a fusao que ela traz");
+                else
                     return new Play("activate", IdxAtivavel(q, METAMORPHOSIS),
-                        "Metamorphosis: troca o corpo mais fraco por uma fusao do Extra");
-                _log("guarda Metamorphosis: tenho um corpo so' em campo — tributa-lo deixaria o campo vazio");
+                        "Metamorphosis: troca o corpo dispensavel mais fraco por uma fusao do Extra");
             }
 
             // 5.94 MONSTER GATE: tributa 1 e cava o deck até achar um monstro
@@ -1083,8 +1196,13 @@ namespace DuelServer
             //      este é uma aposta na média do deck. O 2+ é a mesma trava:
             //      cavar é bom, ficar de campo vazio para cavar não é.
             if (Ativavel(q, MONSTER_GATE) && QtdMonstros(me) >= 2)
-                return new Play("activate", IdxAtivavel(q, MONSTER_GATE),
-                    "Monster Gate: tributa o corpo mais fraco e cava o deck por um monstro");
+            {
+                if (TemCorpoDispensavel(me))
+                    return new Play("activate", IdxAtivavel(q, MONSTER_GATE),
+                        "Monster Gate: tributa o corpo dispensavel mais fraco e cava o deck por um monstro");
+                _log("guarda Monster Gate: o tributo sairia de uma peca do Gate Guardian — " +
+                     "cavar as cegas nao paga o que ela ja' e' em campo");
+            }
 
             // 5.95 MAGICAL LABYRINTH: equipa no Labyrinth Wall e, depois,
             //      tributa o muro para trazer o Wall Shadow (1600/3000) do DECK.
@@ -1214,8 +1332,17 @@ namespace DuelServer
                 var simples = q.choices.Where(c => Vale(c) == 1).ToList();
                 var fonte = simples.Sum(Vale) >= need ? simples : q.choices;
 
+                // Peça do Gate Guardian por último, mesmo empatando em ATK: o
+                // Kazejin e o Garnecia têm os mesmos 2400, e nesse empate a
+                // ordem decidia por acaso qual dos dois virava custo. Quem sai é
+                // sempre o que não faz falta ao combo. Isto é desempate, não
+                // proibição — pedindo mais tributos do que eu tenho de sobra, a
+                // peça entra: recusar aqui deixaria o motor esperando por uma
+                // resposta que nunca viria.
                 int soma = 0;
-                foreach (var c in fonte.OrderBy(c => _cards.Stats(c.code).AtkValue))
+                foreach (var c in fonte
+                             .OrderBy(c => PECAS_GATE_GUARDIAN.Contains(c.code) ? 1 : 0)
+                             .ThenBy(c => _cards.Stats(c.code).AtkValue))
                 {
                     if (soma >= need) break;
                     picks.Add(c.index);
@@ -1304,6 +1431,22 @@ namespace DuelServer
                 return new List<int> { maisPesada.index };
             }
 
+            // A INVOCAÇÃO do Mausoléu chega aqui como "escolha uma carta da mão",
+            // exatamente igual a um custo de descarte — e quer o oposto dele. A
+            // regra já decidiu quem sobe (`PlanoDoMausoleu`); aqui é só cumprir.
+            if (loc == HAND && _alvoDoMausoleu != 0)
+            {
+                uint alvo = _alvoDoMausoleu;
+                _alvoDoMausoleu = 0;
+                var escolhido = q.choices.FirstOrDefault(c => c.code == alvo);
+                if (escolhido.code == alvo)
+                {
+                    _log($"Mausoleu: invoca {alvo} da mao");
+                    return new List<int> { escolhido.index };
+                }
+                _log($"Mausoleu: {alvo} nao esta' entre os oferecidos — segue o criterio geral");
+            }
+
             var ordem = loc == HAND
                 ? q.choices.OrderByDescending(ValorDescarte)                       // descarta o maior monstro
                 : q.choices.OrderByDescending(c => _cards.Stats(c.code).AtkValue); // alvo/reborn: o mais forte
@@ -1357,13 +1500,111 @@ namespace DuelServer
             return melhor;
         }
 
-        /// <summary>Prioridade de DESCARTE: o monstro de maior nível/ATK primeiro
-        /// (será revivido); carta que não é monstro por último.</summary>
+        /// <summary>
+        /// Prioridade de DESCARTE: o monstro de maior nível/ATK primeiro (será
+        /// revivido); carta que não é monstro por último.
+        ///
+        /// **As exceções do labirinto.** A regra acima parte de "monstro grande
+        /// no cemitério é monstro grande de volta pelo Monster Reborn", e é isso
+        /// que a torna venenosa aqui:
+        ///
+        ///   • o **Gate Guardian** é Nv11 com 3750 de ATK — o maior de qualquer
+        ///     mão, portanto SEMPRE o primeiro descartado. E ele não volta de
+        ///     lugar nenhum: precisa ter sido corretamente Invocado Especialmente
+        ///     antes, e no cemitério nunca esteve. Descartá-lo é rasgar a carta;
+        ///   • as três **peças** são o único caminho até ele. Do cemitério até
+        ///     voltam, mas cada uma que sai da mão adia o combo inteiro.
+        ///
+        /// Por isso os dois ficam ABAIXO de "não é monstro": entre jogar fora
+        /// uma magia e jogar fora o rei do deck, vai a magia.
+        /// </summary>
         int ValorDescarte(InteractiveDuel.Sel c)
         {
+            if (c.code == GATE_GUARDIAN) return -3;
+            if (PECAS_GATE_GUARDIAN.Contains(c.code)) return -2;
             var st = _cards.Stats(c.code);
             if (!st.IsMonster) return -1;
             return st.Level * 10000 + st.AtkValue;
+        }
+
+        /// <summary>
+        /// Tenho em campo algum corpo que NÃO seja peça do Gate Guardian?
+        ///
+        /// É a pergunta que trava os atalhos que cobram um tributo (Tribute
+        /// Doll, Metamorphosis, Monster Gate): quem escolhe o tributo é o
+        /// <see cref="DecideSelect"/>, e se em campo só houver peça, o custo sai
+        /// dela por falta de opção — desmontando justamente o que o deck passou
+        /// o duelo inteiro montando.
+        /// </summary>
+        bool TemCorpoDispensavel(int me) =>
+            _fieldOf(me).Any(c => _cards.Stats(c).IsMonster && !PECAS_GATE_GUARDIAN.Contains(c));
+
+        /// <summary>Peça do Gate Guardian que ainda NÃO está em campo — a que
+        /// completa o trio, e por isso vale mais que um Nv7 de ATK igual.</summary>
+        bool PecaQueFalta(int me, uint code) =>
+            PECAS_GATE_GUARDIAN.Contains(code) && !_fieldOf(me).Contains(code);
+
+        /// <summary>
+        /// **O plano do Mausoléu**: quem sobe da mão, e por quantos LP.
+        ///
+        /// O efeito cobra 1000 LP por tributo que a invocação exigiria — 1000
+        /// para um Nv5/6, 2000 para um Nv7+ —, e é o jogador quem escolhe qual
+        /// dos dois caminhos usar (o `Duel.SelectEffect` do Lua). Então a
+        /// escolha da CARTA e a da OPÇÃO são a mesma decisão, e ficam aqui: o
+        /// <see cref="DecideOption"/> e o <see cref="DecideSelect"/> só
+        /// executam o que este plano disse.
+        ///
+        /// A ordem de preferência é a do deck: uma peça que falta em campo vem
+        /// antes de qualquer coisa (é o que constrói o Gate Guardian), depois o
+        /// maior ATK. O Gate Guardian em si nunca entra — ele não tem invocação
+        /// normal, e o Lua do Mausoléu (`IsSummonableCard`) não o ofereceria.
+        ///
+        /// Devolve alvo 0 quando não há nada que ele consiga pagar sem furar o
+        /// piso de LP.
+        /// </summary>
+        (uint alvo, int custo, bool doisTributos) PlanoDoMausoleu(int me)
+        {
+            var candidatos = _handOf(me)
+                .Where(c => c != GATE_GUARDIAN)
+                .Select(c => (code: c, st: _cards.Stats(c)))
+                .Where(x => x.st.IsMonster && x.st.Level >= 5)
+                .Select(x => (x.code, custo: TributosPara(x.st.Level) * 1000, x.st))
+                .Where(x => x.custo > 0 && _lpOf(me) - x.custo >= LP_PISO)
+                .OrderByDescending(x => PecaQueFalta(me, x.code) ? 1 : 0)
+                .ThenByDescending(x => x.st.AtkValue)
+                .ToList();
+
+            if (candidatos.Count == 0) return (0, 0, false);
+            var melhor = candidatos[0];
+            return (melhor.code, melhor.custo, melhor.custo >= 2000);
+        }
+
+        /// <summary>
+        /// Escolha numa pergunta de OPÇÃO (MSG_SELECT_OPTION). O padrão do host
+        /// é a primeira da lista, que é uma escolha determinística mas cega.
+        ///
+        /// O Mausoléu é o caso em que ela erra: as opções são "pago 1000 e
+        /// invoco quem pede 1 tributo" e "pago 2000 e invoco quem pede 2", e a
+        /// primeira é a de 1000 — o Labyrinth Wall de 0 de ATK na frente do
+        /// Sanga de 2600. Cada opção vem identificada pelo id de texto do Lua
+        /// (<c>aux.Stringid</c>), então dá para escolher pelo que ela SIGNIFICA.
+        ///
+        /// Devolve o índice na lista oferecida, ou 0 quando não reconhece nada —
+        /// o comportamento de antes.
+        /// </summary>
+        public int DecideOption(InteractiveDuel.Question q, int me)
+        {
+            int i1 = q.options.IndexOf(MAUSOLEU_1_TRIBUTO);
+            int i2 = q.options.IndexOf(MAUSOLEU_2_TRIBUTOS);
+            if (i1 < 0 && i2 < 0) return 0;
+
+            var plano = PlanoDoMausoleu(me);
+            // O motor só oferece o caminho que ele consegue pagar: querendo o de
+            // 2 tributos e ele não estar na lista, sobra o de 1.
+            int escolha = plano.doisTributos && i2 >= 0 ? i2 : (i1 >= 0 ? i1 : i2);
+            _log($"Mausoleu: escolhe pagar {(escolha == i2 ? 2000 : 1000)} LP " +
+                 $"para invocar {plano.alvo}");
+            return Math.Max(0, escolha);
         }
 
         /// <summary>
@@ -1817,6 +2058,18 @@ namespace DuelServer
         /// responde a seleção é a chamada seguinte.
         /// </summary>
         uint _proximoAlvoStPerigosa;
+
+        /// <summary>
+        /// A carta da MÃO que o Mausoléu vai Invocar Normalmente, decidida por
+        /// `PlanoDoMausoleu` na hora de ativar o efeito e consumida pelo
+        /// `DecideSelect`.
+        ///
+        /// Sem isto a escolha cairia no critério genérico da mão, que é o de
+        /// DESCARTE — e o descarte quer o oposto de uma invocação: ele joga fora
+        /// o maior, e desde a regra do Gate Guardian empurra as peças para o
+        /// FIM da fila. O NPC pagaria 2000 LP para invocar a pior carta da mão.
+        /// </summary>
+        uint _alvoDoMausoleu;
 
         /// <summary>
         /// Já equipei um Cocoon of Evolution nesta partida? O Lua dele

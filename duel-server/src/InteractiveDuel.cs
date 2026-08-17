@@ -170,7 +170,11 @@ namespace DuelServer
             public int chainTriggerPlayer = -1;   // de quem é (−1 = não sei)
             public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
             public byte posMask;                 // position: posições que o motor aceita
-            public List<uint> options = new();   // selectoption: ids das opções de texto do motor
+            // selectoption: ids de texto do motor. 64 bits porque a descrição de
+            // uma carta é `code << 20 | indice` (ver ParseSelectOption) — em 32
+            // ela não cabe. Os ids de sistema (60/61, a moeda) continuam
+            // pequenos, então a tela compara com eles do mesmo jeito.
+            public List<ulong> options = new();
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
@@ -874,9 +878,13 @@ namespace DuelServer
                     _s.Respond(I32(1));
                     break;
                 case "option":
-                    // O motor espera o índice, não o identificador textual da opção.
-                    // Para o NPC, a primeira opção é uma escolha determinística segura.
-                    _s.Respond(I32(0));
+                    // O motor espera o índice, não o identificador textual da opção
+                    // — mas os identificadores VÊM na pergunta, e é por eles que o
+                    // brain reconhece a escolha que importa (o Mausoléu pergunta
+                    // "1000 LP por 1 tributo ou 2000 por 2?", e a primeira opção,
+                    // que era a resposta fixa daqui, é a que invoca o corpo menor).
+                    // Sem reconhecer nada, ele devolve 0: o comportamento de antes.
+                    _s.Respond(I32(_npcEnabled ? _npc.DecideOption(q, q.player) : 0));
                     break;
                 case "selectcard":
                 case "selecttribute": _s.Respond(NpcSelect(q)); break;
@@ -1126,16 +1134,32 @@ namespace DuelServer
             }
         }
 
+        /// <summary>
+        /// MSG_SELECT_OPTION: player(1), quantidade(1), e **8 bytes por opção**.
+        ///
+        /// Eram 4 aqui, e o erro era silencioso do jeito mais caro: com UMA
+        /// opção o valor sai certo (a metade baixa vem primeiro, little-endian)
+        /// e nada denuncia o problema. Com duas, a lista lida vira
+        /// [metade baixa da 1a, metade ALTA da 1a] — a segunda opção some, e
+        /// mesmo assim a contagem de botões na tela fecha. Foi assim que a moeda
+        /// do Mago do Tempo virou "👑 Cara" + "Opção 2" em vez de "Coroa".
+        ///
+        /// São 8 porque a descrição é de 64 bits neste core: o `aux.Stringid` do
+        /// `utility.lua` monta `(indice & 0xfffff) | code &lt;&lt; 20`, e o
+        /// deslocamento de 20 bits joga qualquer id de carta real para fora dos
+        /// 32. O `len` da mensagem confirmou: 11 bytes para uma opção (1+1+1+8),
+        /// 19 para duas.
+        /// </summary>
         Question ParseSelectOption(byte[] d, int o, int mlen)
         {
             var q = new Question { kind = "option", player = d[o + 1] };
             int count = d[o + 2];
             int p = o + 3;
-            if (p + count * 4 > o + mlen)
+            if (p + count * 8 > o + mlen)
                 throw new InvalidOperationException($"SELECT_OPTION truncado: {count} opcoes em {mlen} bytes");
-            for (int i = 0; i < count; i++, p += 4)
-                q.options.Add(BitConverter.ToUInt32(d, p));
-            Log.Info($"[select option] p={q.player} opcoes=[{string.Join(",", q.options)}]");
+            for (int i = 0; i < count; i++, p += 8)
+                q.options.Add(BitConverter.ToUInt64(d, p));
+            Log.Info($"[select option] p={q.player} n={count} len={mlen} opcoes=[{string.Join(",", q.options)}]");
             return q;
         }
 

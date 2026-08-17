@@ -944,7 +944,7 @@ async function start() {
     rewardGiven = false;
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
     log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)${vs}`, true);
-    apply(j);
+    aplicarEmOrdem(j);
   } catch (e) { conn(false); warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).'); }
 }
 
@@ -1023,7 +1023,7 @@ async function act(action, arg, label, args) {
       // trânsito, e clicar de novo mandaria a mesma coisa outra vez.
       await ponte.responder(action, arg, args);
     } else {
-      await apply(await rpc('/respond', args ? { action, arg, args } : { action, arg }));
+      await aplicarEmOrdem(await rpc('/respond', args ? { action, arg, args } : { action, arg }));
     }
   }
   catch (e) {
@@ -1457,6 +1457,30 @@ async function animateEvent(ev) {
       return;
     }
   } catch { /* animação nunca derruba o duelo */ }
+}
+
+/**
+ * **Uma visão de cada vez.**
+ *
+ * No modo NPC as visões chegam como RETORNO da minha própria jogada, uma por
+ * vez. No MULTIPLAYER elas chegam por canal, quando o outro joga — e podem
+ * chegar enquanto a anterior ainda está sendo aplicada, porque o `apply` agora
+ * ESPERA (o aviso de fase segura o laço por ~1 s de propósito).
+ *
+ * Sem fila, duas aplicações se sobrepõem e a mais VELHA termina por último:
+ * ela roda `question = j.question` com o estado ANTIGO e apaga a pergunta que
+ * acabou de chegar. Foi exatamente o que travou um duelo em 17/08/2026 — o
+ * motor mandou a End Phase e, 1,15 s depois, a janela de corrente da Aegis; a
+ * janela apareceu, a aplicação da fase acordou do aviso e a apagou, e o duelo
+ * ficou esperando para sempre uma resposta que a tela não tinha mais como dar.
+ *
+ * A fila é uma corrente de promessas: barata, preserva a ORDEM de chegada (que
+ * é a ordem do motor) e não deixa duas aplicações vivas ao mesmo tempo.
+ */
+let filaDeVisoes = Promise.resolve();
+function aplicarEmOrdem(j) {
+  filaDeVisoes = filaDeVisoes.then(() => apply(j), () => apply(j));
+  return filaDeVisoes;
 }
 
 async function apply(j) {
@@ -2633,7 +2657,7 @@ if (partidaId) {
       // Toda visão que chega da ponte entra pelo MESMO `apply` do modo NPC —
       // eventos são eventos, venham do motor ao lado ou do outro estado.
       busy = false;
-      apply(visao);
+      aplicarEmOrdem(visao);
     });
     window.addEventListener('beforeunload', () => ponte?.fechar());
   }

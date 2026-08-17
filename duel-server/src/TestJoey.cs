@@ -83,9 +83,12 @@ namespace DuelServer
             Check("Harpie's dispara com S/T do oponente em campo",
                   p3b.Action == "activate" && p3b.Why.Contains("remocao"), $"(veio {p3b.Action}: {p3b.Why})");
 
-            // Pote continua primeiro
+            // Pote continua primeiro. A checagem e' pelo INDICE, nao pela
+            // palavra "Pote" no texto: a regra deixou de conhecer a carta pelo ID
+            // e passou a reconhecer QUALQUER compra limpa pelo efeito, entao o
+            // log nao cita mais o nome — mas a jogada tem de ser a mesma.
             var p4 = brain.Decide(Idle(POT, OOKAZI), 1);
-            Check("Pote antes do burn", p4.Action == "activate" && p4.Why.Contains("Pote"),
+            Check("Pote antes do burn", p4.Action == "activate" && p4.Index == 0,
                   $"(veio {p4.Why})");
         }
 

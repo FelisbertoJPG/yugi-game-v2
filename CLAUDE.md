@@ -114,6 +114,16 @@ Especialmente da mão — o NPC ativa as duas sozinho, na ordem que fecha o comb
 no MESMO turno, escolhe sempre o de maior ATK entre os oferecidos e guarda as
 Regras quando não há alvo Nv5+ na mão; o duelo real prova que o corpo chega ao
 campo, e que quem chega é o Ryu-Ran de 2200, não o Parrot Dragon de 2000),
+`--test-compra` (as cartas de **compra**, reconhecidas pelo EFEITO e não por uma
+lista de IDs: a `category` do `cards.cdb` diz que a carta compra, o Lua dela diz
+se cobra descarte e se alguma outra reanima do cemitério — nenhuma das duas
+últimas está na categoria. Compra limpa vem antes de qualquer invocação;
+compra com descarte só sai quando não há jogada nenhuma OU quando o descarte
+vira ganho — corpo grande preso na mão mais uma reanimação para trazê-lo de
+volta —, com o par controle sem a reanimação. Prova a generalização com cartas
+que o código NUNCA cita por id, Upstart Goblin e Jar of Greed. O duelo real no
+fim existe porque a leitura do Lua depende de achar o arquivo no disco: com o
+caminho errado nada é reconhecido como compra e nenhuma regra acusa),
 `--test-paradox` (o pacote **Para & Dox**, o Labirinto: um deck de corpos que o
 jogo normal não deixa invocar — Nv7 aos montes e o Gate Guardian de 3750, que
 nem invocação normal tem —, então ele vive de ATALHOS. Prova as quatro regras

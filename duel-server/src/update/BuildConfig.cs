@@ -95,7 +95,17 @@ namespace DuelServer.Update
         // o Tribute Doll voltou a trazer o Nv7 que a regra escolheu: a pergunta
         // "escolha uma carta da mao" e' a mesma de um custo de descarte, e a
         // fila do descarte (0.9.0) passou a jogar as pecas para o fim.
-        public const string InstallerVersion = "0.9.1";
+        //
+        // 0.10.0 (17/08/2026): o NPC aprendeu CARTAS DE COMPRA pelo efeito, e nao
+        // por id. Antes ele conhecia so' o Pote da Ganancia; Graceful Charity,
+        // Dark World Dealings, Trade-In e Jar of Greed ficavam paradas na mao o
+        // duelo inteiro. Quem responde "esta carta compra?" agora e' o proprio
+        // jogo — a `category` do cards.cdb mais o Lua da carta —, entao toda
+        // carta de compra que entrar em qualquer deck ja' nasce sendo usada.
+        // Compra limpa vem antes de tudo; compra com descarte so' quando nao ha'
+        // jogada ou quando encher o cemiterio e' o plano (corpo grande na mao +
+        // reanimacao).
+        public const string InstallerVersion = "0.10.0";
 
         public const string UserAgent = "DuelAcademy-Updater/" + InstallerVersion;
 

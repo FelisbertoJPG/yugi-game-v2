@@ -201,6 +201,55 @@ dois duelos reais (negar uma invocação e negar um Raigeki). Os duelos reais es
 lá por um motivo específico: se o contexto da janela parar de chegar, nenhuma
 regra acusa nada — o sintoma seria só "ele nunca mais usou Solemn Judgment".
 
+### Cartas de compra — reconhecidas pelo EFEITO, não por id
+
+O NPC conhecia **uma** carta de compra: o Pote da Ganância, por id. Graceful
+Charity, Dark World Dealings, Trade-In, Jar of Greed — todas ficavam paradas na
+mão o duelo inteiro, e cada carta nova exigiria uma linha nova no cérebro.
+
+Quem responde "esta carta compra?" agora é o próprio jogo, em
+`DatabaseManager.Perfil`, cruzando **duas fontes**:
+
+| o que se quer saber | de onde sai | por quê |
+|---|---|---|
+| compra? | `category & 0x100` no `cards.cdb` **e** `Duel.Draw` no Lua da carta | a categoria é a classificação do próprio motor; o Lua limpa os falsos positivos |
+| custa descarte? | `DiscardHand` / `REASON_DISCARD` / (`SendtoGrave` + `LOCATION_HAND`) no Lua | **a categoria não registra isto** |
+| reanima do cemitério? | `SpecialSummon` **e** `LOCATION_GRAVE` no Lua | a categoria não separa "do cemitério" de "da mão" |
+
+⚠️ **O bit de compra é `0x100` — e isso NÃO é o que o `constant.lua` deste core
+diz.** Lá `0x100` é `CATEGORY_SUMMON` e `CATEGORY_DRAW` é `0x10000`: o `cards.cdb`
+foi escrito com a tabela ANTIGA de categorias. Não deduza pelo `constant.lua`;
+foi medido contra o banco — Pot of Greed, Graceful Charity, Jar of Greed,
+Trade-In, Card Destruction e Dark World Dealings têm todos `0x100`, e Raigeki
+(destruir) tem `0x1`. São 794 cartas com o bit, e só 13 não têm `Duel.Draw` no
+próprio script (a compra vem de outro efeito) — daí exigir os dois sinais.
+
+⚠️ **A categoria não conta o descarte.** Graceful Charity e Dark World Dealings
+são `0x100` e nada mais, embora as duas mandem descartar. Sem ler o Lua, as duas
+passariam por compra limpa e o NPC jogaria a mão fora achando que era de graça.
+
+As duas regras que saem disso (`Decide`, logo depois da busca específica):
+
+- **0.1 compra limpa** (compra e não cobra): antes de qualquer invocação. Mais
+  carta na mão é mais jogada, e nada se perde no caminho;
+- **0.15 compra com descarte**: só quando vale, e o log diz qual dos dois casos
+  foi — **(a)** não tenho o que pôr em campo (nem monstro invocável, nem corpo
+  já em campo), então a mão que eu guardo parada não vale nada; **(b)** o
+  descarte é **ganho**: tenho um corpo grande preso na mão (Nv5+) e uma carta
+  que o traz de volta do cemitério, na mão ou já baixada. Aí o descarte é atalho
+  para pôr o grandão em campo de graça.
+
+> A busca específica continua **antes** da compra: comprar às cegas pode trazer
+> justamente a carta que a busca traria, e aí a busca vira carta morta. O
+> Summoner's Art é a exceção de ordem — ele tem regra própria (5.36) com
+> condição de alvo e mora depois; `BUSCA_ESPECIFICA` é o conjunto das buscas
+> incondicionais.
+
+Teste: `duel-server.exe --test-compra` — 22 checagens. O duelo real no fim está
+lá porque a leitura do Lua depende de achar o arquivo no disco: com o caminho
+errado o perfil vem vazio, **nada** é reconhecido como compra e nenhuma regra
+acusa — o sintoma seria só "ele nunca mais usou o Pote".
+
 ### O Gate Guardian: cartas que o NPC não pode gastar
 
 O deck do Para & Dox tem uma peça que **não volta de lugar nenhum**. O Gate

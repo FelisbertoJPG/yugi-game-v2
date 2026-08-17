@@ -62,8 +62,12 @@ public class DatabaseManager : IDisposable
     [DllImport("sqlite3", EntryPoint = "sqlite3_finalize", CallingConvention = CallingConvention.Cdecl)]
     private static extern int sqlite3_finalize(IntPtr pStmt);
 
+    /// <summary>Onde moram o banco e os scripts — o `Perfil` precisa dos dois.</summary>
+    private readonly string _sa;
+
     public DatabaseManager(string streamingAssetsPath)
     {
+        _sa = streamingAssetsPath;
         string dbPath = Path.Combine(streamingAssetsPath, "YGODemo/cards.cdb");
 
         try
@@ -100,11 +104,18 @@ public class DatabaseManager : IDisposable
         /// </summary>
         public readonly uint Race, Attribute;
 
+        /// <summary>
+        /// A `category` do `cards.cdb` — a classificação que o PRÓPRIO motor faz
+        /// do que o efeito da carta fez (destruir, comprar, invocar…). É o que
+        /// permite reconhecer "esta carta compra" sem manter uma lista de IDs.
+        /// </summary>
+        public readonly uint Category;
+
         public CardStats(uint code, uint type, uint rawLevel, int atk, int def,
-                         uint race = 0, uint attribute = 0)
+                         uint race = 0, uint attribute = 0, uint category = 0)
         {
             Code = code; Type = type; RawLevel = rawLevel; Atk = atk; Def = def;
-            Race = race; Attribute = attribute;
+            Race = race; Attribute = attribute; Category = category;
         }
 
         public bool IsMonster => (Type & 0x1) != 0;
@@ -126,7 +137,7 @@ public class DatabaseManager : IDisposable
         var s = new CardStats(code, 0, 0, 0, 0);
         if (db != IntPtr.Zero)
         {
-            string query = $"SELECT type, level, atk, def, race, attribute FROM datas WHERE id = {code}";
+            string query = $"SELECT type, level, atk, def, race, attribute, category FROM datas WHERE id = {code}";
             if (sqlite3_prepare_v2(db, query, -1, out IntPtr stmt, IntPtr.Zero) == 0)
             {
                 if (sqlite3_step(stmt) == 100)
@@ -138,13 +149,100 @@ public class DatabaseManager : IDisposable
                         sqlite3_column_int(stmt, 2),
                         sqlite3_column_int(stmt, 3),
                         (uint)sqlite3_column_int(stmt, 4),
-                        (uint)sqlite3_column_int(stmt, 5));
+                        (uint)sqlite3_column_int(stmt, 5),
+                        (uint)sqlite3_column_int(stmt, 6));
                 }
                 sqlite3_finalize(stmt);
             }
         }
         _statsCache[code] = s;
         return s;
+    }
+
+    // ================= o que o EFEITO de uma carta faz =================
+    //
+    // O NPC precisava saber "esta carta compra?" sem uma lista de IDs escrita à
+    // mão — uma lista assim envelhece a cada carta nova e é justamente o tipo de
+    // regra que não deveria morar fora do motor. As duas fontes abaixo são do
+    // próprio jogo:
+    //
+    //   • a coluna `category` do `cards.cdb`, que é a classificação que o motor
+    //     faz do efeito. **O bit de compra é 0x100** — e isso NÃO é o que o
+    //     `constant.lua` deste core diz (lá 0x100 é CATEGORY_SUMMON e
+    //     CATEGORY_DRAW é 0x10000): o banco foi escrito com a tabela ANTIGA.
+    //     Conferido contra o banco, não deduzido: Pot of Greed, Graceful
+    //     Charity, Jar of Greed, Trade-In, Card Destruction e Dark World
+    //     Dealings têm todos 0x100, e Raigeki (destruir) tem 0x1;
+    //
+    //   • o Lua da própria carta, para o que a categoria não distingue. São 794
+    //     cartas com o bit de compra e 13 delas não têm `Duel.Draw` no próprio
+    //     script (a compra vem de outro efeito), então exigir os DOIS sinais
+    //     limpa esses falsos positivos. E o custo de descarte a categoria
+    //     simplesmente não registra — Graceful Charity e Dark World Dealings são
+    //     `0x100` e nada mais, embora as duas mandem descartar.
+    const uint CATEGORY_DRAW = 0x100;
+
+    /// <summary>O que o efeito de uma carta faz, do ponto de vista de quem decide jogá-la.</summary>
+    public readonly struct PerfilDeEfeito
+    {
+        /// <summary>Compra carta(s) para quem ativou.</summary>
+        public readonly bool Compra;
+        /// <summary>Tira carta da MÃO (custo de descarte, ou descarte forçado).</summary>
+        public readonly bool Descarta;
+        /// <summary>Traz um monstro de volta do CEMITÉRIO.</summary>
+        public readonly bool ReanimaDoCemiterio;
+        public PerfilDeEfeito(bool compra, bool descarta, bool reanima)
+        { Compra = compra; Descarta = descarta; ReanimaDoCemiterio = reanima; }
+    }
+
+    private readonly System.Collections.Generic.Dictionary<uint, PerfilDeEfeito> _perfilCache = new();
+
+    /// <summary>
+    /// Perfil do efeito, com cache. Carta sem script cai em "não faz nada
+    /// disso" — o silêncio é o erro barato: o NPC deixa de usar uma carta, em
+    /// vez de usar errado uma que ele não entendeu.
+    /// </summary>
+    public PerfilDeEfeito Perfil(uint code)
+    {
+        if (_perfilCache.TryGetValue(code, out var hit)) return hit;
+
+        string lua = LuaDaCarta(code);
+        bool compra = (Stats(code).Category & CATEGORY_DRAW) != 0 && lua.Contains("Duel.Draw");
+        // `DiscardHand` é o descarte direto; `REASON_DISCARD` cobre quem manda
+        // para o cemitério COMO descarte; e "mandar da mão para o cemitério" é a
+        // terceira forma de escrever a mesma coisa (Hand Destruction).
+        bool descarta = lua.Contains("DiscardHand") || lua.Contains("REASON_DISCARD")
+                     || (lua.Contains("SendtoGrave") && lua.Contains("LOCATION_HAND"));
+        // Invocar Especialmente + cemitério: é o que separa o Monster Reborn e o
+        // Premature Burial do Ancient Rules (que também Invoca Especialmente, mas
+        // da mão). A categoria não distingue os dois — os três são `0x100000`.
+        bool reanima = lua.Contains("SpecialSummon") && lua.Contains("LOCATION_GRAVE");
+
+        var p = new PerfilDeEfeito(compra, descarta, reanima);
+        _perfilCache[code] = p;
+        return p;
+    }
+
+    private readonly System.Collections.Generic.Dictionary<uint, string> _luaCache = new();
+
+    /// <summary>
+    /// O script da carta, lido do disco. Busca DIRIGIDA (dois caminhos
+    /// conhecidos) em vez de varrer a pasta: são 21 mil arquivos, e o
+    /// ScriptManager já paga essa varredura uma vez na subida.
+    /// </summary>
+    private string LuaDaCarta(uint code)
+    {
+        if (_luaCache.TryGetValue(code, out string hit)) return hit;
+        string texto = "";
+        foreach (string rel in new[] { "YGODemo/script/official", "YGODemo/script" })
+        {
+            string p = Path.Combine(_sa ?? "", rel, $"c{code}.lua");
+            if (!File.Exists(p)) continue;
+            try { texto = File.ReadAllText(p); } catch { /* ilegível = desconhecida */ }
+            break;
+        }
+        _luaCache[code] = texto;
+        return texto;
     }
 
     public void CardReaderCallback(IntPtr payload, uint code, IntPtr dataPtr)

@@ -684,6 +684,10 @@ namespace DuelServer
         }
 
         // ---- atalhos de leitura da situação ----
+        /// <summary>O que o efeito da carta faz, pelo banco e pelo Lua dela — sem
+        /// lista de IDs. Ver `DatabaseManager.Perfil`.</summary>
+        DatabaseManager.PerfilDeEfeito Perfil(uint code) => _cards.Perfil(code);
+
         bool Ativavel(InteractiveDuel.Question q, uint code) => q.activatable.Any(a => a.code == code);
         int IdxAtivavel(InteractiveDuel.Question q, uint code) => q.activatable.First(a => a.code == code).index;
         bool NaMao(int me, uint code) => _handOf(me).Contains(code);
@@ -765,9 +769,57 @@ namespace DuelServer
                 return new Play("activate", buscaEsp.index,
                     $"busca especifica antes da compra ({buscaEsp.code})");
 
-            // 0.1 Pote da Ganância antes de qualquer invocação.
-            if (Ativavel(q, POT_OF_GREED))
-                return new Play("activate", IdxAtivavel(q, POT_OF_GREED), "Pote da Ganancia primeiro");
+            // 0.1 COMPRA LIMPA — qualquer carta que COMPRE sem cobrar nada, antes
+            //     de qualquer invocação. Mais carta na mão é mais jogada possível,
+            //     e nada se perde no caminho.
+            //
+            //     Não é mais o Pote da Ganância por ID: quem responde "esta carta
+            //     compra?" é o PRÓPRIO jogo (a `category` do `cards.cdb` mais o
+            //     `Duel.Draw` no Lua da carta — ver `DatabaseManager.Perfil`).
+            //     Toda carta de compra que entrar em qualquer deck, hoje ou
+            //     depois, passa a ser usada sem uma linha nova aqui.
+            var compraLimpa = AtivavelSe(q, c => Perfil(c).Compra && !Perfil(c).Descarta);
+            if (compraLimpa.code != 0)
+                return new Play("activate", compraLimpa.index,
+                    $"compra limpa ({compraLimpa.code}): mais carta na mao sem custo nenhum");
+
+            // 0.15 COMPRA COM DESCARTE — Graceful Charity, Dark World Dealings,
+            //      Trade-In. Aqui a compra CUSTA, então ativar por ativar é trocar
+            //      as cartas que eu escolhi manter pelas que o deck sortear. Duas
+            //      situações em que vale, e o log diz qual foi:
+            //
+            //      (a) PRECISO COMPRAR: não tenho o que pôr em campo — nem monstro
+            //          invocável, nem corpo já em campo. Parado, a mão que eu
+            //          guardo não vale nada;
+            //      (b) O DESCARTE É GANHO: tenho um corpo grande preso na mão (o
+            //          Nv5+ que espera tributos que não chegam) e uma carta que o
+            //          traz DE VOLTA do cemitério. Aí descartar não é perder — é
+            //          um atalho para pôr o grandão em campo, e de graça.
+            //
+            //      Quem escolhe O QUE descartar é o `DecideSelect`, que já joga
+            //      fora o maior monstro justamente para revivê-lo depois — e já
+            //      protege o que não volta (Gate Guardian e as peças).
+            var compraCara = AtivavelSe(q, c => Perfil(c).Compra && Perfil(c).Descarta);
+            if (compraCara.code != 0)
+            {
+                bool semJogada = q.summonable.Count == 0 && q.spSummonable.Count == 0
+                                 && QtdMonstros(me) == 0;
+                bool gordoNaMao = _handOf(me).Any(c =>
+                    _cards.Stats(c).IsMonster && _cards.Stats(c).Level >= 5);
+                bool podeReanimar = _handOf(me).Concat(_faceUpStOf(me)).Concat(_setStOf(me))
+                    .Any(c => Perfil(c).ReanimaDoCemiterio);
+
+                if (semJogada)
+                    return new Play("activate", compraCara.index,
+                        $"compra com descarte ({compraCara.code}): sem monstro em campo nem " +
+                        "invocacao na mao, parado eu nao faco nada mesmo");
+                if (gordoNaMao && podeReanimar)
+                    return new Play("activate", compraCara.index,
+                        $"compra com descarte ({compraCara.code}): o corpo grande preso na mao " +
+                        "vai para o cemiterio e volta pela reanimacao que eu tenho");
+                _log($"guarda a compra com descarte ({compraCara.code}): tenho jogada em campo e " +
+                     $"o descarte seria perda seca (grande na mao: {gordoNaMao}, reanimacao: {podeReanimar})");
+            }
 
             // 0.2 Toon World o quanto antes: sem ele os Toons "clássicos" da mão
             // não têm como entrar (spsummon) e os "modernos" em campo não atacam

@@ -57,6 +57,7 @@ namespace DuelServer
         // de fora do deck, para os controles
         const uint BATTLE_OX = 5053103;
         const uint LA_JINN = 97590747;
+        const uint MYSTICAL_ELF = 15025844;   // 800/2000 — parede de verdade, sem gatilho
 
         static int _pass, _fail;
 
@@ -124,6 +125,12 @@ namespace DuelServer
             // O eixo do deck e' um monstro NORMAL: sem efeito nenhum, e e' por
             // isso que o Summoner's Art (que busca Normal Nv5+) o alcanca.
             Classe("Dark Magician", DARK_MAGICIAN, "");
+            // O gatilho de invocacao: a busca do Rod so' acontece se ele entrar
+            // com a FACE PARA CIMA.
+            Check("Magician's Rod ganha ao ser INVOCADO (nao pode ser setado)",
+                  db.Perfil(MAGICIANS_ROD).GanhaAoInvocar);
+            Check("...e o Dark Magician, que e' Normal, nao tem gatilho nenhum",
+                  !db.Perfil(DARK_MAGICIAN).GanhaAoInvocar);
             Check("Dark Magician e' Normal Nv7 de 2500",
                   db.Stats(DARK_MAGICIAN).Level == 7 && db.Stats(DARK_MAGICIAN).AtkValue == 2500);
         }
@@ -221,6 +228,51 @@ namespace DuelServer
             p = brain.Decide(Idle(THOUSAND_KNIVES, MAGICIANS_ROD), 1);
             Check("com busca e remocao na mao, a BUSCA sai primeiro (nao gasta nada)",
                   p.Action == "activate" && p.Index == 1, $"(veio idx {p.Index} — {p.Why})");
+
+            // ================================================================
+            // O QUE O DUELO DE VERDADE MOSTROU
+            // ================================================================
+
+            // 1. O NPC setou o Magician's Rod (1600/100) como parede contra um
+            //    1800. Setado, o gatilho de invocacao nao dispara: ele jogou fora
+            //    a busca E pos uma parede de 100 de DEF.
+            Zerar(); seuCampo.Add(LA_JINN);   // 1800 do outro lado, eu sem campo
+            var qSet = new InteractiveDuel.Question { kind = "idle", player = 1 };
+            qSet.summonable.Add(new InteractiveDuel.Act { code = MAGICIANS_ROD, index = 0, location = 0x2 });
+            qSet.settable.Add(new InteractiveDuel.Act { code = MAGICIANS_ROD, index = 0, location = 0x2 });
+            p = brain.Decide(qSet, 1);
+            Check("Magician's Rod contra um 1800: INVOCA (pela busca), nao seta",
+                  p.Action == "summon", $"(veio {p.Action} — {p.Why})");
+
+            // ...e o controle: um monstro SEM gatilho de invocacao, com DEF que
+            // presta, continua sendo setado como parede.
+            Zerar(); seuCampo.Add(LA_JINN);
+            var qParede = new InteractiveDuel.Question { kind = "idle", player = 1 };
+            qParede.summonable.Add(new InteractiveDuel.Act { code = MYSTICAL_ELF, index = 0, location = 0x2 });
+            qParede.settable.Add(new InteractiveDuel.Act { code = MYSTICAL_ELF, index = 0, location = 0x2 });
+            p = brain.Decide(qParede, 1);
+            Check("...mas a Mystical Elf (800/2000, sem gatilho) segue sendo setada (controle)",
+                  p.Action == "setmonster", $"(veio {p.Action} — {p.Why})");
+
+            // 2. O Magician of Dark Illusion so' sai da mao QUANDO O PROPRIO NPC
+            //    ativa uma magia/armadilha no turno do oponente — ou seja, ele
+            //    chega SEMPRE na mesma cadeia da carta que abriu a janela, e a
+            //    regra de "uma carta por cadeia" o matava toda vez.
+            Zerar(); seuCampo.Add(LA_JINN);
+            var qCadeia = new InteractiveDuel.Question { kind = "chain", player = 1 };
+            qCadeia.choices.Add(new InteractiveDuel.Sel { code = MAGICIAN_DARK_ILLUSION, index = 0, location = 0x2 });
+            brain.MarcaJaEncadeou();          // o NPC acabou de virar o Jar of Greed
+            int escolha = brain.DecideChain(qCadeia, 1);
+            Check("na cadeia, o corpo de graca fura a trava de 'uma carta por cadeia'",
+                  escolha == 0, $"(veio {escolha})");
+
+            // ...e o controle: com o campo ja' melhor que o dele, a trava volta a
+            // valer — a carta fica na mao para quando fizer falta.
+            Zerar(); meuCampo.Add(DARK_MAGICIAN); meuCampo.Add(LA_JINN);
+            brain.MarcaJaEncadeou();
+            escolha = brain.DecideChain(qCadeia, 1);
+            Check("...com o campo ja' na frente, a trava volta a valer (controle)",
+                  escolha == -1, $"(veio {escolha})");
         }
 
         // ------------------------------------------------------------------

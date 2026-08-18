@@ -238,8 +238,28 @@ Três armadilhas que custaram teste vermelho:
    categoria dele acusa destruição. A regra de remoção ignora quem também invoca
    — quem põe corpo em campo é julgado pela regra de invocação.
 
-Teste: `duel-server.exe --test-magos` — 28 checagens, com o deck "Poder dos
-Magos" inteiro.
+**Duas coisas que só um duelo de verdade mostrou** (relato do jogador: "ganhei
+de lavada, ele setou o bastão do mago em vez de buscar"):
+
+1. **Nunca SETAR um monstro que ganha ao ser Invocado.** Setar é pôr com a face
+   para baixo, e o gatilho `EVENT_SUMMON_SUCCESS` simplesmente não acontece. O
+   NPC setou o Magician's Rod (1600/**100**) como parede contra um 1800 — jogou
+   fora a busca que a carta faria E pôs uma parede de 100 de DEF, perdendo as
+   duas coisas de uma vez. O perfil ganhou `GanhaAoInvocar`, e quem o tem sai da
+   lista de setáveis (mesmo tratamento que o Mago do Tempo e o casulo já tinham).
+2. **A trava de "uma carta por cadeia" matava o corpo de graça.** O Magician of
+   Dark Illusion só pode sair da mão quando **o próprio NPC** ativa uma
+   magia/armadilha **no turno do oponente** (`Duel.IsTurnPlayer(1-tp) and
+   rp==tp`): ele chega SEMPRE na mesma cadeia da carta que abriu a janela. A
+   regra criada para não gastar dois Trap Hole no mesmo monstro o descartava toda
+   vez — 2100 de ATK parados na mão a partida inteira. Hoje a trava não vale para
+   quem se Invoca Especialmente, e só quando o campo não está na frente.
+
+Teste: `duel-server.exe --test-magos` — 34 checagens, com o deck "Poder dos
+Magos" inteiro. As duas acima têm par de controle (a Mystical Elf 800/2000, sem
+gatilho, continua sendo setada; e com o campo na frente a trava da cadeia volta
+a valer) e foram conferidas DESLIGANDO a correção: falham com a mesma linha que
+apareceu no log do duelo.
 
 ### Cartas de compra — reconhecidas pelo EFEITO, não por id
 

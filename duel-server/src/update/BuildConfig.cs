@@ -127,7 +127,14 @@ namespace DuelServer.Update
         // cruzada com o Lua da carta. E' o que faz o deck novo do Yugi (Poder dos
         // Magos, dezoito cartas com efeito) ser jogado sem uma linha por carta.
         // Cerebro viaja so' no exe: com o motor velho, o adversario segura a mao.
-        public const string InstallerVersion = "0.12.0";
+        //
+        // 0.12.1 (18/08/2026): duas coisas que so' o duelo de verdade mostrou. O
+        // NPC nao SETA mais um monstro que ganha ao ser Invocado (ele setou o
+        // Magician's Rod de 1600/100 como parede e jogou fora a busca), e a trava
+        // de "uma carta por cadeia" deixou de matar o corpo de graca — o Magician
+        // of Dark Illusion so' sai da mao na MESMA cadeia da carta que abriu a
+        // janela, entao a trava o descartava sempre.
+        public const string InstallerVersion = "0.12.1";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 

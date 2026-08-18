@@ -224,13 +224,21 @@ public class DatabaseManager : IDisposable
         public readonly bool Fusao;
         /// <summary>Cobra pontos de vida.</summary>
         public readonly bool PagaLp;
+        /// <summary>
+        /// O efeito dispara ao ser INVOCADO — e por isso a carta nunca deve ser
+        /// SETADA. Um monstro setado entra com a face para baixo: o gatilho de
+        /// invocação não acontece, e a vantagem que ele traria some com a carta.
+        /// </summary>
+        public readonly bool GanhaAoInvocar;
 
         public PerfilDeEfeito(bool compra, bool descarta, bool reanima, bool destroiMonstro,
-                              bool destroiSt, bool busca, bool invocaEspecial, bool fusao, bool pagaLp)
+                              bool destroiSt, bool busca, bool invocaEspecial, bool fusao,
+                              bool pagaLp, bool ganhaAoInvocar)
         {
             Compra = compra; Descarta = descarta; ReanimaDoCemiterio = reanima;
             DestroiMonstro = destroiMonstro; DestroiSt = destroiSt; Busca = busca;
             InvocaEspecial = invocaEspecial; Fusao = fusao; PagaLp = pagaLp;
+            GanhaAoInvocar = ganhaAoInvocar;
         }
     }
 
@@ -272,9 +280,14 @@ public class DatabaseManager : IDisposable
         // antigo e o `Cost.PayLP(n)` moderno — o Dark Magic Veil usa o segundo, e
         // procurar só pelo primeiro fazia o custo dele passar despercebido.
         bool pagaLp = lua.Contains("PayLP");
+        // `EVENT_SUMMON_SUCCESS` é o gatilho de "fui Invocado (com a face para
+        // cima)". Quem o tem perde o efeito ao ser setado — o Magician's Rod
+        // busca uma magia ao ser Invocado, e setado ele vira só um corpo de 100
+        // de DEF.
+        bool ganhaAoInvocar = lua.Contains("EVENT_SUMMON_SUCCESS");
 
         var p = new PerfilDeEfeito(compra, descarta, reanima, destroiMonstro,
-                                   destroiSt, busca, invocaEspecial, fusao, pagaLp);
+                                   destroiSt, busca, invocaEspecial, fusao, pagaLp, ganhaAoInvocar);
         _perfilCache[code] = p;
         return p;
     }

@@ -1392,10 +1392,16 @@ namespace DuelServer
             // O Mago do Tempo NUNCA entra como parede: setá-lo o vira, e virado
             // ele perde a única coisa que vale nele (a moeda). Um 500/400 também
             // não segura nada. Fora da lista de setáveis, portanto.
+            // E quem GANHA AO SER INVOCADO também fica fora: setar é pôr com a
+            // face para baixo, e o gatilho de invocação simplesmente não
+            // acontece. Visto em duelo: o NPC setou o Magician's Rod (1600/100)
+            // como parede contra um 1800 — jogou fora a busca que a carta faria
+            // E pôs uma parede de 100 de DEF, perdendo as duas coisas de uma vez.
             var setaveis = seguraOCorpo
                 ? new List<Cand>()
                 : Monstros(q.settable)
-                    .Where(c => c.Act.code != TIME_WIZARD && c.Act.code != COCOON_OF_EVOLUTION)
+                    .Where(c => c.Act.code != TIME_WIZARD && c.Act.code != COCOON_OF_EVOLUTION
+                                && !Perfil(c.Act.code).GanhaAoInvocar)
                     .ToList();
             var altasQueCompensam = invocaveis
                 .Where(c => c.St.Level >= 5 && TributoCompensa(me, c.St, setando: false))
@@ -2318,6 +2324,11 @@ namespace DuelServer
         /// </summary>
         public void ResetCadeia() => _jaEncadeou = false;
 
+        /// <summary>Marca que já se ativou uma carta nesta cadeia. Existe para o
+        /// teste poder montar o estado que o duelo produz sozinho — a exceção do
+        /// "corpo de graça" só tem sentido com a trava JÁ armada.</summary>
+        public void MarcaJaEncadeou() => _jaEncadeou = true;
+
         /// <summary>
         /// Por que o NPC ativou (ou não) a última corrente. O host usa no evento
         /// `npc` que a tela mostra — sem isto o jogador via "ativa 41420027" sem
@@ -2380,6 +2391,24 @@ namespace DuelServer
             // Negate Attack, Sakuretsu) somar duas cartas na mesma cadeia é
             // desperdício em praticamente todos os casos. Se o motor OBRIGAR a
             // ativar (`chainForced`), a regra sai da frente.
+            // A EXCEÇÃO DO CORPO DE GRAÇA. Uma carta que se Invoca Especialmente
+            // em resposta não é "segunda carta gasta na mesma cadeia": ela é
+            // vantagem que aparece e some. O Magician of Dark Illusion só pode
+            // sair da mão QUANDO O PRÓPRIO NPC ativa uma magia/armadilha no turno
+            // do oponente (`Duel.IsTurnPlayer(1-tp) and rp==tp`) — ou seja, ele
+            // chega SEMPRE na mesma cadeia da carta que abriu a janela, e a regra
+            // de baixo o matava toda vez. Foi o que se viu em duelo: 2100 de ATK
+            // parados na mão a partida inteira.
+            var corpoDeGraca = q.choices.FirstOrDefault(
+                c => !CONTRA.ContainsKey(c.code) && Perfil(c.code).InvocaEspecial);
+            if (corpoDeGraca.code != 0 && QtdMonstros(me) <= QtdMonstros(foe))
+            {
+                _jaEncadeou = true;
+                PorqueDaCadeia = $"corrente: {corpoDeGraca.code} poe corpo em campo de graca";
+                _log($"chain: {PorqueDaCadeia}");
+                return corpoDeGraca.index;
+            }
+
             if (_jaEncadeou && !q.chainForced)
             {
                 _log("chain: ja ativei uma carta nesta cadeia — nao gasta outra");

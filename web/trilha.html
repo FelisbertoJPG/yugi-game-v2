@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trilha de Duelos — Classic Duels</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { display: flex; flex-direction: column; }
+
+  /* ---------- a barra da campanha ----------
+     A campanha é definida pelo ADMIN (o campo `campaign` de cada adversário);
+     aqui só se navega entre as que existem. */
+  .campanha-bar {
+    display: flex; align-items: center; gap: 12px; justify-content: center;
+    padding: 10px 16px; background: var(--bg2); border-bottom: 1px solid var(--line);
+  }
+  .campanha-bar .nome {
+    color: var(--gold); font-size: 15px; letter-spacing: 2px; text-transform: uppercase;
+    min-width: 240px; text-align: center;
+  }
+  .campanha-bar .conta { font-size: 11px; color: var(--dim); }
+
+  .palco { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: auto; }
+
+  /* ---------- o painel do adversário (esquerda) ----------
+     Aparece ao passar o mouse por um quadro LIBERADO da trilha. Fora isso,
+     mostra a instrução — um painel vazio pareceria tela quebrada. */
+  .painel {
+    width: 320px; flex: none; background: var(--panel); border: 2px solid var(--line);
+    border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 12px;
+    align-self: flex-start; position: sticky; top: 0;
+  }
+  .painel.vazio { align-items: center; justify-content: center; min-height: 320px; }
+  .painel .titulo {
+    border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px;
+    color: var(--gold); font-size: 14px; overflow-wrap: anywhere;
+  }
+  .painel .titulo .adv { display: block; font-size: 11px; color: var(--blue); margin-top: 2px; }
+  .painel .arte {
+    border: 1px solid var(--line); border-radius: 4px; background: var(--panel2) center/contain no-repeat;
+    aspect-ratio: 59 / 86; min-height: 150px;
+  }
+  .painel .info {
+    border: 1px solid var(--line); border-radius: 4px; padding: 10px;
+    font-size: 11px; color: var(--dim); display: flex; flex-direction: column; gap: 8px;
+  }
+  .painel .info b { color: var(--ink); }
+  .painel .info .aviso { color: var(--gold); }
+  .painel .acoes { display: flex; flex-direction: column; gap: 6px; }
+  .painel .instrucao { font-size: 12px; color: var(--dim); text-align: center; line-height: 1.6; }
+
+  /* ---------- a trilha (direita) ----------
+     Serpentina: as linhas alternam o sentido, e os conectores saem do próprio
+     quadro (::after horizontal, ::before vertical). Sem SVG e sem medir nada
+     por JS — o layout é o desenho. */
+  .trilha { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 46px; padding: 10px 0; }
+  .linha { display: flex; gap: 46px; }
+  .linha.invertida { flex-direction: row-reverse; }
+  .no {
+    position: relative; width: 96px; height: 96px; flex: none;
+    border: 3px solid var(--line); border-radius: 12px; background: var(--panel2);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background-size: cover; background-position: center; overflow: visible;
+  }
+  .no .rotulo {
+    position: absolute; inset: auto 0 -20px; text-align: center;
+    font-size: 10px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Conector horizontal: sai pela direita e cruza o `gap`. Nas linhas
+     invertidas ele sai pela esquerda — é o mesmo traço, espelhado. */
+  .no.liga-lado::after {
+    content: ''; position: absolute; top: 50%; left: 100%; width: 46px;
+    border-top: 3px solid var(--line);
+  }
+  .linha.invertida .no.liga-lado::after { left: auto; right: 100%; }
+  /* Conector vertical: desce do último quadro da linha para o de baixo. */
+  .no.liga-baixo::before {
+    content: ''; position: absolute; left: 50%; top: 100%; height: 46px;
+    border-left: 3px solid var(--line);
+  }
+
+  .no.aberto { border-color: var(--gold); box-shadow: 0 0 12px #e8c46a55; }
+  .no.aberto:hover { transform: scale(1.06); }
+  .no.vencido { border-color: var(--green, #3fd68a); }
+  .no.vencido::after, .no.vencido::before { border-color: var(--green, #3fd68a); }
+  .no.trancado { opacity: .45; cursor: not-allowed; filter: grayscale(1); }
+  .no .selo {
+    position: absolute; top: -8px; right: -8px; font-size: 14px;
+    background: var(--bg); border-radius: 50%; width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .no .cadeado { font-size: 26px; opacity: .8; }
+
+  /* ---------- a lista de drops ---------- */
+  #drops-back {
+    position: fixed; inset: 0; background: #000c; z-index: 60; display: none;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  #drops-back.show { display: flex; }
+  .drops-box {
+    background: var(--panel); border: 2px solid var(--gold); padding: 18px;
+    max-width: min(680px, 96vw); max-height: 86vh; overflow: auto;
+  }
+  .drops-box h2 { margin: 0 0 4px; color: var(--gold); font-size: 17px; }
+  .drops-box .sub { font-size: 11px; color: var(--dim); margin-bottom: 14px; }
+  .gaveta { margin-bottom: 14px; }
+  .gaveta h3 {
+    margin: 0 0 6px; font-size: 12px; letter-spacing: 1px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .gaveta h3 .pct { color: var(--dim); font-weight: normal; letter-spacing: 0; }
+  .gaveta.UR h3 { color: #e8c46a; } .gaveta.SR h3 { color: #cbb7ff; }
+  .gaveta.R h3 { color: #7fd0ff; }  .gaveta.N h3 { color: #cfd6de; }
+  .cartas { display: flex; gap: 8px; flex-wrap: wrap; }
+  .carta { width: 68px; position: relative; }
+  .carta img { width: 100%; display: block; border: 1px solid var(--line); }
+  .carta.tenho img { border-color: var(--green, #3fd68a); }
+  .carta .marca {
+    position: absolute; top: 2px; right: 2px; font-size: 11px;
+    background: #04121fdd; border-radius: 2px; padding: 0 3px;
+  }
+  .carta .nm { font-size: 9px; color: var(--dim); margin-top: 2px; line-height: 1.2; }
+  .hint { font-size: 11px; color: var(--dim); padding: 8px 14px; background: var(--bg2); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>▚ TRILHA DE DUELOS</h1>
+  <span class="spacer"></span>
+  <span class="dp" id="dp" style="color:var(--gold); border:1px solid var(--gold); padding:3px 10px; font-weight:bold">— DP</span>
+  <button id="btn-home">← home</button>
+</div>
+
+<!-- A campanha é do ADMIN; o jogador navega entre as que existem. -->
+<div class="campanha-bar">
+  <button id="camp-ant" title="campanha anterior">◀</button>
+  <span class="nome" id="camp-nome">—</span>
+  <button id="camp-prox" title="próxima campanha">▶</button>
+  <span class="conta" id="camp-conta"></span>
+</div>
+
+<div class="hint">
+  Cada adversário <b>libera o próximo</b> ao ser vencido. Passe o mouse por um
+  quadro liberado para ver o deck, a recompensa e a lista de drops. Exige o
+  <b>duel-server</b> no ar (suba pelo <b>classic-duels.exe</b>); você duela com
+  o seu deck ativo.
+</div>
+
+<div class="palco" id="palco">
+  <div class="painel vazio" id="painel">
+    <div class="instrucao">
+      Passe o mouse por um quadro <b>liberado</b> da trilha<br>para ver o adversário.
+    </div>
+  </div>
+  <div class="trilha" id="trilha"></div>
+</div>
+
+<div id="drops-back">
+  <div class="drops-box">
+    <h2 id="drops-titulo">Lista de drops</h2>
+    <div class="sub" id="drops-sub"></div>
+    <div id="drops-corpo"></div>
+    <div style="margin-top:14px"><button id="drops-fechar">fechar</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/web/js/trilha.js"></script>
+</body>
+</html>

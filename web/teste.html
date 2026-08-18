@@ -122,7 +122,12 @@
     <button id="btn-mundo">
       <span class="k">9</span>
       <span>Mundo andável (mapa mundi)</span>
-      <span class="why">em standby · fora do fluxo do jogador, que usa a lista de Adversário</span>
+      <span class="why">em standby · fora do fluxo do jogador, que usa a Trilha de Duelos</span>
+    </button>
+    <button id="btn-adv-grade">
+      <span class="k">0</span>
+      <span>Adversários em grade (tela antiga)</span>
+      <span class="why">aposentada pela Trilha de Duelos · sem trilha e sem cadeado, útil para testar um duelo direto</span>
     </button>
   </div>
 
@@ -228,6 +233,7 @@ $('btn-campo').onclick = () => (location.href = '/web/campo.html');
 $('btn-banlist').onclick = () => (location.href = '/web/banlist.html');
 $('btn-listas').onclick = () => (location.href = '/web/listas.html');
 $('btn-mundo').onclick = () => (location.href = '/web/mundo.html');
+$('btn-adv-grade').onclick = () => (location.href = '/web/adversario.html');
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 document.addEventListener('keydown', (e) => {
   if (e.key === '1') $('btn-deck').click();

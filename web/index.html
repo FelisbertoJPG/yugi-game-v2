@@ -116,8 +116,8 @@
     </button>
     <button id="btn-adv">
       <span class="k">4</span>
-      <span>Adversário</span>
-      <span class="why">escolha um NPC e duele · vitória = +100 DP e a carta dele</span>
+      <span>Trilha de Duelos</span>
+      <span class="why">a campanha em trilha · cada vitória libera o próximo adversário</span>
     </button>
     <button id="btn-mp">
       <span class="k">5</span>
@@ -220,7 +220,7 @@ $('btn-logout').onclick = async () => { await logout(); location.href = '/web/lo
 $('btn-shop').onclick = () => (location.href = '/web/loja.html');
 $('btn-deck').onclick = () => (location.href = '/web/deck.html?owned=1');
 $('btn-inv').onclick = () => (location.href = '/web/inventario.html');
-$('btn-adv').onclick = () => (location.href = '/web/adversario.html');
+$('btn-adv').onclick = () => (location.href = '/web/trilha.html');
 $('btn-mp').onclick = () => (location.href = '/web/multiplayer.html');
 $('btn-test').onclick = () => (location.href = '/web/teste.html');
 

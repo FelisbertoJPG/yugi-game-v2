@@ -261,6 +261,26 @@ export async function premiarVitoria(dueloId) {
  * e o servidor não o vê. O que isto faz é transformar um laço de console em
  * trabalho — a solução de verdade é o duelo rodar no servidor.
  */
+/**
+ * **Contra quem o jogador já venceu**, direto do banco.
+ *
+ * É o que libera a Trilha de Duelos: cada adversário abre o próximo depois da
+ * vitória. Mora no servidor de propósito — progresso não pode ser preferência
+ * de navegador, senão trocar de máquina (ou limpar o site) apaga a campanha
+ * inteira, e editar um `localStorage` liberaria a trilha toda.
+ *
+ * A RLS de `duelos` já filtra por `usuario_id = auth.uid()`, então a consulta
+ * devolve só os DESTA conta sem precisar mandar quem é.
+ *
+ * @returns {Promise<Set<string>>} ids dos NPCs vencidos (vazio sem sessão).
+ */
+export async function npcsVencidos() {
+  if (!sessao()) return new Set();
+  const r = await req('duelos?select=npc&resultado=eq.vitoria');
+  if (!r.ok || !Array.isArray(r.dados)) return new Set();
+  return new Set(r.dados.map((d) => d.npc).filter(Boolean));
+}
+
 export async function iniciarDuelo(npcId) {
   const r = await req('rpc/iniciar_duelo', {
     method: 'POST',

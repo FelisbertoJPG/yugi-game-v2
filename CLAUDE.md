@@ -22,6 +22,8 @@ node web/js/drops.test.mjs   # 19 testes do drop por NPC (pool por raridade, a %
                              # e o descarte de quem tem carta mas quantidade zero)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
+node web/js/trilha.test.mjs  # 8 testes da liberação da Trilha de Duelos (cada vitória
+                             # abre o próximo; vitória fora de ordem não abre tudo)
 node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
                              # resolvido pelo nome — não pelo índice)
 npm run data:check           # integridade do banco de cartas (5 checagens)
@@ -408,8 +410,27 @@ num ponto só (qual acesso é plugado no `NpcBrain`), nunca em `if` espalhado
 pelas regras. Na lista do jogador, só o avançado ganha etiqueta — ele precisa
 saber, antes de entrar, que aquele adversário lê a mão dele.
 
-`web/adversario.html` (a página do jogador, e a **porta de entrada** dos
-adversários a partir da home) é organizada só por campanha — sem lista "todos" solta — com uma seção "Sem
+**`web/trilha.html` é a Trilha de Duelos** — a porta de entrada dos
+adversários a partir da home, no lugar da grade de cards. A campanha (o campo
+`campaign`, definido pelo admin) vira um CAMINHO: os adversários dela em
+serpentina, ligados por traços, e **cada um libera o próximo ao ser vencido**.
+Passar o mouse por um quadro liberado abre o painel da esquerda com o deck, a
+arte, a recompensa e o botão da **lista de drops** (as gavetas com a % de cada
+raridade — `chancesDe`, a MESMA conta do sorteio no servidor — e um ✔ nas
+cartas que já estão na Coleção). O quadro trancado mostra só o cadeado: revelar
+o deck e os drops de quem ainda não foi liberado entregaria a campanha de graça.
+
+> **O progresso mora no BANCO** (`npcsVencidos`, que lê `duelos` filtrado pela
+> RLS). Em `localStorage` ele sumiria ao trocar de máquina ou limpar o site — e
+> liberaria a trilha inteira para quem abrisse o console. A ORDEM da trilha é a
+> ordem em que os adversários aparecem em `NPCS` (a de criação), respeitando um
+> campo `ordem` quando existir; ainda não há tela para editá-la.
+> `node web/js/trilha.test.mjs` cobre a regra de liberação, inclusive a vitória
+> fora de ordem, que abre o vencido e o seguinte — nunca a trilha toda.
+
+A grade antiga (`web/adversario.html`) continua inteira, agora na **Área de
+Teste**: sem trilha e sem cadeado, é o caminho curto para testar um duelo.
+Ela é organizada só por campanha — sem lista "todos" solta — com uma seção "Sem
 campanha" para quem ainda não tem uma definida. Em `duel.html`, o tabuleiro
 do NPC (`advNpc.board`) manda mais que o `ygo:activeBoard` global, então cada
 adversário duela sobre o próprio campo sem o jogador precisar ativar nada.

@@ -7,23 +7,12 @@
  * jogador vê e o que fica atrás do cadeado — e ela mora numa função pura, então
  * dá para prová-la sem navegador.
  *
- * A regra é copiada aqui do `trilha.js` (que importa `localStorage` e `fetch` no
- * topo e não carrega em Node), pelo mesmo motivo do `npcativo.test.mjs`: é
- * pequena o bastante para o espelho valer, e grande o bastante para quebrar em
- * silêncio se alguém mexer.
+ * A regra é IMPORTADA de `trilhaordem.js` — não copiada. Aquele módulo existe
+ * exatamente para isto: é função pura, sem DOM e sem `fetch`, então carrega em
+ * Node, e a trilha, a tela de ordenação e este teste usam a MESMA. Um espelho
+ * divergiria em silêncio.
  */
-
-/** Idêntica à de `trilha.js`. */
-function liberados(lista, vencidos) {
-  const out = [];
-  let podeOProximo = true;
-  for (const npc of lista) {
-    const aberto = podeOProximo || vencidos.has(npc.id);
-    out.push(aberto);
-    podeOProximo = aberto && vencidos.has(npc.id);
-  }
-  return out;
-}
+import { ordenarCampanha, liberados } from './trilhaordem.js';
 
 let ok = 0, falhou = 0;
 const t = (nome, cond) => {
@@ -59,6 +48,46 @@ t('o vencido fica acessível mesmo com o anterior por vencer',
 // Casos de borda: a trilha vazia e a de um só.
 t('trilha vazia não estoura', liberados([], venceu()).length === 0);
 t('trilha de um: sempre aberta', String(liberados(trilha('x'), venceu())) === String([true]));
+
+// ---------------------------------------------------------------------------
+// A ORDEM PUBLICADA (Area de Teste -> "Ordenar Trilha")
+//
+// Guardada por ID em `conteudo/npc-trilha`, e nao por indice: e' o que faz um
+// adversario novo entrar na campanha sem trocar a trilha de todo mundo.
+const ids = (lista) => lista.map((n) => n.id).join(',');
+
+t('sem ordem publicada, vale a ordem de criacao',
+  ids(ordenarCampanha(trilha('a', 'b', 'c'), undefined)) === 'a,b,c');
+
+t('a ordem publicada manda',
+  ids(ordenarCampanha(trilha('a', 'b', 'c'), ['c', 'a', 'b'])) === 'c,a,b');
+
+// O caso do pedido: [wevil -> rex_raptor] [rex_raptor -> mako]
+t('o exemplo do pedido: wevil, rex_raptor, mako',
+  ids(ordenarCampanha(trilha('mako', 'wevil', 'rex_raptor'),
+                      ['wevil', 'rex_raptor', 'mako'])) === 'wevil,rex_raptor,mako');
+
+// A armadilha que o ID fecha: um adversario NOVO entra na campanha e nao esta'
+// na lista publicada. Ele vai para o fim; a ordem dos outros nao muda.
+t('adversario fora da lista publicada vai para o FIM, sem mexer nos outros',
+  ids(ordenarCampanha(trilha('novo', 'a', 'b'), ['b', 'a'])) === 'b,a,novo');
+
+t('dois fora da lista mantem entre si a ordem de criacao',
+  ids(ordenarCampanha(trilha('n1', 'a', 'n2'), ['a'])) === 'a,n1,n2');
+
+// Id publicado que nao existe mais (adversario apagado) nao pode furar nada.
+t('id publicado que nao existe mais e ignorado',
+  ids(ordenarCampanha(trilha('a', 'b'), ['sumiu', 'b', 'a'])) === 'b,a');
+
+t('campanha vazia devolve vazio', ordenarCampanha([], ['a']).length === 0);
+
+// E a ponta que liga as duas regras: ordenar E liberar, na mesma trilha.
+{
+  const ordenada = ordenarCampanha(trilha('mako', 'wevil', 'rex_raptor'),
+                                   ['wevil', 'rex_raptor', 'mako']);
+  t('ordenada e com o 1o vencido, abre ate o 2o',
+    String(liberados(ordenada, venceu('wevil'))) === String([true, true, false]));
+}
 
 console.log(`\n  ${ok} passaram, ${falhou} falharam`);
 process.exit(falhou ? 1 : 0);

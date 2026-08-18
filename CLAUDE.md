@@ -22,8 +22,8 @@ node web/js/drops.test.mjs   # 19 testes do drop por NPC (pool por raridade, a %
                              # e o descarte de quem tem carta mas quantidade zero)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
-node web/js/trilha.test.mjs  # 8 testes da liberação da Trilha de Duelos (cada vitória
-                             # abre o próximo; vitória fora de ordem não abre tudo)
+node web/js/trilha.test.mjs  # 16 testes da Trilha de Duelos: a liberação (cada vitória
+                             # abre o próximo) e a ordem publicada por campanha
 node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
                              # resolvido pelo nome — não pelo índice)
 npm run data:check           # integridade do banco de cartas (5 checagens)
@@ -422,11 +422,24 @@ o deck e os drops de quem ainda não foi liberado entregaria a campanha de graç
 
 > **O progresso mora no BANCO** (`npcsVencidos`, que lê `duelos` filtrado pela
 > RLS). Em `localStorage` ele sumiria ao trocar de máquina ou limpar o site — e
-> liberaria a trilha inteira para quem abrisse o console. A ORDEM da trilha é a
-> ordem em que os adversários aparecem em `NPCS` (a de criação), respeitando um
-> campo `ordem` quando existir; ainda não há tela para editá-la.
-> `node web/js/trilha.test.mjs` cobre a regra de liberação, inclusive a vitória
-> fora de ordem, que abre o vencido e o seguinte — nunca a trilha toda.
+> liberaria a trilha inteira para quem abrisse o console.
+
+A **ORDEM** de cada campanha é definida pelo admin em **`web/ordenar.html`**
+(Área de Teste → "Ordenar Trilha"): arrasta-se a lista (ou ▲▼) e publica-se em
+`conteudo/npc-trilha` (migration 0032), na forma `{ campanha: [id, id, …] }` —
+**por id, nunca por índice**. Índice muda de significado quando um adversário
+novo entra na campanha, e trocaria a trilha de todo mundo sem ninguém mexer em
+nada (a mesma armadilha do deck ativo, migration 0030). Quem não estiver na
+lista publicada aparece **no fim**, na ordem de criação: sumir da trilha por
+falta de configuração seria pior que ficar fora de ordem.
+
+> A regra mora em **`web/js/trilhaordem.js`**, sem DOM e sem `fetch`, porque os
+> TRÊS a usam — a trilha, a tela de ordenação e o teste. Importar `trilha.js` de
+> dentro da tela de ordenação executaria o boot da trilha na página errada.
+> `node web/js/trilha.test.mjs` (16 checagens) cobre as duas metades: a
+> liberação — inclusive a vitória fora de ordem, que abre o vencido e o seguinte
+> e nunca a trilha toda — e a ordenação, inclusive o adversário novo que entra
+> sem mexer nos outros.
 
 A grade antiga (`web/adversario.html`) continua inteira, agora na **Área de
 Teste**: sem trilha e sem cadeado, é o caminho curto para testar um duelo.

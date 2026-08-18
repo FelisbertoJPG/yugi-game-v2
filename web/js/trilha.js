@@ -24,6 +24,8 @@ import {
 } from '/web/js/npcs.js';
 import { getDP, hydrateWallet, npcsVencidos, ownsCard, ownedCount } from '/web/js/wallet.js';
 import { carregarDrops, dropsDoNpc, chancesDe, RARIDADES, totalDoPool } from '/web/js/drops.js';
+import { pullFile } from '/web/js/projectstore.js';
+import { ordenarCampanha, liberados } from '/web/js/trilhaordem.js';
 import { requireLogin } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
@@ -46,34 +48,13 @@ let campanhas = [];        // nomes, na ordem em que aparecem
 let iCampanha = 0;
 let vencidos = new Set();  // ids que este jogador já derrotou
 let drops = {};            // conteudo/npc-drops normalizado
+let ordemPublicada = {};   // conteudo/npc-trilha: { campanha: [id, …] }
 let fixado = null;         // o adversário "preso" no painel por clique
 
 /** Os adversários de uma campanha, na ordem da trilha. */
 function daCampanha(nome) {
   const dela = NPCS.filter((n) => (n.campaign || 'Sem campanha') === nome);
-  // `ordem` quando existir; senão a ordem da lista, que é a de criação. O
-  // `?? Infinity` mantém quem não tem `ordem` DEPOIS de quem tem, em vez de
-  // jogá-lo para o começo com um zero implícito.
-  return dela
-    .map((n, i) => ({ n, i }))
-    .sort((a, b) => (a.n.ordem ?? Infinity) - (b.n.ordem ?? Infinity) || a.i - b.i)
-    .map((x) => x.n);
-}
-
-/**
- * Um adversário está LIBERADO quando é o primeiro da trilha ou quando o
- * anterior já foi vencido. Vencer fora de ordem (num link direto, por exemplo)
- * também libera: o que abre o próximo é a vitória, não o caminho até ela.
- */
-function liberados(lista) {
-  const out = [];
-  let podeOProximo = true;
-  for (const npc of lista) {
-    const aberto = podeOProximo || vencidos.has(npc.id);
-    out.push(aberto);
-    podeOProximo = aberto && vencidos.has(npc.id);
-  }
-  return out;
+  return ordenarCampanha(dela, ordemPublicada[nome]);
 }
 
 // ------------------------------------------------------------------ painel
@@ -244,7 +225,11 @@ $('dp').textContent = `${getDP()} DP`;
 
 await hydrateCustomNpcs();
 await loadNpcDecks();
-[vencidos, drops] = await Promise.all([npcsVencidos(), carregarDrops()]);
+let ordem;
+[vencidos, drops, ordem] = await Promise.all([
+  npcsVencidos(), carregarDrops(), pullFile('npc-trilha'),
+]);
+ordemPublicada = (ordem && typeof ordem === 'object') ? ordem : {};
 
 // "Sem campanha" entra como uma trilha própria — quem ainda não organizou os
 // adversários continua conseguindo jogar.

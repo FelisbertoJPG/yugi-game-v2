@@ -115,5 +115,41 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
   assert.deepEqual(RARIDADES, ['UR', 'SR', 'R', 'N']);
 });
 
+// ---------------------------------------------------------------------------
+// O POOL QUE SOME QUANDO A QUANTIDADE E' ZERO
+//
+// Relato: "configurei a pool pro wevil e nao subiu". A gravacao SUBIU — o que
+// nao foi junto era o wevil, descartado aqui antes de sair da tela. A regra
+// esta' certa (0 carta por vitoria e' o mesmo que nao ter drop), o erro era o
+// silencio: o editor apagava a configuracao sem dizer nada.
+//
+// Estes testes fixam a regra, para o dia em que alguem "consertar" o descarte
+// no lugar errado — a correcao e' na TELA (ligar a quantidade na primeira carta
+// e avisar quando ela estiver zerada), nao aqui.
+{
+  const comCartas = { wevil: { quantidade: 0, pool: { UR: [1], SR: [], R: [], N: [2, 3] } } };
+  t('pool com carta e quantidade 0 e descartado (e o mesmo que nao ter drop)',
+    () => assert.equal(Object.keys(normalizarDrops(comCartas)).length, 0));
+
+  const completo = { wevil: { quantidade: 1, pool: { UR: [1], SR: [], R: [], N: [2, 3] } } };
+  t('...e com quantidade 1 ele fica',
+    () => assert.equal(normalizarDrops(completo).wevil?.quantidade, 1));
+
+  t('quantidade sem pool nenhum tambem e descartada',
+    () => assert.equal(Object.keys(normalizarDrops({ wevil: { quantidade: 3, pool: {} } })).length, 0));
+
+  // O outro NPC nao pode ser levado junto: salvar o wevil errado nao pode
+  // apagar a pool do para_dox, que ja' estava publicada.
+  const dois = {
+    para_dox: { quantidade: 3, pool: { UR: [9], SR: [], R: [], N: [] } },
+    wevil: { quantidade: 0, pool: { UR: [1], SR: [], R: [], N: [] } },
+  };
+  const saida = normalizarDrops(dois);
+  t('descartar um NPC nao derruba os outros', () => {
+    assert.equal(saida.para_dox?.quantidade, 3);
+    assert.ok(!saida.wevil);
+  });
+}
+
 console.log(`\n  ${pass} passaram, ${fail} falharam`);
 process.exit(fail === 0 ? 0 : 1);

@@ -18,7 +18,8 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 15 testes do drop por NPC (pool por raridade + a % de cada uma)
+node web/js/drops.test.mjs   # 19 testes do drop por NPC (pool por raridade, a % de cada uma
+                             # e o descarte de quem tem carta mas quantidade zero)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
 node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
@@ -297,6 +298,13 @@ A raridade dos boosters (`reprintsOf`) virou **sugestão**: o quadro
 correspondente se destaca durante o arrasto, mas quem manda é onde a carta foi
 solta — o servidor lê a gaveta gravada, sem reconsultar booster nenhum. É o que
 deixa um adversário largar um Normal como prêmio raro sem mexer na Loja.
+
+> **Pool com carta e quantidade ZERO é descartado** (`normalizarDrops`) — é o
+> mesmo que não ter drop, e é o que faz o servidor cair na carta de assinatura.
+> A regra está certa; o que faltava era a TELA dizer. O editor agora liga a
+> quantidade em 1 ao entrar a primeira carta, e avisa quando você salva com o
+> pool montado e o campo zerado — antes a configuração sumia calada e quem
+> montou continuava achando que tinha salvado. Coberto por `drops.test.mjs`.
 
 Guardado em `conteudo/npc-drops` (espelhado em `store/npc-drops.json`) — chave
 PRÓPRIA, e não um campo dentro de `conteudo/npcs`, porque os 3 NPCs fixos não

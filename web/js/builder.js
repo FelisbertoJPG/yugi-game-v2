@@ -460,8 +460,20 @@ function porNoQuadro(id, rar) {
   const atual = raridadeNoPool(id);
   if (atual === rar) return void toast(`"${nome}" ja' esta' no quadro ${rar}`);
   if (atual) tiraDoDropPool(id);
+  const eraVazio = !totalDoPool(dropPool);
   dropPool[rar].push(id);
   dropAberto = rar;
+
+  // A PRIMEIRA carta liga a quantidade. Sem isto, montar o pool inteiro e
+  // salvar não guardava NADA: a configuração de um NPC com quantidade 0 é
+  // descartada de propósito (é o mesmo que "não tem drop"), e a tela nem
+  // avisava. Um pool com carta e nenhuma vitória dando carta é sempre engano.
+  if (eraVazio && dropQtd <= 0) {
+    dropQtd = 1;
+    $('npc-drop-qtd').value = '1';
+    toast('quantidade por vitoria: 1 (mude no campo acima se quiser mais)');
+  }
+
   markDirty();
   renderDropPool();
   toast(atual ? `${nome}: ${atual} -> ${rar}` : `+ ${nome} -> ${rar}`);
@@ -628,11 +640,23 @@ async function saveNpcDeckFromUI() {
   // NPC. O resultado e' dito na tela — uma configuracao que nao chegou ao
   // banco e' exatamente uma que 'nao funciona' sem explicar por que.
   dropQtd = Math.max(0, Math.min(MAX_DROPS, Number($('npc-drop-qtd').value) || 0));
-  if (totalDoPool(dropPool) && dropQtd > 0) dropsCfg[npcMode.id] = { quantidade: dropQtd, pool: dropPool };
+  const temCarta = totalDoPool(dropPool) > 0;
+  if (temCarta && dropQtd > 0) dropsCfg[npcMode.id] = { quantidade: dropQtd, pool: dropPool };
   else delete dropsCfg[npcMode.id];
   const pub = await salvarDrops(dropsCfg);
-  if (pub?.banco && !pub.banco.ok) toast(`pool de drop NAO publicado: ${pub.banco.erro}`);
-  else if (dropQtd > 0) toast(`pool de drop: ${dropQtd} carta(s) de ${totalDoPool(dropPool)}`);
+
+  // O caso que passava em SILÊNCIO: pool montado, quantidade em zero. A
+  // configuração é descartada (por regra, e a regra está certa: 0 por vitória é
+  // o mesmo que não ter drop), só que a tela não dizia nada — o pool sumia e
+  // quem montou continuava achando que tinha salvado.
+  if (pub?.banco && !pub.banco.ok) {
+    toast(`pool de drop NAO publicado: ${pub.banco.erro}`);
+  } else if (temCarta && dropQtd <= 0) {
+    toast('pool de drop NAO salvo: falta a quantidade por vitoria (esta zerada)');
+    $('npc-drop-qtd').focus();
+  } else if (dropQtd > 0) {
+    toast(`pool de drop publicado: ${dropQtd} carta(s) de ${totalDoPool(dropPool)}`);
+  }
 
   if (r.path) {
     toast(`salvo em decks/${r.path}`);

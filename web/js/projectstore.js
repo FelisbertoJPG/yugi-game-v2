@@ -115,7 +115,44 @@ async function enviar(name, data) {
 /** Quem quer saber como terminou cada gravação. `name -> callback`. */
 const ouvintes = new Map();
 
+/**
+ * **A publicação que falhou aparece na tela — em QUALQUER página.**
+ *
+ * Só a Banlist e o editor de drop registravam um ouvinte; todo o resto publicava
+ * fire-and-forget. Quando o banco recusava (403 de quem não é admin, sessão
+ * vencida, rede caída), o disco gravava, a tela dizia "salvo" e a edição
+ * simplesmente não existia para mais ninguém — que é o pior desfecho possível
+ * para conteúdo compartilhado: quem editou continua vendo o certo.
+ *
+ * O aviso mora aqui, e não em cada página, por isso mesmo: são nove chaves e
+ * quatro telas, e a próxima nasceria sem ele. Injeta o próprio elemento, no
+ * mesmo padrão do `carddetail.js`.
+ */
+function avisoDePublicacao(name, erro) {
+  try {
+    if (typeof document === 'undefined') return;   // Node (os testes)
+    let caixa = document.getElementById('publicacao-falhou');
+    if (!caixa) {
+      caixa = document.createElement('div');
+      caixa.id = 'publicacao-falhou';
+      caixa.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;'
+        + 'background:#3a0d14;color:#ffd9de;border:2px solid #e8455e;border-radius:4px;'
+        + 'padding:10px 14px;font:12px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px #000a;'
+        + 'max-width:640px;margin:0 auto;cursor:pointer';
+      caixa.title = 'clique para fechar';
+      caixa.onclick = () => caixa.remove();
+      document.body?.append(caixa);
+    }
+    caixa.textContent = `⚠ a alteração de "${name}" NÃO foi publicada: ${erro || 'motivo desconhecido'}`
+      + ' — ela vale só nesta máquina até você salvar de novo com sessão de admin.';
+  } catch { /* um aviso não pode derrubar a gravação */ }
+}
+
 function avisar(name, r) {
+  if (r && r.banco && r.banco.ok === false) {
+    console.error(`[conteudo] "${name}" nao foi publicado:`, r.banco.erro);
+    avisoDePublicacao(name, r.banco.erro);
+  }
   const cb = ouvintes.get(name);
   if (cb) { try { cb(r); } catch { /* a tela não pode derrubar a gravação */ } }
 }

@@ -24,6 +24,9 @@ node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não 
 node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
                              # resolvido pelo nome — não pelo índice)
 npm run data:check           # integridade do banco de cartas (5 checagens)
+npm run conteudo:check       # o que o admin editou chegou ao BANCO? (conteudo,
+                             # decks de NPC e tabuleiros, disco x Supabase).
+                             # Edicao que fica so' em disco nao existe pra ninguem
 npm run boosters:check       # cruza os boosters PUBLICADOS com a lista ativa —
                              # acusa carta que o jogador compra e não pode jogar
 npm run data:build           # regenera ygo-data/data a partir do cards.cdb (precisa de Python 3)
@@ -567,6 +570,14 @@ nenhuma conta nova herda esses dados automaticamente.
 
 ## Armadilhas conhecidas
 
+- **Publicar é `fire-and-forget` — e a recusa era invisível.** As telas gravam a
+  cada tecla e não podem esperar a rede, então `pushFile` não devolve nada. Só a
+  Banlist e o editor de drop registravam um ouvinte; nas outras, um 403 de quem
+  não é admin, uma sessão vencida ou a rede caída gravavam o disco, a tela dizia
+  "salvo" e a edição **não existia para mais ninguém** — o pior desfecho para
+  conteúdo compartilhado, porque quem editou continua vendo o certo. Hoje o
+  `projectstore.js` mostra o aviso sozinho, em qualquer página, e o
+  `npm run conteudo:check` responde depois a pergunta "está tudo publicado?".
 - **O que é CONTEÚDO do jogo não pode morar no `localStorage`.** A lista de
   decks de cada NPC sempre veio do banco (`decks_npc`, leitura aberta), mas
   **qual deles estava ativo** era preferência do navegador — e o sintoma

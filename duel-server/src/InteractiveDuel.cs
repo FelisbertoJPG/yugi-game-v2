@@ -681,10 +681,38 @@ namespace DuelServer
         }
 
         /// <summary>Seleção do NPC (tributo/alvo/descarte/reborn) pela regra do brain.</summary>
+        /// <summary>
+        /// A seleção do NPC, com a REDE DE SEGURANÇA do tamanho.
+        ///
+        /// O motor pede um número exato de cartas (`selMin`). Respondendo menos,
+        /// ele recusa a resposta e repete a mesma pergunta — e o duelo TRAVA sem
+        /// erro nenhum, com a tela parada esperando algo que nunca vem. Foi o que
+        /// aconteceu com a Graceful Charity (compra 3, descarta 2): uma regra de
+        /// escolha dirigida do brain respondia UMA carta para um pedido de duas.
+        ///
+        /// A causa foi corrigida lá (as escolhas dirigidas só valem para pedido
+        /// de uma carta), mas o buraco continuaria aberto para a próxima regra
+        /// nova. Aqui a resposta curta é COMPLETADA com as opções que sobraram —
+        /// jogada pior, nunca duelo travado — e o log grita, porque uma escolha
+        /// completada assim é sempre um erro de regra a corrigir.
+        /// </summary>
         byte[] NpcSelect(Question q)
         {
             var idx = _npcEnabled ? _npc.DecideSelect(q, q.player) : null;
-            return idx != null && idx.Count > 0 ? EncodeSelect(idx) : AutoSelect(q);
+            if (idx == null || idx.Count == 0) return AutoSelect(q);
+
+            int precisa = Math.Max(1, q.selMin);
+            if (idx.Count < precisa)
+            {
+                Log.Err($"[npc] a regra devolveu {idx.Count} carta(s) para um pedido de " +
+                        $"{precisa} (kind={q.kind}) — completando para o duelo nao travar");
+                foreach (var c in q.choices)
+                {
+                    if (idx.Count >= precisa) break;
+                    if (!idx.Contains(c.index)) idx.Add(c.index);
+                }
+            }
+            return EncodeSelect(idx);
         }
 
         /// <summary>

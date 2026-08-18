@@ -201,6 +201,28 @@ dois duelos reais (negar uma invocação e negar um Raigeki). Os duelos reais es
 lá por um motivo específico: se o contexto da janela parar de chegar, nenhuma
 regra acusa nada — o sintoma seria só "ele nunca mais usou Solemn Judgment".
 
+### Escolha dirigida × quantas cartas o motor pediu
+
+⚠️ **Responder MENOS cartas do que o `selMin` trava o duelo em silêncio.** O core
+recusa a resposta e repõe a mesma pergunta; a tela fica parada esperando algo que
+nunca vem, e não há erro em lugar nenhum.
+
+Todas as escolhas DIRIGIDAS do `DecideSelect` devolvem **um** índice — o alvo do
+equipamento, o Normal Nv5+, a busca no deck, o Toon World, a remoção de S/T, o
+alvo do Mausoléu. Elas valem só quando o motor pede UMA carta, e por isso todas
+passaram a exigir `escolhaUnica` (`need == 1`).
+
+Foi o que travou um duelo real: a **Graceful Charity** (compra 3, descarta 2) é a
+primeira carta destes decks a pedir DUAS cartas numa seleção. O deck do Para &
+Dox tem seis Normais Nv5+ (três Labyrinth Wall e três Garnecia), então a mão
+depois de dois Potes quase sempre tem dois — e o ramo do "Normal Nv5+" casava no
+descarte e respondia uma. Relato: *"ativou 2 potes + 1 charity e travou"*.
+
+Além da causa, ficou a **rede de segurança** no host (`InteractiveDuel.NpcSelect`):
+resposta curta é completada com as opções que sobraram e o log grita. Jogada pior
+nunca é pior que duelo travado — e a próxima regra nova cai na rede em vez de
+congelar a partida.
+
 ### Classes de efeito — a tabela medida contra o banco
 
 O cérebro reconhece o que uma carta FAZ sem lista de IDs, cruzando a `category`

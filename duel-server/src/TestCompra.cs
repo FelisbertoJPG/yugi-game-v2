@@ -51,7 +51,8 @@ namespace DuelServer
         // alvo, e por isso mora depois; o conjunto BUSCA_ESPECIFICA e' o das
         // buscas incondicionais.
         const uint REINFORCEMENT = 32807846;
-        const uint GARNECIA = 49888191;          // 2400/2000 Nv7 — o "preso na mao"
+        const uint GARNECIA = 49888191;          // 2400/2000 Nv7 Normal — o "preso na mao"
+        const uint LABYRINTH_WALL = 67284908;    // 0/3000 Nv5 Normal
         const uint BATTLE_OX = 5053103;          // 1700/1000 Nv4 — invocavel na hora
         const uint LA_JINN = 97590747;           // 1800/1000 Nv4
         const uint MYSTICAL_ELF = 15025844;      // 800/2000 Nv4
@@ -200,6 +201,51 @@ namespace DuelServer
             p = brain.Decide(Idle(new[] { DARK_WORLD_DEALINGS }, new[] { LA_JINN }), 1);
             Check("Dark World Dealings (compra 1 / descarta 1) segue a mesma regra",
                   p.Action == "activate", $"(veio {p.Action} — {p.Why})");
+
+            // ================================================================
+            // O DESCARTE DE DUAS CARTAS — o travamento relatado
+            //
+            // "ativou 2 potes + 1 charity e travou". A Graceful Charity compra 3
+            // e descarta 2, e e' a primeira carta destes decks a pedir DUAS
+            // cartas numa selecao. As escolhas DIRIGIDAS do brain (o Normal
+            // Nv5+, o alvo do equipamento, a busca no deck) devolvem sempre UMA:
+            // respondendo uma para um pedido de duas, o motor recusa a resposta e
+            // repete a mesma pergunta — o duelo para, sem erro nenhum.
+            //
+            // O deck do Para & Dox tem SEIS Normais Nv5+ (tres Labyrinth Wall e
+            // tres Garnecia), entao a mao depois de dois potes quase sempre tem
+            // dois — e o ramo do "Normal Nv5+" casava no descarte.
+            // ================================================================
+            var descarte2 = new InteractiveDuel.Question
+            {
+                kind = "selectcard", player = 1, selMin = 2, selMax = 2,
+                choices =
+                {
+                    new InteractiveDuel.Sel { code = GARNECIA, index = 0, location = 0x2 },
+                    new InteractiveDuel.Sel { code = LABYRINTH_WALL, index = 1, location = 0x2 },
+                    new InteractiveDuel.Sel { code = POT_OF_GREED, index = 2, location = 0x2 },
+                    new InteractiveDuel.Sel { code = BATTLE_OX, index = 3, location = 0x2 },
+                },
+            };
+            var duas = brain.DecideSelect(descarte2, 1);
+            Check("descarte de DUAS com a mao cheia de Normal Nv5+: devolve DUAS",
+                  duas.Count == 2, $"(devolveu {duas.Count}: {string.Join(",", duas)})");
+            Check("...e sem repetir a mesma carta", duas.Distinct().Count() == duas.Count);
+
+            // O par de controle: pedindo UMA, a escolha dirigida continua valendo
+            // (senao a correcao teria simplesmente desligado a regra).
+            var descarte1 = new InteractiveDuel.Question
+            {
+                kind = "selectcard", player = 1, selMin = 1, selMax = 1,
+                choices =
+                {
+                    new InteractiveDuel.Sel { code = LABYRINTH_WALL, index = 0, location = 0x2 },
+                    new InteractiveDuel.Sel { code = GARNECIA, index = 1, location = 0x2 },
+                },
+            };
+            var uma = brain.DecideSelect(descarte1, 1);
+            Check("pedido de UMA: a escolha dirigida segue valendo (o maior ATK)",
+                  uma.Count == 1 && uma[0] == 1, $"(devolveu {string.Join(",", uma)})");
 
             // Entre as duas, a limpa primeiro: ela nao cobra nada.
             meuCampo.Clear(); minhaMao.Clear();

@@ -1458,6 +1458,19 @@ namespace DuelServer
         public List<int> DecideSelect(InteractiveDuel.Question q, int me)
         {
             int need = Math.Max(1, q.selMin);
+
+            // **Toda escolha DIRIGIDA abaixo devolve UM índice** — o alvo do
+            // equipamento, o Normal Nv5+, a busca no deck, o Toon World, a
+            // remoção de S/T, o alvo do Mausoléu. Elas só valem quando o motor
+            // pede UMA carta; respondendo uma para um pedido de duas, o core
+            // recusa a resposta e a repete, e o duelo TRAVA sem erro nenhum.
+            //
+            // Foi o que aconteceu com a Graceful Charity (compra 3, descarta 2)
+            // no deck do Para & Dox: a mão tem seis Normais Nv5+ (Labyrinth Wall
+            // e Garnecia), então o ramo do "Normal Nv5+" casava no descarte e
+            // respondia uma carta para um pedido de duas. O jogador relatou
+            // "ativou 2 potes + 1 charity e travou".
+            bool escolhaUnica = need == 1;
             var picks = new List<int>();
             if (q.choices.Count == 0) return picks;
 
@@ -1514,7 +1527,7 @@ namespace DuelServer
             // tributo acima. Consome a flag numa tacada só, mesmo que a lista
             // de opções esteja vazia por algum motivo — nunca fica "presa"
             // esperando uma seleção que não vai vir.
-            if (_proximoAlvoEquipFraco)
+            if (escolhaUnica && _proximoAlvoEquipFraco)
             {
                 _proximoAlvoEquipFraco = false;
                 if (q.choices.Count > 0)
@@ -1528,7 +1541,7 @@ namespace DuelServer
             // equipamentos do deck, inclusive os que não podem equipar em nada
             // que eu controlo — pelo critério genérico (maior ATK) todos empatam
             // em 0 e ele levaria o primeiro da lista, que dá na mesma que sortear.
-            if (_proximoEquipDoDeck && q.choices[0].location == DECK)
+            if (escolhaUnica && _proximoEquipDoDeck && q.choices[0].location == DECK)
             {
                 _proximoEquipDoDeck = false;
                 var escolha = MelhorEquipEntre(q.choices, me);
@@ -1554,7 +1567,7 @@ namespace DuelServer
             // sem precisar saber qual carta abriu a janela.
             byte deOnde = q.choices[0].location;
             var normaisGrandes = q.choices.Where(c => EhNormalGrande(c.code)).ToList();
-            if (normaisGrandes.Count > 1 && (deOnde == DECK || deOnde == HAND))
+            if (escolhaUnica && normaisGrandes.Count > 1 && (deOnde == DECK || deOnde == HAND))
             {
                 var melhor = normaisGrandes
                     .OrderByDescending(c => _cards.Stats(c.code).AtkValue).First();
@@ -1569,7 +1582,7 @@ namespace DuelServer
             // mesma que sortear. Aqui a ordem é pelo que a carta FAZ, na mesma
             // escala do resto do cérebro: pôr corpo em campo vale mais que
             // destruir, que vale mais que comprar.
-            if (deOnde == DECK && q.choices.Count > 1
+            if (escolhaUnica && deOnde == DECK && q.choices.Count > 1
                 && q.choices.All(c => !_cards.Stats(c.code).IsMonster))
             {
                 int Valor(InteractiveDuel.Sel c)
@@ -1594,7 +1607,7 @@ namespace DuelServer
             // em primeiro — sem ele nenhum outro Toon funciona por completo.
             // `release==0` aqui de propósito: nunca colide com o tributo acima.
             var toonWorld = q.choices.FirstOrDefault(c => c.code == TOON_WORLD);
-            if (toonWorld.code == TOON_WORLD && !NaMao(me, TOON_WORLD) && !_faceUpStOf(me).Contains(TOON_WORLD))
+            if (escolhaUnica && toonWorld.code == TOON_WORLD && !NaMao(me, TOON_WORLD) && !_faceUpStOf(me).Contains(TOON_WORLD))
                 return new List<int> { toonWorld.index };
 
             byte loc = q.choices[0].location;
@@ -1603,7 +1616,7 @@ namespace DuelServer
             // ordena por ATK, que para magia/armadilha é sempre 0 — na prática
             // ele estourava a primeira zona da lista. Com a leitura, escolhe a
             // que a regra já decidiu (ou, na falta dela, a mais pesada).
-            if (loc == SZONE)
+            if (escolhaUnica && loc == SZONE)
             {
                 var mira = _proximoAlvoStPerigosa != 0
                     ? q.choices.FirstOrDefault(c => c.code == _proximoAlvoStPerigosa)
@@ -1617,7 +1630,7 @@ namespace DuelServer
             // A INVOCAÇÃO do Mausoléu chega aqui como "escolha uma carta da mão",
             // exatamente igual a um custo de descarte — e quer o oposto dele. A
             // regra já decidiu quem sobe (`PlanoDoMausoleu`); aqui é só cumprir.
-            if (loc == HAND && _alvoDaInvocacaoDaMao != 0)
+            if (escolhaUnica && loc == HAND && _alvoDaInvocacaoDaMao != 0)
             {
                 uint alvo = _alvoDaInvocacaoDaMao;
                 _alvoDaInvocacaoDaMao = 0;

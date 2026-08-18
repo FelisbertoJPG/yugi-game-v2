@@ -134,7 +134,13 @@ namespace DuelServer.Update
         // de "uma carta por cadeia" deixou de matar o corpo de graca — o Magician
         // of Dark Illusion so' sai da mao na MESMA cadeia da carta que abriu a
         // janela, entao a trava o descartava sempre.
-        public const string InstallerVersion = "0.12.1";
+        //
+        // 0.12.2 (18/08/2026): o duelo travava depois de "2 potes + 1 charity".
+        // Responder MENOS cartas que o `selMin` faz o core recusar a resposta e
+        // repetir a pergunta — a tela para e nao ha' erro nenhum. As escolhas
+        // dirigidas do DecideSelect devolvem UMA carta e passaram a exigir
+        // pedido de uma; e o host completa resposta curta em vez de congelar.
+        public const string InstallerVersion = "0.12.2";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 

@@ -29,7 +29,15 @@ const BASE_NPCS = [
 ];
 
 const KEY = 'ygo:npcDecks';       // legado: decks que ficaram só no navegador
-const KEY_ACTIVE = 'ygo:npcActive';  // preferência local de qual deck está ativo
+// Qual deck de cada NPC está ATIVO. Era preferência local ("cada um escolhe no
+// seu navegador"), e isso estava errado: qual deck o adversário joga é CONTEÚDO
+// do jogo, igual ao deck em si. O sintoma foi o relato de que, na máquina de
+// outro jogador, o Para & Dox usava outro deck — os dois liam a MESMA lista do
+// banco, mas o índice do ativo era do navegador de cada um, e quem nunca
+// escolheu caía no primeiro da ordem alfabética. Agora vai para
+// `conteudo/npc-deck-ativo` (só admin publica, RLS) e o localStorage fica como
+// cache e como fallback offline.
+const KEY_ACTIVE = 'ygo:npcActive';
 const KEY_CUSTOM = 'ygo:customNpcs'; // adversários criados na Área de Teste
 const KEY_BASE_META = 'ygo:baseNpcMeta'; // campanha/tabuleiro dos 3 NPCs FIXOS (overlay, não tem onde mais morar)
 
@@ -100,6 +108,9 @@ function writeCustom(list) {
 // código), então campanha/tabuleiro deles vivem num overlay à parte —
 // { [npcId]: {campaign, board} } — aplicado por cima de BASE_NPCS.
 let leuBaseMetaDisco = false;
+/** A leitura de `npc-deck-ativo` chegou à fonte? Sem isto, uma máquina offline
+ *  publicaria por cima do banco a escolha que ela mesma inventou. */
+let leuAtivoDisco = false;
 
 function readBaseMeta() {
   const obj = readJson(KEY_BASE_META, {});
@@ -142,6 +153,15 @@ export async function hydrateCustomNpcs() {
     writeJson(KEY_BASE_META, baseMeta.data);
   }
   applyBaseMeta();
+
+  // O deck ATIVO de cada NPC, publicado. Só sobrescreve o cache local quando a
+  // leitura ALCANÇOU a fonte: sem rede, quem joga continua com a última escolha
+  // conhecida em vez de cair no primeiro deck da lista.
+  const ativo = await pullFileEx('npc-deck-ativo');
+  leuAtivoDisco = ativo.alcancou;
+  if (ativo.alcancou && ativo.data && typeof ativo.data === 'object') {
+    writeJson(KEY_ACTIVE, ativo.data);
+  }
 
   rebuildNpcList();
   return alcancou;
@@ -332,12 +352,31 @@ export async function loadNpcDecks() {
   return cache;
 }
 
-/** Estado do NPC: os decks em cache + qual está ativo. */
+/**
+ * Estado do NPC: os decks em cache + qual está ativo.
+ *
+ * O ativo é gravado como `{ i, nome }` e resolvido pelo **nome** primeiro. O
+ * índice sozinho não serve para conteúdo publicado: a lista é ordenada por
+ * nome, então um deck novo entrando antes na ordem alfabética muda o
+ * significado do número e troca o deck de todo mundo sem ninguém mexer em nada.
+ * O número fica como reserva, para o dia em que o deck escolhido for renomeado
+ * ou apagado.
+ *
+ * Aceita também o formato ANTIGO (só o número), que é o que está no
+ * `localStorage` de quem já jogava.
+ */
 export function getNpcState(id) {
   const npc = getNpc(id);
   if (!npc) return null;
   const decks = cache[id] ?? [];
-  const active = readJson(KEY_ACTIVE, {})[id] ?? 0;
+  const guardado = readJson(KEY_ACTIVE, {})[id] ?? 0;
+
+  let active = 0;
+  if (typeof guardado === 'number') active = guardado;
+  else if (guardado && typeof guardado === 'object') {
+    const porNome = decks.findIndex((d) => d.name === guardado.nome);
+    active = porNome >= 0 ? porNome : Number(guardado.i) || 0;
+  }
   return { decks, activeIndex: Math.min(active, Math.max(0, decks.length - 1)) };
 }
 
@@ -435,11 +474,25 @@ export async function deleteNpcDeck(id, index) {
   return true;
 }
 
-/** Define qual deck do NPC fica ativo. Preferência local — não vai para o git. */
+/**
+ * Define qual deck do NPC fica ativo — e PUBLICA a escolha.
+ *
+ * Publicar é o ponto: qual deck o adversário joga é conteúdo do jogo, e antes
+ * disto morava só no `localStorage` de quem escolheu. Quem não fosse essa
+ * pessoa via outro deck, sem nada acusar. O `pushFile` só chega ao banco se
+ * quem está logado for admin (a RLS de `conteudo` recusa o resto); para os
+ * outros, a gravação local continua valendo como preferência da máquina.
+ */
 export function setNpcActiveIndex(id, index) {
   const all = readJson(KEY_ACTIVE, {});
-  all[id] = Math.max(0, index);
-  return writeJson(KEY_ACTIVE, all);
+  const i = Math.max(0, index);
+  // Grava o NOME junto: é por ele que a escolha é resolvida depois (ver
+  // `getNpcState`). Sem o nome, publicar o índice faria um deck novo em ordem
+  // alfabética anterior trocar o adversário de todo mundo.
+  all[id] = { i, nome: (cache[id] ?? [])[i]?.name ?? null };
+  const ok = writeJson(KEY_ACTIVE, all);
+  if (leuAtivoDisco) pushFile('npc-deck-ativo', all);
+  return ok;
 }
 
 /**

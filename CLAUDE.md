@@ -21,6 +21,8 @@ node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do 
 node web/js/drops.test.mjs   # 15 testes do drop por NPC (pool por raridade + a % de cada uma)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
+node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
+                             # resolvido pelo nome — não pelo índice)
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run boosters:check       # cruza os boosters PUBLICADOS com a lista ativa —
                              # acusa carta que o jogador compra e não pode jogar
@@ -564,6 +566,25 @@ são o que existia ANTES do login existir, preservado como histórico —
 nenhuma conta nova herda esses dados automaticamente.
 
 ## Armadilhas conhecidas
+
+- **O que é CONTEÚDO do jogo não pode morar no `localStorage`.** A lista de
+  decks de cada NPC sempre veio do banco (`decks_npc`, leitura aberta), mas
+  **qual deles estava ativo** era preferência do navegador — e o sintoma
+  demorou a aparecer porque, na máquina de quem escolheu, estava tudo certo.
+  Dois jogadores com o MESMO jogo, lendo a MESMA lista, viam adversários
+  diferentes: quem nunca escolheu caía no primeiro da ordem alfabética. Hoje vai
+  para `conteudo/npc-deck-ativo` (migration 0030), e o `localStorage` é cache e
+  fallback offline. A escolha é resolvida pelo **nome** do deck, não pelo
+  índice: a lista é ordenada por nome, então um deck novo entrando antes trocaria
+  o adversário de todo mundo sem ninguém mexer em nada
+  (`node web/js/npcativo.test.mjs`).
+- **`decks/npc/*.ydk` e o pool de drop NÃO viajam no Release.** O manifesto leva
+  `web/`, `ygo-data/`, `boards/` e quatro `store/*.json`; `store/` e `decks/`
+  são intocáveis por código (`UpdateEngine.Intocaveis`), com uma allowlist
+  fechada (`GlobaisPermitidos`) para o punhado de arquivos que são conteúdo. O
+  deck de NPC no disco é só a SEMENTE que veio dentro do exe — quem manda é o
+  banco, e é de lá que o jogo lê. Não "conserte" isso publicando `.ydk` no
+  Release: o caminho é o Supabase.
 
 - **O jogo se chamava Duel Academy.** Virou **Classic Duels** em 17/08/2026, e
   três nomes NÃO acompanharam a troca, cada um por um motivo:

@@ -118,6 +118,14 @@ Especialmente da mão — o NPC ativa as duas sozinho, na ordem que fecha o comb
 no MESMO turno, escolhe sempre o de maior ATK entre os oferecidos e guarda as
 Regras quando não há alvo Nv5+ na mão; o duelo real prova que o corpo chega ao
 campo, e que quem chega é o Ryu-Ran de 2200, não o Parrot Dragon de 2000),
+`--test-magos` (o deck **Poder dos Magos**, o primeiro que não cabe em regra por
+ID: dezoito cartas com efeito. A cobertura é por **classe** — a `category` do
+`cards.cdb` cruzada com o Lua da carta — e o teste prova as duas metades: o
+perfil de cada carta bate com o que ela faz, e cada classe dispara na hora certa
+com a trava (Thousand Knives só com monstro do outro lado, Dark Magic Attack só
+com S/T, Dark Magic Veil só quando preciso de corpo E o custo em LP não fura o
+piso). No duelo real as CINCO classes saem sozinhas: busca, compra, destruição,
+fusão e invocação especial),
 `--test-compra` (as cartas de **compra**, reconhecidas pelo EFEITO e não por uma
 lista de IDs: a `category` do `cards.cdb` diz que a carta compra, o Lua dela diz
 se cobra descarte e se alguma outra reanima do cemitério — nenhuma das duas

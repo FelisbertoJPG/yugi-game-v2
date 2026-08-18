@@ -330,6 +330,11 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-compra") >= 0)
                 return TestCompra.Run(streamingAssets);
 
+            // O deck "Poder dos Magos": dezoito cartas com efeito, cobertas por
+            // CLASSE (a `category` do banco + o Lua) em vez de uma regra por id.
+            if (Array.IndexOf(args, "--test-magos") >= 0)
+                return TestMagos.Run(streamingAssets);
+
             // Teste de aceitacao das cartas que os BOOSTERS ja vendiam e a
             // Lista 1 nao conhecia (De-Spell, Ritual Cage, Birthright, Swing of
             // Memories): o efeito roda no motor E o front sabe desenhar toda

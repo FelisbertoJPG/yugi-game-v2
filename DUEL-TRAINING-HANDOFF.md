@@ -201,6 +201,46 @@ dois duelos reais (negar uma invocação e negar um Raigeki). Os duelos reais es
 lá por um motivo específico: se o contexto da janela parar de chegar, nenhuma
 regra acusa nada — o sintoma seria só "ele nunca mais usou Solemn Judgment".
 
+### Classes de efeito — a tabela medida contra o banco
+
+O cérebro reconhece o que uma carta FAZ sem lista de IDs, cruzando a `category`
+do `cards.cdb` com o Lua dela (`DatabaseManager.Perfil`). Os bits abaixo foram
+**medidos**, uma carta conhecida de cada classe — não deduzidos do
+`constant.lua`, que neste core não bate com o banco:
+
+| bit | classe | conferido em |
+|---|---|---|
+| `0x1` | destrói MONSTRO | Raigeki, Dark Hole, Thousand Knives |
+| `0x2` | destrói MAGIA/ARMADILHA | MST, Heavy Storm, Dust Tornado, Dark Magic Attack |
+| `0x100` | COMPRA | Pot of Greed, Graceful Charity, Jar of Greed, Trade-In |
+| `0x220` | BUSCA no deck | Summoner's Art, Reinforcement, Sangan, Magician's Rod |
+| `0x100000` | INVOCAÇÃO ESPECIAL | Monster Reborn, Ancient Rules, Dark Magic Veil, Magician's Circle |
+| `0x800000` | FUSÃO | Polymerization, The Eye of Timaeus |
+
+O que a categoria **não** distingue sai do Lua: descarte (`DiscardHand` /
+`REASON_DISCARD`), reanimação (`SpecialSummon` **e** `LOCATION_GRAVE` — a
+categoria trata igual quem invoca da mão) e custo de vida (`PayLP`, que cobre o
+`Duel.PayLPCost` antigo e o `Cost.PayLP(n)` moderno; procurar só pelo primeiro
+fazia o custo do Dark Magic Veil passar despercebido).
+
+Três armadilhas que custaram teste vermelho:
+
+1. **A Polymerization não tem marcador nenhum no script** — ela delega tudo a
+   `Fusion.RegisterSummonEff`. Por isso a fusão é reconhecida SÓ pela categoria,
+   sem exigir confirmação no Lua como as outras classes;
+2. **`COM_REGRA_PROPRIA`**. A regra genérica é avaliada ANTES das específicas, e
+   sem essa lista ela as engole: o Metamorphosis voltou a tributar o corpo único,
+   o Burst Stream a sair com 1 monstro do outro lado e o Summoner's Art a ser
+   ativado sem alvo — três suítes acusando de uma vez. Carta com condição própria
+   entra nessa lista;
+3. **Destruir o dele × destruir o MEU.** O Escape from the Dark Dimension traz um
+   banido de volta e destrói esse mesmo monstro quando sai do campo, então a
+   categoria dele acusa destruição. A regra de remoção ignora quem também invoca
+   — quem põe corpo em campo é julgado pela regra de invocação.
+
+Teste: `duel-server.exe --test-magos` — 28 checagens, com o deck "Poder dos
+Magos" inteiro.
+
 ### Cartas de compra — reconhecidas pelo EFEITO, não por id
 
 O NPC conhecia **uma** carta de compra: o Pote da Ganância, por id. Graceful

@@ -120,7 +120,14 @@ namespace DuelServer.Update
         // 0.11.2 (17/08/2026): arte nova do icone (o Enigma sobre a parede de
         // hieroglifos). Recurso dentro do exe — sem trocar o exe, o icone antigo
         // continua na barra de tarefas.
-        public const string InstallerVersion = "0.11.2";
+        //
+        // 0.12.0 (18/08/2026): o NpcBrain passou a cobrir CLASSES DE EFEITO em vez
+        // de cartas por id — busca, destruicao de monstro, destruicao de
+        // magia/armadilha, invocacao especial e fusao saem da `category` do banco
+        // cruzada com o Lua da carta. E' o que faz o deck novo do Yugi (Poder dos
+        // Magos, dezoito cartas com efeito) ser jogado sem uma linha por carta.
+        // Cerebro viaja so' no exe: com o motor velho, o adversario segura a mao.
+        public const string InstallerVersion = "0.12.0";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 

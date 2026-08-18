@@ -180,7 +180,28 @@ public class DatabaseManager : IDisposable
     //     limpa esses falsos positivos. E o custo de descarte a categoria
     //     simplesmente não registra — Graceful Charity e Dark World Dealings são
     //     `0x100` e nada mais, embora as duas mandem descartar.
+    // Os outros bits, medidos do mesmo jeito (uma carta conhecida de cada classe,
+    // conferida contra o banco):
+    //
+    //   0x1      destrói MONSTRO ......... Raigeki, Dark Hole, Thousand Knives
+    //   0x2      destrói MAGIA/ARMADILHA . Mystical Space Typhoon, Heavy Storm,
+    //                                      Dust Tornado, Dark Magic Attack
+    //   0x220    BUSCA no deck ........... Summoner's Art, Reinforcement of the
+    //                                      Army, Sangan, Magician's Rod, Terraforming
+    //   0x100000 INVOCAÇÃO ESPECIAL ...... Monster Reborn, Ancient Rules, Dark
+    //                                      Magic Veil, Magician Navigation,
+    //                                      Call of the Haunted, Magician's Circle
+    //   0x800000 FUSÃO ................... Polymerization, The Eye of Timaeus
+    //
+    // Carta fora da tabela (De-Spell e Fissure saem com `0`) simplesmente não é
+    // reconhecida — e o silêncio é o erro barato: o NPC deixa de usar uma carta,
+    // em vez de usar errado uma que ele não entendeu.
+    const uint CATEGORY_DESTROI_MONSTRO = 0x1;
+    const uint CATEGORY_DESTROI_ST = 0x2;
+    const uint CATEGORY_BUSCA = 0x200;
     const uint CATEGORY_DRAW = 0x100;
+    const uint CATEGORY_SP_SUMMON = 0x100000;
+    const uint CATEGORY_FUSAO = 0x800000;
 
     /// <summary>O que o efeito de uma carta faz, do ponto de vista de quem decide jogá-la.</summary>
     public readonly struct PerfilDeEfeito
@@ -191,8 +212,26 @@ public class DatabaseManager : IDisposable
         public readonly bool Descarta;
         /// <summary>Traz um monstro de volta do CEMITÉRIO.</summary>
         public readonly bool ReanimaDoCemiterio;
-        public PerfilDeEfeito(bool compra, bool descarta, bool reanima)
-        { Compra = compra; Descarta = descarta; ReanimaDoCemiterio = reanima; }
+        /// <summary>Destrói monstro do outro lado.</summary>
+        public readonly bool DestroiMonstro;
+        /// <summary>Destrói magia/armadilha do outro lado.</summary>
+        public readonly bool DestroiSt;
+        /// <summary>Tira uma carta do DECK e põe na mão.</summary>
+        public readonly bool Busca;
+        /// <summary>Põe um monstro em campo por Invocação Especial (de onde for).</summary>
+        public readonly bool InvocaEspecial;
+        /// <summary>Invoca por FUSÃO, do Extra Deck.</summary>
+        public readonly bool Fusao;
+        /// <summary>Cobra pontos de vida.</summary>
+        public readonly bool PagaLp;
+
+        public PerfilDeEfeito(bool compra, bool descarta, bool reanima, bool destroiMonstro,
+                              bool destroiSt, bool busca, bool invocaEspecial, bool fusao, bool pagaLp)
+        {
+            Compra = compra; Descarta = descarta; ReanimaDoCemiterio = reanima;
+            DestroiMonstro = destroiMonstro; DestroiSt = destroiSt; Busca = busca;
+            InvocaEspecial = invocaEspecial; Fusao = fusao; PagaLp = pagaLp;
+        }
     }
 
     private readonly System.Collections.Generic.Dictionary<uint, PerfilDeEfeito> _perfilCache = new();
@@ -207,7 +246,8 @@ public class DatabaseManager : IDisposable
         if (_perfilCache.TryGetValue(code, out var hit)) return hit;
 
         string lua = LuaDaCarta(code);
-        bool compra = (Stats(code).Category & CATEGORY_DRAW) != 0 && lua.Contains("Duel.Draw");
+        uint cat = Stats(code).Category;
+        bool compra = (cat & CATEGORY_DRAW) != 0 && lua.Contains("Duel.Draw");
         // `DiscardHand` é o descarte direto; `REASON_DISCARD` cobre quem manda
         // para o cemitério COMO descarte; e "mandar da mão para o cemitério" é a
         // terceira forma de escrever a mesma coisa (Hand Destruction).
@@ -217,8 +257,24 @@ public class DatabaseManager : IDisposable
         // Premature Burial do Ancient Rules (que também Invoca Especialmente, mas
         // da mão). A categoria não distingue os dois — os três são `0x100000`.
         bool reanima = lua.Contains("SpecialSummon") && lua.Contains("LOCATION_GRAVE");
+        // Categoria E Lua, sempre: a categoria diz a CLASSE do efeito e o script
+        // confirma que ele existe mesmo naquela carta. Um sinal só erra nos dois
+        // sentidos — há categoria sem o efeito no próprio script, e há script com
+        // a palavra sem a carta ser daquela classe.
+        bool destroiMonstro = (cat & CATEGORY_DESTROI_MONSTRO) != 0 && lua.Contains("Destroy");
+        bool destroiSt = (cat & CATEGORY_DESTROI_ST) != 0 && lua.Contains("Destroy");
+        // Buscar é tirar do DECK e pôr na mão. As duas metades têm de aparecer:
+        // `LOCATION_DECK` sozinho pega também quem invoca direto do deck.
+        bool busca = (cat & CATEGORY_BUSCA) != 0 && lua.Contains("LOCATION_DECK");
+        bool invocaEspecial = (cat & CATEGORY_SP_SUMMON) != 0 && lua.Contains("SpecialSummon");
+        bool fusao = (cat & CATEGORY_FUSAO) != 0;
+        // "PayLP" cobre as DUAS formas que os scripts usam: o `Duel.PayLPCost`
+        // antigo e o `Cost.PayLP(n)` moderno — o Dark Magic Veil usa o segundo, e
+        // procurar só pelo primeiro fazia o custo dele passar despercebido.
+        bool pagaLp = lua.Contains("PayLP");
 
-        var p = new PerfilDeEfeito(compra, descarta, reanima);
+        var p = new PerfilDeEfeito(compra, descarta, reanima, destroiMonstro,
+                                   destroiSt, busca, invocaEspecial, fusao, pagaLp);
         _perfilCache[code] = p;
         return p;
     }

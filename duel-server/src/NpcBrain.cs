@@ -96,6 +96,29 @@ namespace DuelServer
             48579379, // Perfectly Ultimate Great Moth
         };
 
+        /// <summary>
+        /// **Cartas que a regra genérica não pode engolir.**
+        ///
+        /// Cada uma destas tem regra PRÓPRIA mais abaixo, com uma condição que a
+        /// classe do efeito não expressa: o Metamorphosis é uma fusão, mas não
+        /// pode esvaziar o campo nem comer uma peça do Gate Guardian; o Burst
+        /// Stream destrói monstros, mas só compensa limpando 2+; o Summoner's Art
+        /// busca, mas só serve com um Nv5+ para trazer.
+        ///
+        /// Sem esta lista, a regra genérica — que vem ANTES por ser mais barata de
+        /// avaliar — dispara primeiro e a condição específica nunca é consultada.
+        /// Foi exatamente o que aconteceu ao generalizar: o Metamorphosis voltou a
+        /// tributar o corpo único e o Burst Stream a sair com 1 monstro do outro
+        /// lado, com três suítes acusando de uma vez.
+        /// </summary>
+        static readonly HashSet<uint> COM_REGRA_PROPRIA = new()
+        {
+            MONSTER_REBORN, TRIBUTE_TO_DOOMED, BURST_STREAM, TIME_WIZARD, TOON_WORLD,
+            TRIBUTE_DOLL, MONSTER_GATE, METAMORPHOSIS, MAGICAL_LABYRINTH, MAUSOLEUM,
+            COCOON_OF_EVOLUTION, INSECT_ARMOR_LASER, INSECT_IMITATION,
+            SUMMONERS_ART, ANCIENT_RULES, ARMORY_CALL,
+        };
+
         const byte DECK = 0x1, HAND = 0x2, MZONE = 0x4, SZONE = 0x8, GRAVE = 0x10;
         const uint TYPE_SPELL = 0x2, TYPE_TRAP = 0x4, TYPE_RITUAL = 0x80;
 
@@ -764,10 +787,15 @@ namespace DuelServer
             //    primeiro nunca desperdiça. O Pote continua logo abaixo, então na
             //    decisão seguinte ele sai do mesmo jeito, só que com o deck já
             //    afinado.
-            var buscaEsp = AtivavelSe(q, BUSCA_ESPECIFICA.Contains);
+            //    A lista `BUSCA_ESPECIFICA` continua por trás, mas o que reconhece
+            //    a carta agora é o EFEITO: `Perfil().Busca` (a categoria de busca
+            //    do banco mais o `LOCATION_DECK` no Lua). Toda carta que tira do
+            //    deck e põe na mão entra aqui sem uma linha nova — foi assim que o
+            //    Magician's Rod e o Terraforming passaram a ser jogados.
+            var buscaEsp = AtivavelSe(q, c => BUSCA_ESPECIFICA.Contains(c) || (Perfil(c).Busca && !COM_REGRA_PROPRIA.Contains(c)));
             if (buscaEsp.code != 0)
                 return new Play("activate", buscaEsp.index,
-                    $"busca especifica antes da compra ({buscaEsp.code})");
+                    $"busca antes da compra: tira do deck em vez de comprar as cegas ({buscaEsp.code})");
 
             // 0.1 COMPRA LIMPA — qualquer carta que COMPRE sem cobrar nada, antes
             //     de qualquer invocação. Mais carta na mão é mais jogada possível,
@@ -886,7 +914,10 @@ namespace DuelServer
             //     Polymerization quando existe fusão possível com a mão/campo, então
             //     não é preciso conferir receita aqui — se ela está em `activatable`,
             //     há o que fundir.
-            var fusao = AtivavelSe(q, FUSAO.Contains);
+            //     Reconhecida pela CLASSE (`Perfil().Fusao`), e não só pela lista:
+            //     The Eye of Timaeus funde um Dark Magician que já está em campo
+            //     sem gastar Polymerization nenhuma, e entra aqui de graça.
+            var fusao = AtivavelSe(q, c => FUSAO.Contains(c) || (Perfil(c).Fusao && !COM_REGRA_PROPRIA.Contains(c)));
             if (fusao.code != 0)
                 return new Play("activate", fusao.index,
                     $"Fusao: corpo grande em campo e materiais no cemiterio p/ o Reborn ({fusao.code})");
@@ -1014,6 +1045,39 @@ namespace DuelServer
                 _log("guarda Ancient Rules: nenhum monstro Normal Nv5+ na mao para invocar");
             }
 
+            // 5.375 QUALQUER CARTA QUE PONHA CORPO EM CAMPO — a regra genérica que
+            //       fecha a classe. Reconhecida pelo EFEITO (`Perfil().InvocaEspecial`):
+            //       a categoria de Invocação Especial do banco mais o `SpecialSummon`
+            //       no Lua da carta. Cobre Dark Magic Veil, Magician Navigation,
+            //       Eternal Soul, Escape from the Dark Dimension e qualquer outra
+            //       que entre em qualquer deck depois desta linha.
+            //
+            //       Duas travas, porque estas cartas CUSTAM:
+            //
+            //       • só quando eu PRECISO de corpo — sem monstro em campo, ou com o
+            //         que tenho perdendo para a ameaça do outro lado. Com o campo
+            //         resolvido, gastar a carta agora é jogar fora a que resolveria
+            //         o turno em que ele varrer a mesa;
+            //       • quem cobra LP (o Lua chama `PayLPCost`) respeita o piso de
+            //         vida. O motor recusaria sozinho o pagamento impossível, mas
+            //         "posso pagar" e "vale pagar" são perguntas diferentes.
+            //
+            //       Vem DEPOIS das regras específicas de invocação (Toon, mariposa,
+            //       Gate Guardian, Ancient Rules) de propósito: elas são escolhas de
+            //       combo, esta é "põe o que der em campo".
+            var poeCorpo = AtivavelSe(q, c => Perfil(c).InvocaEspecial && !Perfil(c).Fusao && !COM_REGRA_PROPRIA.Contains(c));
+            if (poeCorpo.code != 0)
+            {
+                bool precisoDeCorpo = QtdMonstros(me) == 0 || (oponenteTemMonstro && meuMelhor < ameaca);
+                bool pagoOPreco = !Perfil(poeCorpo.code).PagaLp || _lpOf(me) - 1000 >= LP_PISO;
+                if (precisoDeCorpo && pagoOPreco)
+                    return new Play("activate", poeCorpo.index,
+                        $"Invocacao Especial ({poeCorpo.code}): poe corpo em campo — " +
+                        (QtdMonstros(me) == 0 ? "estou sem monstro" : $"meu melhor ({meuMelhor}) nao segura {ameaca}"));
+                _log($"guarda {poeCorpo.code} (invoca especialmente): " +
+                     (!precisoDeCorpo ? "meu campo ja' resolve o turno" : $"o custo em LP me deixaria abaixo de {LP_PISO}"));
+            }
+
             // 5.4 Insect Imitation — tributa 1 inseto (o DecideSelect já sacrifica
             //     o de menor ATK) para trazer um Inseto de nível +1 do PRÓPRIO
             //     deck. Sempre vale: troca o inseto mais fraco por um mais forte.
@@ -1025,10 +1089,21 @@ namespace DuelServer
             //   • remoção de monstro (Raigeki/Dark Hole/Fissure) só com alvo;
             //   • remoção de magia/armadilha (Harpie's/MST) só se o oponente tiver S/T;
             //   • burn (dano fixo) sempre que der — é a condição de vitória do deck.
-            var remMon = AtivavelSe(q, REMOCAO_MONSTRO.Contains);
+            //   As duas listas continuam existindo (elas carregam conhecimento que
+            //   a categoria não tem), mas o reconhecimento é por CLASSE DE EFEITO:
+            //   `Perfil().DestroiMonstro` e `.DestroiSt`. É o que faz o Thousand
+            //   Knives e o Dark Magic Attack — que só ficam ativáveis com um Dark
+            //   Magician em campo, e a condição quem confere é o motor — serem
+            //   usados sem uma linha por carta.
+            //   O `!InvocaEspecial` separa "destrói o dele" de "destrói o MEU": o
+            //   Escape from the Dark Dimension traz um banido de volta E destrói
+            //   esse mesmo monstro quando sair do campo, então a categoria dele
+            //   acusa destruição — que não é o efeito pelo qual se ativa a carta.
+            //   Quem põe corpo em campo é julgado pela regra de invocação, abaixo.
+            var remMon = AtivavelSe(q, c => REMOCAO_MONSTRO.Contains(c) || (Perfil(c).DestroiMonstro && !Perfil(c).InvocaEspecial && !COM_REGRA_PROPRIA.Contains(c)));
             if (remMon.code != 0 && QtdMonstros(foe) >= 1)
                 return new Play("activate", remMon.index, $"remocao: limpa o campo do oponente ({remMon.code})");
-            var remST = AtivavelSe(q, REMOCAO_ST.Contains);
+            var remST = AtivavelSe(q, c => REMOCAO_ST.Contains(c) || (Perfil(c).DestroiSt && !Perfil(c).InvocaEspecial && !COM_REGRA_PROPRIA.Contains(c)));
             if (remST.code != 0 && _stCountOf(foe) >= 1)
             {
                 // O `if` acima já garante o critério antigo (ele tem S/T em campo).
@@ -1480,6 +1555,32 @@ namespace DuelServer
                 _log($"Normal Nv5+: escolhe {melhor.code} " +
                      $"({_cards.Stats(melhor.code).AtkValue} ATK, o maior dos {normaisGrandes.Count} oferecidos)");
                 return new List<int> { melhor.index };
+            }
+
+            // BUSCA DE MAGIA/ARMADILHA NO DECK (Magician's Rod, Terraforming): o
+            // critério genérico logo abaixo ordena por ATK, que para magia é
+            // sempre 0 — todas empatam e ele leva a primeira da lista, o que dá na
+            // mesma que sortear. Aqui a ordem é pelo que a carta FAZ, na mesma
+            // escala do resto do cérebro: pôr corpo em campo vale mais que
+            // destruir, que vale mais que comprar.
+            if (deOnde == DECK && q.choices.Count > 1
+                && q.choices.All(c => !_cards.Stats(c.code).IsMonster))
+            {
+                int Valor(InteractiveDuel.Sel c)
+                {
+                    var p = Perfil(c.code);
+                    if (p.InvocaEspecial) return 4;
+                    if (p.DestroiMonstro || p.DestroiSt) return 3;
+                    if (p.Busca) return 2;
+                    if (p.Compra) return 1;
+                    return 0;
+                }
+                var melhorSt = q.choices.OrderByDescending(Valor).First();
+                if (Valor(melhorSt) > 0)
+                {
+                    _log($"busca no deck: escolhe {melhorSt.code} pelo efeito, nao pela ordem da lista");
+                    return new List<int> { melhorSt.index };
+                }
             }
 
             // Busca (ex.: Toon Table of Contents): se Toon World está entre as

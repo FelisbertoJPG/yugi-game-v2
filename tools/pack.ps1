@@ -1,4 +1,4 @@
-# Gera dist\ClassicDuels.exe - o jogo inteiro num arquivo so'.
+﻿# Gera dist\ClassicDuels.exe - o jogo inteiro num arquivo so'.
 #
 # O executavel sai self-contained (o .NET vai dentro dele) e com um payload.zip
 # embutido contendo o jogo. Quem recebe nao precisa de .NET, nem de Node, nem do
@@ -41,9 +41,16 @@ Passo 0 'conferindo dist\release\ (gerado pelo npm run release:build)'
 
 $zipGame = Join-Path $release 'game.zip'
 $zipCards = Join-Path $release 'cards.zip'
+# O MOTOR em C#. Ele viaja como pacote desde 19/08/2026: a casca o carrega do
+# disco, entao uma correcao no NpcBrain chega ao jogador por ~400 KB em vez de
+# um executavel inteiro. Aqui eles entram na SEMENTE, para uma instalacao nova
+# ja' nascer com o motor no lugar (e com o marcador certo, senao o primeiro boot
+# ofereceria de novo o que ele mesmo acabou de instalar).
+$zipEngine = Join-Path $release 'engine.zip'
+$zipNative = Join-Path $release 'native.zip'
 $manifesto = Join-Path $release 'manifest.json'
 
-foreach ($f in @($manifesto, $zipGame, $zipCards)) {
+foreach ($f in @($manifesto, $zipGame, $zipCards, $zipEngine, $zipNative)) {
   if (-not (Test-Path $f)) {
     Write-Host "  ERRO nao achei $f" -ForegroundColor Red
     Write-Host "       rode primeiro:  npm run release:build" -ForegroundColor Red
@@ -54,14 +61,15 @@ foreach ($f in @($manifesto, $zipGame, $zipCards)) {
 $m = Get-Content $manifesto -Raw | ConvertFrom-Json
 $versoes = @{}
 foreach ($p in $m.payloads) { $versoes[$p.id] = $p.version }
-foreach ($id in @('game', 'cards')) {
+foreach ($id in @('game', 'cards', 'engine', 'native')) {
   if (-not $versoes.ContainsKey($id)) { Falhar "o manifest.json nao tem o pacote '$id'" }
 }
 
 # O manifesto tem o sha256 de cada zip. Se nao bater, o dist\release\ foi mexido
 # depois de gerado e os marcadores que vamos embutir seriam mentira - que e'
 # exatamente o defeito que este script existe para nao cometer.
-foreach ($par in @(@{ id = 'game'; zip = $zipGame }, @{ id = 'cards'; zip = $zipCards })) {
+foreach ($par in @(@{ id = 'game'; zip = $zipGame }, @{ id = 'cards'; zip = $zipCards },
+                   @{ id = 'engine'; zip = $zipEngine }, @{ id = 'native'; zip = $zipNative })) {
   $esperado = ($m.payloads | Where-Object { $_.id -eq $par.id }).sha256
   $atual = (Get-FileHash -Algorithm SHA256 -Path $par.zip).Hash.ToLowerInvariant()
   if ($atual -ne $esperado) {
@@ -81,8 +89,24 @@ if ($maisNovo -and $maisNovo.LastWriteTimeUtc -gt $dataZip) {
   exit 1
 }
 
-Ok "game  $($versoes['game'])   $([math]::Round((Get-Item $zipGame).Length / 1MB, 1)) MB"
-Ok "cards $($versoes['cards'])  $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB"
+# O MESMO cuidado para o C#. Esta e' a checagem que substitui o ritual antigo de
+# "mexeu em C#? lembre do -ComExe": um fonte mais novo que o engine.zip quer
+# dizer que o Release nao leva a sua mudanca, e agora isso e' um erro em vez de
+# uma linha no CLAUDE.md que da' para esquecer.
+$fonteCs = Get-ChildItem (Join-Path $root 'duel-server\src'), (Join-Path $root 'duel-server\host') `
+                         -Recurse -File -Filter '*.cs' -ErrorAction SilentlyContinue |
+           Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+if ($fonteCs -and $fonteCs.LastWriteTimeUtc -gt (Get-Item $zipEngine).LastWriteTimeUtc) {
+  Write-Host "  ERRO distelease\engine.zip esta' velho." -ForegroundColor Red
+  Write-Host "       $($fonteCs.FullName.Substring($root.Length + 1)) mudou depois dele." -ForegroundColor Red
+  Write-Host "       rode:  npm run release:build" -ForegroundColor Red
+  exit 1
+}
+
+Ok "game   $($versoes['game'])   $([math]::Round((Get-Item $zipGame).Length / 1MB, 1)) MB"
+Ok "cards  $($versoes['cards'])  $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB"
+Ok "engine $($versoes['engine']) $([math]::Round((Get-Item $zipEngine).Length / 1KB, 0)) KB"
+Ok "native $($versoes['native']) $([math]::Round((Get-Item $zipNative).Length / 1MB, 1)) MB"
 
 # ------------------------------------------------------------------ 1. semente
 # O que os dois pacotes NAO trazem: o estado inicial de store/ e decks/ e o
@@ -117,10 +141,13 @@ Passo 2 'montando o payload.zip'
 
 Copy-Item $zipGame (Join-Path $conteudo 'game.zip') -Force
 Copy-Item $zipCards (Join-Path $conteudo 'cards.zip') -Force
+Copy-Item $zipEngine (Join-Path $conteudo 'engine.zip') -Force
+Copy-Item $zipNative (Join-Path $conteudo 'native.zip') -Force
 
 # As versoes viajam junto porque o Payload nao tem como recalcula-las: elas sao o
 # sha256 do zip PUBLICADO, e recomprimir aqui daria outro numero.
-$linhas = @("game=$($versoes['game'])", "cards=$($versoes['cards'])")
+$linhas = @("game=$($versoes['game'])", "cards=$($versoes['cards'])",
+            "engine=$($versoes['engine'])", "native=$($versoes['native'])")
 [System.IO.File]::WriteAllLines((Join-Path $conteudo 'payload.markers'), $linhas,
                                 (New-Object System.Text.UTF8Encoding($false)))
 
@@ -136,7 +163,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $fs = [System.IO.File]::Create($payload)
 $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
-  foreach ($nome in @('game.zip', 'cards.zip')) {
+  foreach ($nome in @('game.zip', 'cards.zip', 'engine.zip', 'native.zip')) {
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
       $zip, (Join-Path $conteudo $nome), $nome, [System.IO.Compression.CompressionLevel]::NoCompression) | Out-Null
   }

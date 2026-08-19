@@ -37,7 +37,7 @@ import {
   inLista1, aplicarLista1, fonteDaLista1, restaurarLista1,
   LISTA1_TIPOS, LISTA1_SPELLTRAP,
 } from './lista1.js';
-import { pullFileEx, pushFile } from './projectstore.js';
+import { pullFileEx, pushFileGuardado } from './projectstore.js';
 import { req } from './supabase.js';
 
 const CHAVE = 'cardlists';
@@ -171,8 +171,7 @@ export async function salvarListas(listas, cartas) {
     id: l.id, label: l.label, tipos: [...l.tipos], ids: [...l.ids],
   }));
 
-  if (leuODisco) pushFile(CHAVE, { listas: fonte });
-  else console.warn('[cardlists] fonte não espelhada: o disco ainda não foi lido');
+  pushFileGuardado(CHAVE, { listas: fonte }, leuODisco);
 
   const publicadas = [];
   const erros = [];

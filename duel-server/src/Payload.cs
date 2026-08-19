@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -59,7 +59,30 @@ namespace DuelServer
             }
         }
 
-        static Assembly Asm => typeof(Payload).Assembly;
+        static Assembly _asm;
+
+        /// <summary>
+        /// Onde o `payload.zip` esta' embutido: no assembly de ENTRADA, que hoje
+        /// e' a casca (`duel-server.exe`) e nao este motor.
+        ///
+        /// O motor virou um `DuelServer.Engine.dll` baixavel (ver
+        /// `host/Program.cs`), e um recurso de 30 MB dentro dele acabaria com a
+        /// razao de ele existir. A busca no proprio assembly continua como
+        /// segunda opcao para um motor rodado fora da casca nao ficar cego.
+        /// </summary>
+        static Assembly Asm => _asm ??= AcharAsm();
+
+        static Assembly AcharAsm()
+        {
+            try
+            {
+                var entrada = Assembly.GetEntryAssembly();
+                if (entrada != null && entrada.GetManifestResourceInfo(ResourceName) != null)
+                    return entrada;
+            }
+            catch { }
+            return typeof(Payload).Assembly;
+        }
 
         /// <summary>A pasta em %LOCALAPPDATA% onde o jogo se instala.</summary>
         public const string PASTA = "ClassicDuels";
@@ -124,12 +147,23 @@ namespace DuelServer
             if (!Exists) return null;
 
             string carimbo = Carimbo();
-            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            // Quem ja' jogava tem a instalacao — e os decks e o store dentro dela
-            // — na pasta com o nome ANTIGO do jogo.
-            MigrarInstalacaoAntiga(Path.Combine(local, PASTA_ANTIGA),
-                                   Path.Combine(local, PASTA));
-            string root = Path.Combine(local, PASTA, "game");
+
+            // A CASCA ja' resolveu a raiz (e ja' migrou a pasta com o nome antigo
+            // do jogo — ela precisa fazer isso antes de pousar o motor). Usar a
+            // dela em vez de recalcular e' o que garante que as duas nunca
+            // discordem: o motor instalaria o jogo num lugar e a casca procuraria
+            // o motor noutro. O calculo continua aqui para quem rodar o motor
+            // fora da casca.
+            string root = EngineEntry.RaizInstalacao;
+            if (string.IsNullOrEmpty(root))
+            {
+                string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                // Quem ja' jogava tem a instalacao — e os decks e o store dentro
+                // dela — na pasta com o nome ANTIGO do jogo.
+                MigrarInstalacaoAntiga(Path.Combine(local, PASTA_ANTIGA),
+                                       Path.Combine(local, PASTA));
+                root = Path.Combine(local, PASTA, "game");
+            }
             string marca = Path.Combine(root, ".versao");
 
             if (Directory.Exists(root) && File.Exists(marca))
@@ -191,8 +225,14 @@ namespace DuelServer
                 if (nome.Equals(Marcadores, StringComparison.OrdinalIgnoreCase))
                 { LerMarcadores(entry, versoes); continue; }
 
-                if (nome.Equals("game.zip", StringComparison.OrdinalIgnoreCase) ||
-                    nome.Equals("cards.zip", StringComparison.OrdinalIgnoreCase))
+                // Qualquer .zip na RAIZ do payload e' um pacote (game, cards,
+                // engine, native — e o proximo que aparecer). A lista fixa que
+                // havia aqui era um jeito calado de um pacote novo virar arquivo
+                // solto na instalacao: `engine.zip` seria extraido como se fosse
+                // conteudo, sem marcador nenhum, e a primeira checagem o
+                // ofereceria de novo. A semente esta' toda sob `seed/`, entao um
+                // zip na raiz nao pode ser outra coisa.
+                if (!nome.Contains('/') && nome.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 { pacotes.Add((Path.GetFileNameWithoutExtension(nome), entry)); continue; }
 
                 // `seed/x` vai para `x`. Qualquer outra coisa e' o formato

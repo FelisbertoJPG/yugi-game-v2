@@ -281,10 +281,41 @@ export async function npcsVencidos() {
   return new Set(r.dados.map((d) => d.npc).filter(Boolean));
 }
 
-export async function iniciarDuelo(npcId) {
+/**
+ * Quais DECKS de cada adversário este jogador já derrotou.
+ *
+ *     { para_dox: Set{'Bem-vindo ao Labirinto'}, wevil: Set{...} }
+ *
+ * Separado de `npcsVencidos` porque responde outra pergunta: aquele libera o
+ * PRÓXIMO ADVERSÁRIO da trilha, este libera o PRÓXIMO DECK do mesmo adversário
+ * (`decksnpc.js`). Vitória anterior à migration 0033 não tem `deck_npc` e fica
+ * de fora — ela não sabe qual deck caiu, e chutar destrancaria de graça o deck
+ * difícil de quem só venceu o fácil.
+ */
+export async function decksVencidos() {
+  if (!sessao()) return {};
+  const r = await req('duelos?select=npc,deck_npc&resultado=eq.vitoria');
+  if (!r.ok || !Array.isArray(r.dados)) return {};
+  const out = {};
+  for (const d of r.dados) {
+    if (!d?.npc || !d?.deck_npc) continue;
+    (out[d.npc] ??= new Set()).add(String(d.deck_npc));
+  }
+  return out;
+}
+
+/**
+ * Abre o registro do duelo. `deckNpc` é o NOME do deck do adversário — é ele
+ * que decide, no servidor, de que pool o drop sai e qual deck a vitória
+ * destranca. Sem ele o servidor cai no pool do NPC, como antes.
+ */
+export async function iniciarDuelo(npcId, deckNpc) {
   const r = await req('rpc/iniciar_duelo', {
     method: 'POST',
-    body: { p_npc: String(npcId ?? '') },
+    body: {
+      p_npc: String(npcId ?? ''),
+      ...(deckNpc ? { p_deck_npc: String(deckNpc) } : {}),
+    },
   });
   return r.ok ? r.dados : null;
 }

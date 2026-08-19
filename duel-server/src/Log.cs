@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text.RegularExpressions;
 
@@ -43,6 +43,12 @@ namespace YGO
                     if (File.Exists(old)) File.Delete(old);
                     File.Move(FilePath, old);
                 }
+                // A CASCA (host/CascaLog.cs) escreve no MESMO arquivo e abre a
+                // sessao antes de o motor existir. Sem esta guarda o cabecalho
+                // sairia duas vezes por boot, com as linhas da casca orfas
+                // acima do segundo — que e' justamente onde uma troca de motor
+                // mal sucedida deixa o seu rastro.
+                if (Environment.GetEnvironmentVariable("CLASSICDUELS_LOG_SESSAO") == "1") return;
                 File.AppendAllText(FilePath,
                     $"\n===== sessao {DateTime.Now:yyyy-MM-dd HH:mm:ss} (pid {Environment.ProcessId}) =====\n");
             }

@@ -1,4 +1,4 @@
-# Gera os pacotes de atualizacao + o manifest.json e (opcionalmente) publica o
+﻿# Gera os pacotes de atualizacao + o manifest.json e (opcionalmente) publica o
 # Release no repositorio privado de distribuicao.
 #
 #   powershell -File tools\publish-release.ps1              # DRY-RUN: so' gera em dist\release\
@@ -362,6 +362,76 @@ else {
   Ok "cards.zip: $([math]::Round((Get-Item $zipCards).Length / 1MB, 1)) MB ($($luas.Count) scripts lua) - refeito e guardado no cache"
 }
 
+# --------------------------------------------------- 2.5 pacotes do MOTOR (C#)
+# O motor (ocgcore + NpcBrain + InteractiveDuel + servidor web) e' um
+# DuelServer.Engine.dll de ~800 KB carregado pela casca em tempo de execucao.
+#
+# ISTO E' O QUE MATOU O "REENVIA O EXE". Ate' 19/08/2026 todo o C# viajava
+# dentro do ClassicDuels.exe, entao entregar uma correcao no NpcBrain custava
+# 67,8 MB ao jogador - dos quais ~30 MB eram game.zip e cards.zip que ele ja'
+# tinha no disco - e dependia de um ritual manual (`pack` + bump da
+# InstallerVersion + `-ComExe`) que ja' foi esquecido em producao: o front subiu,
+# o motor ficou velho, e nenhum teste acusou.
+#
+# Sao DOIS pacotes por volatilidade, a mesma logica de game/cards:
+#   engine  o .dll gerenciado  (~400 KB)  muda a cada mexida em C#
+#   native  ocgcore + sqlite3  (~2 MB)    muda quando o core e' recompilado
+#
+# As entradas vao com o prefixo `.staged/`: quem baixa a atualizacao e' o
+# proprio motor, e nesse instante ele e a ocgcore.dll estao carregados - o
+# Windows nao deixa sobrescrever DLL em uso. O pacote fica em estagio e a casca
+# aplica no boot seguinte (duel-server/host/Estagio.cs).
+Passo '2.5' "montando os pacotes 'engine' e 'native' (o motor em C#)"
+
+$projMotor = Join-Path $root 'duel-server\engine\duel-engine.csproj'
+$saidaMotor = Join-Path $stage 'motor'
+& dotnet build $projMotor -c Release -o $saidaMotor -v q --nologo | Out-Null
+if ($LASTEXITCODE -ne 0) { Falhar 'o build do motor (duel-engine) falhou' }
+
+$dllMotor = Join-Path $saidaMotor 'DuelServer.Engine.dll'
+if (-not (Test-Path $dllMotor)) { Falhar "nao achei $dllMotor depois do build" }
+
+# Zip com data FIXA nas entradas. Sem isto, dois builds do MESMO fonte geram
+# zips diferentes (o zip guarda o timestamp de cada arquivo), o marcador do
+# manifesto - que e' o sha256 do zip - muda toda publicacao e TODO jogador
+# re-baixa o motor a' toa, com direito a tela de atualizacao. O compilador ja'
+# e' determinista (`<Deterministic>` no .csproj); faltava o empacotador ser.
+function ZipDeterminista($mapa, $destino) {
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  if (Test-Path $destino) { Remove-Item $destino -Force }
+  $data = [DateTimeOffset]::new(2020, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+  $fs = [System.IO.File]::Create($destino)
+  $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($nome in ($mapa.Keys | Sort-Object)) {
+      $e = $zip.CreateEntry($nome, [System.IO.Compression.CompressionLevel]::Optimal)
+      $e.LastWriteTime = $data
+      $saidaEntrada = $e.Open()
+      try {
+        $bytes = [System.IO.File]::ReadAllBytes($mapa[$nome])
+        $saidaEntrada.Write($bytes, 0, $bytes.Length)
+      }
+      finally { $saidaEntrada.Dispose() }
+    }
+  }
+  finally { $zip.Dispose(); $fs.Dispose() }
+}
+
+$zipEngine = Join-Path $saida 'engine.zip'
+ZipDeterminista @{ '.staged/engine/DuelServer.Engine.dll' = $dllMotor } $zipEngine
+Ok "engine.zip: $([math]::Round((Get-Item $zipEngine).Length / 1KB, 0)) KB"
+
+$nativas = @{}
+foreach ($n in @('ocgcore.dll', 'sqlite3.dll')) {
+  $de = Join-Path $root "duel-server\native\$n"
+  if (-not (Test-Path $de)) { Falhar "nao achei duel-server\native\$n" }
+  $nativas[".staged/engine/$n"] = $de
+}
+$zipNative = Join-Path $saida 'native.zip'
+ZipDeterminista $nativas $zipNative
+Ok "native.zip: $([math]::Round((Get-Item $zipNative).Length / 1MB, 1)) MB"
+
 # ------------------------------------------------------------- 3. arquivos avulsos
 # CONTEUDO GLOBAL do jogo (banlist, boosters, NPCs, listas de cartas) -
 # versionado de proposito.
@@ -454,7 +524,13 @@ $manifesto = [ordered]@{
     # proposito - a limpeza e' por inventario, entao o tabuleiro que o JOGADOR
     # criou no editor nunca esteve la' e sobrevive a atualizacao.
     (PayloadInfo 'game'  $zipGame  @('web','ygo-data/src','ygo-data/data','boards')),
-    (PayloadInfo 'cards' $zipCards @('ygo-data/data','duel_academy/Assets/StreamingAssets/YGODemo'))
+    (PayloadInfo 'cards' $zipCards @('ygo-data/data','duel_academy/Assets/StreamingAssets/YGODemo')),
+    # `.staged/` nas roots nao e' decoracao: e' POR ELA que o cliente sabe que o
+    # pacote so' vale depois de reabrir o jogo (Manifest.EmEstagio). Publicar um
+    # zip que cai em estagio sem isso faria a tela dizer "pronto" com o motor
+    # velho ainda rodando.
+    (PayloadInfo 'engine' $zipEngine @('.staged/engine')),
+    (PayloadInfo 'native' $zipNative @('.staged/engine'))
   )
 }
 

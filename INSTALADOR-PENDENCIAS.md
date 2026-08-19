@@ -29,8 +29,32 @@ Ordenado por **impacto no jogador**, não por esforço.
 | 7 | Caminho offline sem teste | `--test-offline` |
 | 2 | `SelfUpdater` nunca exercitado | `--test-selfupdate` — **metade**; ver §2 abaixo |
 | 9 | Aviso do `npc-base-meta.json` | virou opcional explícito no `publish-release.ps1` |
+| 10 | **O motor em C# não viajava no Release** | `--test-casca` (25) + `--test-update` (caso 11) + `--test-selfupdate` (caso 5); ver §0 |
 
-`npm run update:test` roda as quatro suítes que não precisam de rede.
+`npm run update:test` roda as cinco suítes que não precisam de rede.
+
+## §0 — O motor virou conteúdo (19/08/2026)
+
+Era a pendência mais cara e não estava nesta lista, porque parecia "o jeito que as coisas
+são": **todo o C# viajava dentro do `ClassicDuels.exe`**. Uma correção de 800 KB no
+`NpcBrain` custava 67,8 MB ao jogador e só chegava até ele se quem publicou lembrasse de
+`pack` + bump da `InstallerVersion` + `-ComExe` — e isso já falhou em produção (§2 conta o
+caso da varredura de ATK/DEF).
+
+Hoje o executável é uma **casca** (`duel-server/host/`, ~400 linhas): resolve a instalação,
+aplica o motor que ficou em estágio e carrega `engine/DuelServer.Engine.dll` por bytes. O
+motor é o pacote `engine` (0,2 MB) e as nativas, o `native` (1,9 MB).
+
+O que isso muda nesta lista:
+
+- **o item 1 da ordem sugerida (publicar com `-ComExe`) deixa de ser recorrente.** Ele ainda
+  precisa acontecer UMA vez — quem está na 0.14.0 tem o motor preso dentro do exe, e sem a
+  casca nova os pacotes `engine`/`native` chegam ao disco dele e ninguém os aplica (ficam
+  parados em `.staged/`, inofensivos; o jogo segue com o motor de dentro do exe). Daí em
+  diante, só se `host/` mudar;
+- **o risco da troca do exe deixa de ser existencial.** Ele era o único caminho para entregar
+  motor; agora é um caminho raro, e o caminho comum (pacote) é o mesmo que já entrega
+  `game.zip` há dezenas de publicações.
 
 Detalhes que merecem ser lembrados, porque não são óbvios do código:
 
@@ -181,7 +205,7 @@ uma nota de fluxo de trabalho.
 
 | # | Item | Por quê primeiro |
 |---|---|---|
-| 1 | §2 — publicar com `-ComExe` e provar a troca do exe | é o que sobrou do caminho mais frágil |
+| 1 | §2 — publicar com `-ComExe` e provar a troca do exe | é o que sobrou do caminho mais frágil — e a 0.15.0 é a última vez que ele é obrigatório (§0) |
 | 2 | §11 — decidir sobre `decks/npc/` | conteúdo que hoje não alcança quem já instalou |
 | 3 | §4 — virar as outras duas `managedRoots` | depois de uma atualização real rodando limpa |
 | 4 | §8, §12 | manutenção, sem pressa |

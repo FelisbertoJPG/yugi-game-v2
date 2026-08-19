@@ -22,7 +22,13 @@ namespace DuelServer
         private static OCG_DataReader _cardReaderDelegate;
         private static OCG_ScriptReader _scriptReaderDelegate;
 
-        private static int Main(string[] args)
+        /// <summary>
+        /// O antigo `Main`. O executavel de hoje e' so' uma casca
+        /// (`../host/Program.cs`) que carrega este motor do disco e chama aqui
+        /// pelo <see cref="EngineEntry"/> — e' o que permite atualizar o C# sem
+        /// reenviar o .exe. Continua sendo O MESMO ponto de entrada de sempre.
+        /// </summary>
+        internal static int Executar(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
 
@@ -320,6 +326,12 @@ namespace DuelServer
             // (Ancient Rules) um Normal Nv5+ sozinho, escolhendo o de maior ATK.
             if (Array.IndexOf(args, "--test-pegasus") >= 0)
                 return TestPegasus.Run(streamingAssets);
+
+            // O deck de HARPIAS da Mai: os efeitos de cada carta conferidos no
+            // motor (pelo evento `stats`, nao por conta nossa) e o NpcBrain
+            // jogando o deck real sozinho.
+            if (Array.IndexOf(args, "--test-mai") >= 0)
+                return TestMai.Run(streamingAssets);
 
             if (Array.IndexOf(args, "--test-paradox") >= 0)
                 return TestParadox.Run(streamingAssets);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -92,6 +92,67 @@ namespace DuelServer.Update
                 Log.Err($"nao consegui baixar o executavel novo: {e.Message}");
                 try { if (File.Exists(novo)) File.Delete(novo); } catch { }
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Agenda a REABERTURA do jogo (sem trocar arquivo nenhum) e devolve
+        /// `true` se o chamador deve encerrar o processo.
+        ///
+        /// Serve para a troca do MOTOR: o pacote `engine` ja' esta' baixado em
+        /// `.staged/`, e quem o aplica e' a casca, no boot seguinte, quando nada
+        /// esta' carregado. Falta so' esse boot acontecer.
+        ///
+        /// POR QUE UM .BAT, E NAO UM `Process.Start` DIRETO: o processo novo
+        /// subiria enquanto este ainda segura as portas 8080/8770, e o servidor
+        /// "anda para a proxima porta livre" — o jogador cairia num jogo na 8081
+        /// enquanto o antigo morre. O .bat espera o PID sumir antes de reabrir,
+        /// que e' a mesma licao (e o mesmo codigo) da troca do executavel.
+        /// </summary>
+        /// <param name="exeAtual">So' os testes passam (ver <see cref="BaixarAsync"/>).</param>
+        /// <param name="pidEsperar">So' os testes passam (ver <see cref="AgendarTroca"/>).</param>
+        public static bool AgendarReabertura(string exeAtual = null, int? pidEsperar = null)
+        {
+            string atual = exeAtual ?? Environment.ProcessPath;
+            if (string.IsNullOrEmpty(atual)) return false;
+
+            string bat = Path.Combine(Path.GetTempPath(), $"classicduels-reabrir-{Guid.NewGuid():N}.bat");
+            int pid = pidEsperar ?? Environment.ProcessId;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("@echo off");
+            sb.AppendLine("setlocal");
+            sb.AppendLine($"set ALVO=\"{atual}\"");
+            sb.AppendLine();
+            sb.AppendLine(":esperar");
+            sb.AppendLine($"tasklist /fi \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul");
+            sb.AppendLine("if not errorlevel 1 (");
+            // `ping` como sleep: o `timeout` do Windows exige console interativo.
+            sb.AppendLine("  ping -n 2 127.0.0.1 >nul");
+            sb.AppendLine("  goto esperar");
+            sb.AppendLine(")");
+            sb.AppendLine();
+            sb.AppendLine("start \"\" %ALVO%");
+            sb.AppendLine("del \"%~f0\"");
+
+            try
+            {
+                // ASCII de proposito: o cmd.exe le' o .bat na codepage do console.
+                File.WriteAllText(bat, sb.ToString(), Encoding.ASCII);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c \"{bat}\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+                Log.Info("motor novo em estagio — reabrindo o Classic Duels para aplica-lo");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Log.Err($"nao consegui agendar a reabertura: {e.Message}");
+                return false;
             }
         }
 

@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-07-27T16:29:33.015876+00:00",
+ "generatedAt": "2026-08-18T14:44:47.815920+00:00",
  "source": {
   "path": "C:\\Users\\suporteti2\\Desktop\\duel academy\\duel_academy\\Assets\\StreamingAssets\\YGODemo",
   "note": "cards.cdb e scripts .lua extraidos do ygopro/ocgcore (edo9300), via projeto Unity duel_academy"
@@ -13,7 +13,7 @@
    "Unknown": 1
   },
   "withScript": 12582,
-  "alternateArt": 298,
+  "alternateArt": 283,
   "archetypesNamed": 577,
   "scripts": {
    "official": 12702,

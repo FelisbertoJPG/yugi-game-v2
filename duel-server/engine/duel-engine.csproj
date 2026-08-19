@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- O MOTOR (ocgcore + NpcBrain + InteractiveDuel + servidor web) compilado
+       como BIBLIOTECA, para poder viajar sozinho.
+
+       Por que isto existe: ate' 19/08/2026 todo este codigo morava dentro do
+       ClassicDuels.exe, e a unica forma de entregar uma mudanca de C# ao jogador
+       era trocar o executavel inteiro - 67,8 MB, dos quais ~30 MB sao game.zip e
+       cards.zip que ele JA' TEM instalados. Uma mexida de 800 KB no NpcBrain
+       custava isso, e dependia de um ritual manual (`pack` + bump da
+       InstallerVersion + `-ComExe`) que ja' foi esquecido em producao pelo menos
+       uma vez - o front subiu, o motor ficou velho, e nada acusou.
+
+       Como biblioteca, o motor virou mais um PACOTE do manifesto (`engine`), do
+       tamanho do que realmente mudou. Quem carrega e' a casca em ../host/.
+
+       OS FONTES NAO SE MUDARAM DE LUGAR de proposito: continuam em
+       ../src/**/*.cs, que e' onde toda a documentacao do projeto aponta. Esta
+       pasta tem so' o .csproj. -->
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>DuelServer.Engine</AssemblyName>
+    <RootNamespace>DuelServer</RootNamespace>
+
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+
+    <!-- Framework-dependent SEMPRE: quem hospeda o runtime e' a casca (que sai
+         self-contained no `npm run pack`). Se esta biblioteca carregasse um
+         runtime proprio, o pacote `engine` voltaria a pesar dezenas de MB, que
+         e' exatamente o problema que ela existe para resolver. -->
+    <SelfContained>false</SelfContained>
+
+    <!-- O .dll e' baixado pelo jogador e comparado por sha256. Build determinista
+         faz fonte igual produzir bytes iguais - sem isso o marcador mudaria a
+         cada publicacao e todo mundo re-baixaria o motor a' toa. -->
+    <Deterministic>true</Deterministic>
+
+    <!-- Os fontes vem de fora da pasta do projeto; o glob padrao pegaria tambem
+         o obj/ gerado aqui e a compilacao quebraria com tipos duplicados. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\**\*.cs" />
+  </ItemGroup>
+
+</Project>

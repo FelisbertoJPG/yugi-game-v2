@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -114,5 +114,23 @@ namespace DuelServer.Update
         [JsonPropertyName("size")] public long Size { get; set; }
         /// <summary>Pastas que este zip preenche (usadas na limpeza pós-extração).</summary>
         [JsonPropertyName("roots")] public List<string> Roots { get; set; } = new();
+
+        /// <summary>
+        /// O pacote cai em `.staged/` e NÃO vale enquanto o jogo não reabrir.
+        ///
+        /// É o caso do `engine`/`native`: quem baixa a atualização é o próprio
+        /// motor, e nesse instante ele e a `ocgcore.dll` estão carregados — o
+        /// Windows não deixa sobrescrever DLL em uso. Então o pacote fica em
+        /// estágio e a casca (`host/Estagio.cs`) troca no boot seguinte.
+        ///
+        /// Não é um campo do manifesto: é lido das próprias `roots`, para não
+        /// haver como publicar um zip que cai em `.staged/` sem o cliente saber
+        /// que precisa reabrir — nem o contrário.
+        /// </summary>
+        [JsonIgnore]
+        public bool EmEstagio =>
+            (Roots ?? new List<string>()).Exists(r =>
+                (r ?? "").Replace('\\', '/').TrimStart('/')
+                         .StartsWith(".staged", StringComparison.OrdinalIgnoreCase));
     }
 }

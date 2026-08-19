@@ -597,6 +597,17 @@ function limpar() {
  * O rascunho é local de propósito: publicar exige admin e servidor no ar, e é
  * justamente quando esses dois faltam que ele precisa existir. Ele NÃO é o
  * deck publicado — some assim que a publicação dá certo.
+ *
+ * **E ele NUNCA é carregado de volta.** Era: o boot restaurava o rascunho por
+ * cima de tudo, e isso fazia a cópia local vencer a nuvem. O sintoma foi um
+ * deck editado e publicado numa máquina (o colega recebeu na hora, pelo gatilho
+ * da 0025) aparecer VELHO ao abrir o editor noutra — porque ali havia um
+ * rascunho pendurado, de antes, que o boot restaurava. O rascunho só era
+ * apagado ao publicar COM SUCESSO naquela máquina, então quem publicou de outro
+ * lugar nunca o limpava.
+ *
+ * Agora, ao abrir a tela, o rascunho é ARQUIVADO em `store/bkp/` e apagado do
+ * navegador. Nada se perde e nada compete com o que está publicado.
  */
 const RASCUNHO = 'ygo:estrutural:rascunho';
 
@@ -614,23 +625,47 @@ function apagarRascunho() {
   try { localStorage.removeItem(RASCUNHO); } catch { /* idem */ }
 }
 
-/** Devolve `true` se restaurou algo. */
-function restaurarRascunho() {
+/** O rascunho guardado, ou `null`. Só leitura — não aplica nada na tela. */
+function lerRascunho() {
   let r = null;
-  try { r = JSON.parse(localStorage.getItem(RASCUNHO) ?? 'null'); } catch { return false; }
-  if (!r || !r.quantidades || !Object.keys(r.quantidades).length) return false;
+  try { r = JSON.parse(localStorage.getItem(RASCUNHO) ?? 'null'); } catch { return null; }
+  if (!r || !r.quantidades || !Object.keys(r.quantidades).length) return null;
+  return r;
+}
 
-  idAtual = r.idAtual ?? null;
-  $('nome').value = r.nome ?? '';
-  $('preco').value = r.preco ?? 300;
-  $('na-loja').checked = r.na_loja !== false;
-  quantidades = r.quantidades;
-  raridades = r.raridades ?? {};
-  pintarDeck(); pintarPool();
+/**
+ * MOVE o rascunho para `store/bkp/` e o apaga do navegador. Devolve o nome do
+ * arquivo, ou `null` quando não havia nada a arquivar.
+ *
+ * Só apaga o localStorage se a gravação em disco der certo: arquivar e perder
+ * seria pior que o problema que isto resolve.
+ */
+async function arquivarRascunho() {
+  const r = lerRascunho();
+  if (!r) return null;
 
-  const quando = new Date(r.em ?? Date.now()).toLocaleString('pt-BR');
-  msg(`rascunho recuperado (${total()} cartas, de ${quando}) — "novo" descarta`, 'ok');
-  return true;
+  const quando = new Date(r.em ?? Date.now());
+  const carimbo = quando.toISOString().slice(0, 19).replace(/[:T-]/g, '').slice(0, 13);
+  const arquivo = `bkp/estrutural-${slug(r.nome || r.idAtual || 'sem-nome')}-${carimbo}.json`;
+
+  try {
+    const res = await fetch(`/__store/${arquivo}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...r, arquivadoEm: new Date().toISOString() }),
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || String(res.status));
+  } catch (e) {
+    // Sem servidor no ar não dá para arquivar. O rascunho FICA no navegador
+    // (não é lido de qualquer jeito) para a próxima abertura tentar de novo —
+    // jogá-lo fora aqui seria destruir o backup por falta de servidor.
+    console.warn('[estrutural] nao consegui arquivar o rascunho:', e);
+    return null;
+  }
+
+  apagarRascunho();
+  return arquivo;
 }
 
 /** "Deck do Dragão Branco" -> "deck-do-dragao-branco" */
@@ -746,9 +781,12 @@ try {
 }
 
 await pintarSalvos();
-// O rascunho manda: se a última sessão terminou sem publicar, ela volta inteira.
-// `limpar()` (o botão "novo") é o que descarta.
-if (!restaurarRascunho()) limpar();
+// A NUVEM manda, sempre. O rascunho que sobrou de uma sessão anterior é
+// arquivado em `store/bkp/` e sai do navegador — carregá-lo aqui era o que
+// fazia a versão local vencer a publicada.
+const arquivado = await arquivarRascunho();
+limpar();
+if (arquivado) msg(`rascunho anterior arquivado em store/${arquivado} — a tela abre pela nuvem`, 'ok');
 pintarPool();
 </script>
 </body>

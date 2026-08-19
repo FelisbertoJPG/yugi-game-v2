@@ -19,6 +19,9 @@
 // `C:\web\js\...`). No browser os dois caminhos dão na mesma URL; em Node só
 // este funciona. Trocar por absoluto quebra `node web/js/banlist.test.mjs`.
 import { cabecalhoAuth, req } from './supabase.js';
+import {
+  memoriaFalsa, enfileirar, desenfileirar, listar, resumo,
+} from './pendencias.js';
 
 /**
  * Lê `store/<name>.json` distinguindo os dois "vazios":
@@ -128,10 +131,17 @@ const ouvintes = new Map();
  * quatro telas, e a próxima nasceria sem ele. Injeta o próprio elemento, no
  * mesmo padrão do `carddetail.js`.
  */
-function avisoDePublicacao(name, erro) {
+function avisoDePublicacao() {
   try {
     if (typeof document === 'undefined') return;   // Node (os testes)
+    const texto = resumo(deposito());
     let caixa = document.getElementById('publicacao-falhou');
+
+    // Fila vazia = está tudo na nuvem. O aviso some sozinho, sem ninguém
+    // precisar fechá-lo — um aviso que sobra depois de resolvido ensina a
+    // ignorar avisos.
+    if (!texto) { caixa?.remove(); return; }
+
     if (!caixa) {
       caixa = document.createElement('div');
       caixa.id = 'publicacao-falhou';
@@ -139,22 +149,101 @@ function avisoDePublicacao(name, erro) {
         + 'background:#3a0d14;color:#ffd9de;border:2px solid #e8455e;border-radius:4px;'
         + 'padding:10px 14px;font:12px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px #000a;'
         + 'max-width:640px;margin:0 auto;cursor:pointer';
-      caixa.title = 'clique para fechar';
-      caixa.onclick = () => caixa.remove();
+      caixa.title = 'clique para tentar publicar agora';
+      caixa.onclick = () => reenviarPendentes();
       document.body?.append(caixa);
     }
-    caixa.textContent = `⚠ a alteração de "${name}" NÃO foi publicada: ${erro || 'motivo desconhecido'}`
-      + ' — ela vale só nesta máquina até você salvar de novo com sessão de admin.';
+    caixa.textContent = `⚠ ${texto} — guardadas nesta máquina; estou tentando`
+      + ' publicar sozinho. Clique para tentar agora.';
   } catch { /* um aviso não pode derrubar a gravação */ }
 }
 
-function avisar(name, r) {
+function avisar(name, r, data) {
   if (r && r.banco && r.banco.ok === false) {
     console.error(`[conteudo] "${name}" nao foi publicado:`, r.banco.erro);
-    avisoDePublicacao(name, r.banco.erro);
+    // Não some mais: fica na fila e o `reenviarPendentes` tenta sozinho até o
+    // banco aceitar. Antes o aviso pedia "salve de novo" — o conserto era
+    // manual, e quem fechasse a aba perdia a edição para todo mundo menos si.
+    enfileirar(deposito(), name, data, r.banco.erro);
+    avisoDePublicacao();
+  } else if (r && r.banco && r.banco.ok === true) {
+    desenfileirar(deposito(), name);
+    avisoDePublicacao();
   }
   const cb = ouvintes.get(name);
   if (cb) { try { cb(r); } catch { /* a tela não pode derrubar a gravação */ } }
+}
+
+/** O `localStorage` do navegador, ou uma memória de mentira em Node/modo restrito. */
+let memoria = null;
+function deposito() {
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage) return localStorage;
+  } catch { /* modo privativo pode lançar só de tocar */ }
+  return (memoria ??= memoriaFalsa());
+}
+
+/**
+ * **Publica, e se não der, GUARDA para tentar de novo.**
+ *
+ * É o caminho das seis chaves com trava `leu*Disco` (`banlist`, `boosters`,
+ * `cardlists`, `npcs`, `npc-base-meta`, `npc-deck-ativo`). A trava existe por
+ * um bug real: uma máquina que não conseguiu LER a fonte não pode publicar por
+ * cima do banco um estado que ela mesma inventou por padrão.
+ *
+ * O que estava errado não era a trava — era o que ela fazia com a edição:
+ * descartava, e em quatro das seis sem dizer nada. Agora a edição vai para a
+ * fila e sobe assim que a fonte estiver ao alcance.
+ *
+ * @param {boolean} fonteLida a hidratação desta chave alcançou banco ou disco?
+ */
+export function pushFileGuardado(name, data, fonteLida) {
+  if (fonteLida) return void pushFile(name, data);
+  enfileirar(deposito(), name, data, 'ainda não li a versão publicada desta chave');
+  avisoDePublicacao();
+  agendarReenvio();
+}
+
+/**
+ * Tenta subir tudo o que ficou para trás. Sai calado quando não há nada.
+ *
+ * Roda sozinho: no boot de qualquer página que importe este módulo, quando a
+ * conexão volta, e de tempos em tempos enquanto sobrar pendência. Uma chave só
+ * sai da fila quando o BANCO aceita — o disco não conta, porque é justamente o
+ * disco que já tinha e o banco que não.
+ */
+export async function reenviarPendentes() {
+  const store = deposito();
+  const fila = listar(store);
+  if (!fila.length) return { tentadas: 0, subiram: 0 };
+
+  let subiram = 0;
+  for (const { name, data } of fila) {
+    // Em voo agora: o `drenar` vai publicar a versão mais nova de qualquer
+    // jeito, e insistir aqui só duplicaria o POST.
+    if (emVoo.has(name)) continue;
+    try {
+      const r = await enviar(name, data);
+      if (r?.banco?.ok) { desenfileirar(store, name); subiram++; }
+    } catch { /* segue para a próxima; a fila continua guardando esta */ }
+  }
+  avisoDePublicacao();
+  return { tentadas: fila.length, subiram };
+}
+
+/** Quais chaves ainda não chegaram ao banco. Para a tela poder mostrar. */
+export const pendentes = () => listar(deposito()).map((x) => x.name);
+
+let timerReenvio = null;
+function agendarReenvio() {
+  if (typeof setTimeout === 'undefined' || timerReenvio) return;
+  timerReenvio = setTimeout(async () => {
+    timerReenvio = null;
+    await reenviarPendentes();
+    // Sobrou alguma? Continua tentando. Sem pendência, o timer morre — nada de
+    // um laço eterno batendo no banco à toa.
+    if (listar(deposito()).length) agendarReenvio();
+  }, 20000);
 }
 
 function drenar(name) {
@@ -162,7 +251,7 @@ function drenar(name) {
   const proximo = pendente.get(name);
   pendente.delete(name);
   emVoo.set(name, enviar(name, proximo)
-    .then((r) => { avisar(name, r); return r; })
+    .then((r) => { avisar(name, r, proximo); return r; })
     .finally(() => drenar(name)));
 }
 
@@ -177,7 +266,7 @@ export function pushFile(name, data) {
   try {
     if (emVoo.has(name)) { pendente.set(name, data); return; }
     emVoo.set(name, enviar(name, data)
-      .then((r) => { avisar(name, r); return r; })
+      .then((r) => { avisar(name, r, data); return r; })
       .finally(() => drenar(name)));
   } catch { /* sem servidor: só o localStorage guarda */ }
 }
@@ -202,4 +291,26 @@ export async function hydrate(name, storageKey) {
   if (data === null || data === undefined) return false;
   try { localStorage.setItem(storageKey, JSON.stringify(data)); return true; }
   catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// O REENVIO AUTOMÁTICO
+//
+// "Instantaneamente na nuvem" não pode depender de a rede estar boa no exato
+// segundo em que o admin digitou. Três gatilhos, todos baratos:
+//
+//   • o BOOT de qualquer página que importe este módulo — é o que recupera a
+//     edição feita ontem numa máquina offline;
+//   • a CONEXÃO voltando (`online`), que é o caso comum do notebook que dormiu;
+//   • o TIMER, enquanto sobrar pendência (ver `agendarReenvio`).
+//
+// Nada disto roda em Node: `window` não existe lá, e os testes importam este
+// módulo de carona (`banlist.test.mjs` → `banlist.js` → aqui).
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => { reenviarPendentes(); });
+  // Um respiro antes do primeiro: o boot já tem hidratação e banco de cartas
+  // para carregar, e a fila quase sempre está vazia.
+  setTimeout(() => {
+    if (listar(deposito()).length) { reenviarPendentes(); agendarReenvio(); }
+  }, 3000);
 }

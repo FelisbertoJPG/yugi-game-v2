@@ -29,6 +29,13 @@ store/users/
 store/sessions.json
 decks/users/
 
+# BACKUP DE COPIA LOCAL. `store/bkp/` guarda o que era rascunho no navegador:
+# ele e' ARQUIVADO ao abrir o editor e nunca mais lido, para a copia local nao
+# competir com o que esta' publicado na nuvem. E' registro de UMA maquina, num
+# instante — nao e' conteudo do jogo, e commitar so' encheria o repositorio de
+# estados intermediarios de quem editou.
+store/bkp/
+
 # Ferramentas
 .claude/
 node_modules/

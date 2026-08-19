@@ -65,31 +65,57 @@ export const poolVazio = () => ({ UR: [], SR: [], R: [], N: [] });
  * Aceita também o formato ANTIGO (`pool` como lista simples): as cartas caem em
  * N, que é onde o servidor já colocava quem não está em booster nenhum.
  */
+function normalizarUm(cfg) {
+  if (typeof cfg !== 'object' || cfg == null) return null;
+
+  const pool = poolVazio();
+  const vistos = new Set();
+  const guardar = (raridade, lista) => {
+    for (const c of Array.isArray(lista) ? lista : []) {
+      const n = Number(c);
+      if (!Number.isInteger(n) || n <= 0 || vistos.has(n)) continue;
+      vistos.add(n);
+      pool[raridade].push(n);
+    }
+  };
+
+  if (Array.isArray(cfg.pool)) guardar('N', cfg.pool);          // formato antigo
+  else for (const r of RARIDADES) guardar(r, cfg.pool?.[r]);
+
+  let qtd = Number(cfg.quantidade);
+  if (!Number.isFinite(qtd)) qtd = 0;
+  qtd = Math.max(0, Math.min(MAX_DROPS, Math.trunc(qtd)));
+
+  if (!vistos.size || qtd <= 0) return null;
+  return { quantidade: qtd, pool };
+}
+
 export function normalizarDrops(bruto) {
   const saida = {};
   for (const [id, cfg] of Object.entries(bruto ?? {})) {
     if (!id || typeof cfg !== 'object' || cfg == null) continue;
 
-    const pool = poolVazio();
-    const vistos = new Set();
-    const guardar = (raridade, lista) => {
-      for (const c of Array.isArray(lista) ? lista : []) {
-        const n = Number(c);
-        if (!Number.isInteger(n) || n <= 0 || vistos.has(n)) continue;
-        vistos.add(n);
-        pool[raridade].push(n);
-      }
-    };
+    // O pool do NPC INTEIRO. Continua existindo por dois motivos: é o que as
+    // configurações feitas antes dos drops por deck já têm gravado, e é a
+    // reserva de todo deck que não ganhou pool próprio — sem ela, criar um
+    // segundo deck faria o adversário parar de dropar no primeiro.
+    const base = normalizarUm(cfg);
 
-    if (Array.isArray(cfg.pool)) guardar('N', cfg.pool);          // formato antigo
-    else for (const r of RARIDADES) guardar(r, cfg.pool?.[r]);
+    // O pool de cada DECK, por NOME (a mesma chave do deck ativo e do `#libera`
+    // — índice trocaria de significado quando um deck novo entrasse).
+    const decks = {};
+    const crus = (typeof cfg.decks === 'object' && cfg.decks != null) ? cfg.decks : {};
+    for (const [nome, sub] of Object.entries(crus)) {
+      const limpo = String(nome ?? '').trim();
+      if (!limpo) continue;
+      const n = normalizarUm(sub);
+      if (n) decks[limpo] = n;
+    }
 
-    let qtd = Number(cfg.quantidade);
-    if (!Number.isFinite(qtd)) qtd = 0;
-    qtd = Math.max(0, Math.min(MAX_DROPS, Math.trunc(qtd)));
+    const temDecks = Object.keys(decks).length > 0;
+    if (!base && !temDecks) continue;
 
-    if (!vistos.size || qtd <= 0) continue;
-    saida[id] = { quantidade: qtd, pool };
+    saida[id] = { ...(base ?? {}), ...(temDecks ? { decks } : {}) };
   }
   return saida;
 }
@@ -116,9 +142,39 @@ export function chancesDe(pool) {
   return out;
 }
 
-/** A configuração de um NPC só. `null` quando ele não tem drop configurado. */
+/**
+ * A configuração do NPC INTEIRO — a reserva, válida para todo deck que não tem
+ * pool próprio. `null` quando ele não tem drop de NPC configurado (o que hoje
+ * pode significar apenas que tudo dele é por deck).
+ */
 export function dropsDoNpc(cfg, npcId) {
-  return normalizarDrops(cfg)[String(npcId ?? '')] ?? null;
+  const n = normalizarDrops(cfg)[String(npcId ?? '')] ?? null;
+  if (!n || !Number.isFinite(n.quantidade)) return null;
+  return { quantidade: n.quantidade, pool: n.pool };
+}
+
+/**
+ * **A configuração que vale para um DUELO**: o pool do deck escolhido, caindo
+ * no pool do NPC quando aquele deck não tem um.
+ *
+ * É por deck porque é isso que dá sentido a destrancar o deck difícil: se o
+ * prêmio fosse o mesmo, escolher o caminho mais duro não teria motivo. A
+ * reserva por NPC existe para o outro lado — quem já tinha um pool montado
+ * antes disto não perde nada, e um deck novo nasce dropando.
+ *
+ * A MESMA resolução roda no servidor (`premiar_vitoria`), que é quem sorteia.
+ */
+export function dropsDoDeck(cfg, npcId, deckNome) {
+  const doNpc = normalizarDrops(cfg)[String(npcId ?? '')] ?? null;
+  if (!doNpc) return null;
+
+  const nome = String(deckNome ?? '').trim();
+  const doDeck = nome ? doNpc.decks?.[nome] : null;
+  if (doDeck) return { quantidade: doDeck.quantidade, pool: doDeck.pool };
+
+  return Number.isFinite(doNpc.quantidade)
+    ? { quantidade: doNpc.quantidade, pool: doNpc.pool }
+    : null;
 }
 
 /** Lê a configuração publicada (banco, com o disco de reserva). */

@@ -44,13 +44,46 @@ os nossos conteúdos têm ritmos de mudança muito diferentes:
 
 | Pacote | Conteúdo | Tamanho **real** | Muda quando |
 |---|---|---|---|
-| `ClassicDuels.exe` | motor .NET + `ocgcore.dll` + `sqlite3.dll` | ~14 MB | mexe em `duel-server/src/` |
-| `game.zip` | `web/`, `ygo-data/src/`, e de `ygo-data/data/`: `cards.index.json`, `archetypes.json`, `scripts.index.json`, `meta.json`, `constants.json` | **0,8 MB** (53 arquivos) | **quase todo dia** |
-| `cards.zip` | `ygo-data/data/cards.json` (14 MB), `.../YGODemo/cards.cdb` e os 20.949 `script/*.lua` | **24,9 MB** (20.951 arquivos) | só quando roda `npm run data:build` |
-| `files[]` | `store/banlist.json`, `store/boosters.json`, `store/npcs.json` | KB | conteúdo global do jogo, sob demanda |
+| `ClassicDuels.exe` | a **casca** (`duel-server/host/`) + o runtime .NET + a semente | ~68 MB | mexe em `host/` — raro, de propósito |
+| `game.zip` | `web/`, `ygo-data/src/`, e de `ygo-data/data/`: `cards.index.json`, `archetypes.json`, `scripts.index.json`, `meta.json`, `constants.json` | **1,2 MB** | **quase todo dia** |
+| `cards.zip` | `ygo-data/data/cards.json` (14 MB), `.../YGODemo/cards.cdb` e os 20.949 `script/*.lua` | **27,1 MB** (20.951 arquivos) | só quando roda `npm run data:build` |
+| `engine.zip` | `DuelServer.Engine.dll` — **todo o C#**: motor, `NpcBrain`, `InteractiveDuel`, servidor web | **0,2 MB** | mexe em `duel-server/src/` |
+| `native.zip` | `ocgcore.dll` + `sqlite3.dll` | **1,9 MB** | o core é recompilado (quase nunca) |
+| `files[]` | `store/banlist.json`, `store/boosters.json`, `store/npcs.json`, `store/cardlists.json` | KB | conteúdo global do jogo, sob demanda |
 
 Os tamanhos acima são medidos, não estimados (`npm run release:build`). Publicar um
-ajuste de front custa **0,8 MB** ao jogador, contra os 64 MB do `ClassicDuels.exe` de hoje.
+ajuste de front custa **1,2 MB** ao jogador; uma correção no `NpcBrain`, **0,2 MB**.
+
+### O motor também é conteúdo (19/08/2026)
+
+As duas últimas linhas são a mudança que fechou o buraco mais caro deste desenho: até
+19/08/2026 **todo o C# viajava dentro do `.exe`**. Uma correção de 800 KB no `NpcBrain`
+custava 67,8 MB de download — dos quais ~29 MB eram `game.zip` e `cards.zip` que o jogador
+já tinha no disco — e só chegava até ele se quem publicou lembrasse de `npm run pack`, do
+bump da `InstallerVersion` e do `-ComExe`. Foi esquecido em produção pelo menos uma vez (a
+varredura de ATK/DEF: front novo, motor velho, nenhum teste vermelho).
+
+Hoje o executável é uma **casca**: ele resolve a instalação, aplica o motor que ficou em
+estágio e carrega `engine/DuelServer.Engine.dll` **por bytes** (nunca `LoadFrom`, que
+travaria o arquivo e impediria a atualização seguinte de substituí-lo). O motor virou um
+pacote como qualquer outro.
+
+**Por que `engine`/`native` caem em `.staged/` e não no lugar definitivo.** Quem baixa a
+atualização é o próprio motor — é ele que tem a tela `web/atualizando.html` e as rotas
+`/__update/*` —, e nesse instante ele e a `ocgcore.dll` estão carregados no processo; o
+Windows não deixa sobrescrever DLL em uso. Então o zip publicado traz as entradas com o
+prefixo `.staged/`, o `UpdateEngine` as extrai ali sem saber de nada, e a casca aplica no
+boot seguinte, quando nada foi aberto ainda (`host/Estagio.cs`). O cliente descobre que
+precisa reabrir pelas próprias `roots` do pacote (`Manifest.EmEstagio`), não por um campo
+novo — assim não há como publicar um zip que cai em estágio e o cliente não saber.
+
+**A rede de segurança.** Um motor baixado é um `.dll` que ninguém revisou na máquina do
+jogador; se ele puder travar o boot, não há como consertar do outro lado. Então: falha de
+CARGA reverte na hora; exceção nos primeiros 20 segundos põe o motor de castigo
+(`engine.ruim-<carimbo>`), restaura o anterior de `.staged-bak/` e ainda tenta subir o
+motor embutido no MESMO boot; e uma sentinela (`.engine-tentativa`) pega o caso em que o
+processo morre sem exceção — duas sobras seguidas e ele vai para a quarentena. O
+`--test-casca` cobre os cinco casos.
 
 Os três `store/*.json` acima são **conteúdo do jogo** versionado de propósito (banlist,
 boosters, NPCs customizados), não progresso de ninguém — por isso entram em `files[]` e
@@ -286,6 +319,25 @@ mesmo caminho de código do GitHub. Os casos:
 | volatilidade | ajuste no front pede só `game`, e o pacote de cartas não é tocado |
 | raízes sobrepostas | regressão do bug do §2 — os dois pacotes convivem em `ygo-data/data` |
 | payload embutido | instalação nova nasce **em dia** (§11); e sem o `payload.markers` o fantasma reaparece |
+
+### `--test-casca` — a troca do motor em disco (25 asserções, sem rede)
+
+Cobre o que só existe na máquina do jogador: o pacote `engine` chegou em `.staged/` e a
+troca acontece no boot seguinte (`duel-server/host/Estagio.cs`). Os casos:
+
+1. **caminhos** — o prefixo `.staged/` sai; `..` e caminho absoluto são recusados;
+2. **aplicar** — o motor novo entra, o que o pacote não trazia continua onde estava, o
+   anterior vai para `.staged-bak/` e o `.staged/` é limpo (senão seria reaplicado todo boot);
+3. **escopo** — um pacote em estágio só escreve em `engine/`; um zip publicado por engano com
+   `store/wallet.json` dentro não sobrescreve a carteira de ninguém por este caminho;
+4. **sentinela** — a primeira sobra é tolerada (o jogo pode ter sido morto pelo Gerenciador de
+   Tarefas); a segunda põe o motor de castigo em `engine.ruim-<carimbo>` e restaura o anterior;
+5. **sem anterior** — reverter ainda funciona: o `engine/` some e o boot cai no motor embutido;
+6. **quarentena** — só a mais recente fica (são ~5 MB por cópia);
+7. **constantes** — a casca duplica `PASTA`/`PASTA_ANTIGA` do `DuelServer.Payload` (ela precisa
+   saber onde o jogo mora ANTES de poder olhar dentro do motor) e o teste confere que as duas
+   concordam. Duplicata sem guarda envelhece: discordando, a casca procuraria o motor numa
+   pasta e o motor instalaria o jogo noutra.
 
 ### `--test-offline` — a rede FORA do ar (16 asserções)
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using YGO;
@@ -126,6 +126,12 @@ namespace DuelServer.Update
                 // deixaria um exe novo rodando conteudo velho.
                 if (_plano.InstaladorDesatualizado && TrocarExecutavel()) return;
 
+                // O MOTOR novo esta' baixado, mas em `.staged/`: ele so' vale
+                // quando a casca o aplicar, e ela so' roda no boot. Sem reabrir,
+                // o jogador continuaria com o motor velho — vendo "pronto" na
+                // tela, que e' a pior das duas mentiras possiveis aqui.
+                if (_plano.TrocaMotor && ReabrirParaTrocarMotor()) return;
+
                 Estagio(Estado.Concluido, "pronto", _manifesto.GameVersion, 1);
             }
             catch (Exception e)
@@ -156,6 +162,24 @@ namespace DuelServer.Update
             {
                 Thread.Sleep(1200);
                 if (SelfUpdater.AgendarTroca(novo)) Environment.Exit(0);
+            });
+            return true;
+        }
+
+        /// <summary>
+        /// Fecha o jogo e reabre, para a casca aplicar o motor que ficou em
+        /// estágio. A pausa antes do `Exit` não é frescura: sem ela o servidor
+        /// morre antes do próximo poll do front, e o jogador vê a página
+        /// congelar em vez de ler "reiniciando".
+        /// </summary>
+        static bool ReabrirParaTrocarMotor()
+        {
+            Estagio(Estado.Reiniciando, "reiniciando", "aplicando o motor novo", 1);
+
+            Task.Run(() =>
+            {
+                Thread.Sleep(1200);
+                if (SelfUpdater.AgendarReabertura()) Environment.Exit(0);
             });
             return true;
         }

@@ -1,12 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- A CASCA. Ate' 19/08/2026 este projeto era o jogo inteiro; hoje ele compila
+       so' `host/` e o motor mora em `engine/duel-engine.csproj`
+       (DuelServer.Engine.dll), carregado do disco em tempo de execucao. E' o que
+       permite entregar uma mudanca de C# como um pacote de ~400 KB em vez de um
+       executavel de 67,8 MB. Ver host/Program.cs. -->
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
+
+    <!-- O nome NAO muda: `npm run duel:build`, as suites de teste, o launcher e o pack todos chamam duel-server.exe. -->
     <AssemblyName>duel-server</AssemblyName>
-    <RootNamespace>DuelServer</RootNamespace>
+    <RootNamespace>ClassicDuels.Casca</RootNamespace>
 
     <!-- O processo PRECISA ser 64-bit: as bibliotecas nativas sao x64 e o
          DllImport falharia com BadImageFormat num processo 32-bit. -->
@@ -19,16 +27,39 @@
          codigo, outra plataforma. -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
-  
+
+    <!-- Os fontes da casca sao so' os de host/. O glob padrao puxaria tambem os
+         fontes do motor (src/) e os que o SDK gera dentro de engine/obj — o
+         mesmo motivo do `Compile Remove` que o launcher usa para stop/. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
     <!-- O icone do jogo. Gerado em codigo por tools/gerar-icone.mjs — o desenho
          e o codigo sao a mesma coisa, nao existe binario sem fonte. -->
     <ApplicationIcon>$(MSBuildThisFileDirectory)../assets/icone.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="host\**\*.cs" />
+    <None Remove="engine\**" />
+    <None Remove="src\**" />
+  </ItemGroup>
+
+  <!-- O motor. `ReferenceOutputAssembly` fica LIGADO de proposito: e' o que poe o
+       DuelServer.Engine.dll ao lado do .exe (e dentro do bundle, no pack), que e'
+       a copia de reserva usada quando nao ha' motor no disco — e a unica que
+       existe em desenvolvimento. A casca nunca usa um TIPO do motor: ela chama
+       tudo por reflexao, senao o runtime carregaria esta copia antes de a gente
+       ter a chance de preferir a do disco. -->
+  <ItemGroup>
+    <ProjectReference Include="engine\duel-engine.csproj" />
+  </ItemGroup>
+
   <!-- Distribuicao: `npm run pack` gera duel-server/payload.zip (web, dados,
-       cards.cdb e os scripts lua) e ele entra COMO RECURSO no executavel, para o
-       jogo poder ser entregue como um arquivo unico. No dia a dia o zip nao
-       existe, a condicao nao bate e o build sai igual ao de sempre. -->
+       cards.cdb, os scripts lua e os pacotes do motor) e ele entra COMO RECURSO
+       no executavel, para o jogo poder ser entregue como um arquivo unico. No dia
+       a dia o zip nao existe, a condicao nao bate e o build sai igual ao de
+       sempre. Fica na CASCA, e nao no motor: ela e' quem precisa dele antes de o
+       motor existir no disco. -->
   <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\payload.zip')">
     <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" />
   </ItemGroup>
@@ -36,13 +67,21 @@
   <!-- Token de distribuicao (PAT fine-grained, Contents: Read-only) do repositorio
        privado de Releases. Mesma condicional do payload: se o token.txt existe ele
        entra como recurso; se nao existe - o dia a dia - o build sai igual ao de
-       sempre e o updater roda sem autenticacao. O arquivo NAO vai para o git. -->
+       sempre e o updater roda sem autenticacao. O arquivo NAO vai para o git.
+
+       Fica na casca de proposito: o `engine.zip` publicado e' baixado por QUEM
+       ja' tem o token, entao um token dentro do motor seria distribuido no
+       pacote sem ganhar nada — e nao daria para rodar sem ele de qualquer jeito. -->
   <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\token.txt')">
     <EmbeddedResource Include="token.txt" LogicalName="token.txt" />
   </ItemGroup>
 
   <!-- Bibliotecas nativas do WINDOWS, copiadas para junto do executavel para o
        DllImport("ocgcore") / DllImport("sqlite3") encontra-las.
+
+       Aqui elas servem ao DESENVOLVIMENTO e ao primeiro boot; na instalacao do
+       jogador quem manda sao as de `engine/` (pacote `native`), resolvidas pelo
+       `Motor.LigarResolvedorDeNativas`.
 
        Condicionado ao RID: num build linux-x64 estes .dll nao servem para nada
        e, pior, seriam copiados para a imagem do servidor sem que ninguem

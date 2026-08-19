@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using YGO;
@@ -12,32 +12,18 @@ public class DatabaseManager : IDisposable
     private IntPtr db;
 
     /// <summary>
-    /// Ensina o .NET a achar a SQLite no Linux.
+    /// O resolvedor de bibliotecas nativas mora em <see cref="DuelServer.Nativas"/>.
     ///
-    /// `DllImport("sqlite3")` procura por `libsqlite3.so` — o nome do pacote de
-    /// DESENVOLVIMENTO. Uma distribuicao so' com o runtime instalado tem apenas
-    /// `libsqlite3.so.0`, e o carregamento falha. O sintoma nao apontava para
-    /// nada disso: o banco de cartas ficava vazio, o NPC nao enxergava carta
-    /// nenhuma e so' passava o turno — 24 testes vermelhos, todos parecendo bug
-    /// de regra.
-    ///
-    /// Resolver por codigo (em vez de exigir libsqlite3-dev na imagem) mantem o
-    /// servidor auto-suficiente: roda em qualquer host sem pacote extra.
-    /// No Windows nada muda — o resolvedor devolve zero e o .NET segue com a
-    /// busca normal, achando a sqlite3.dll ao lado do executavel.
+    /// Ele ficava AQUI, num construtor estatico, e isso escondia dois furos: o
+    /// construtor so' roda quando alguem toca no banco (a `ocgcore` e' carregada
+    /// antes, no boot), e o .NET aceita um resolvedor por assembly — entao a
+    /// casca nao conseguia registrar o dela sem estourar
+    /// "A resolver is already set for the assembly". Continua sendo chamado por
+    /// aqui para quem usar o `DatabaseManager` direto num teste.
     /// </summary>
     static DatabaseManager()
     {
-        NativeLibrary.SetDllImportResolver(typeof(DatabaseManager).Assembly, (nome, asm, caminho) =>
-        {
-            if (nome != "sqlite3" || !RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                return IntPtr.Zero;
-
-            foreach (var tentativa in new[] { "libsqlite3.so.0", "libsqlite3.so" })
-                if (NativeLibrary.TryLoad(tentativa, out var h)) return h;
-
-            return IntPtr.Zero;
-        });
+        DuelServer.Nativas.Ligar();
     }
 
     // ----- P/Invoke Direto para a SQLite3.dll Nativa -----

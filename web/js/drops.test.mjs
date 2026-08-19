@@ -9,7 +9,7 @@
  * porcentagem mostrada e' a mesma conta que o servidor faz.
  */
 import {
-  normalizarDrops, dropsDoNpc, chancesDe, totalDoPool, poolVazio,
+  normalizarDrops, dropsDoNpc, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
   MAX_DROPS, DROP_ODDS, RARIDADES,
 } from './drops.js';
 import assert from 'node:assert/strict';
@@ -148,6 +148,91 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
   t('descartar um NPC nao derruba os outros', () => {
     assert.equal(saida.para_dox?.quantidade, 3);
     assert.ok(!saida.wevil);
+  });
+}
+
+// ------------------------------------------------------- o pool por DECK
+//
+// O pool passou a ser por DECK, e nao mais por adversario. E' o que da' sentido
+// a destrancar o deck dificil: se o premio fosse o mesmo, escolher o caminho
+// mais duro nao teria motivo.
+//
+// O pool do NPC continua existindo como RESERVA — quem montou um antes disto
+// nao perde nada, e um deck novo ja' nasce dropando.
+{
+  const p = (id) => ({ UR: [], SR: [], R: [], N: [id] });
+  const cfg = {
+    para_dox: {
+      quantidade: 1, pool: p(111),                       // a reserva do NPC
+      decks: {
+        'Bem-vindo ao Labirinto': { quantidade: 2, pool: p(222) },
+        'Guardiao do Portao':     { quantidade: 5, pool: p(333) },
+      },
+    },
+    wevil: { quantidade: 3, pool: p(444) },              // so' o formato antigo
+  };
+
+  t('o deck com pool proprio usa o DELE, nao o do NPC', () => {
+    assert.deepEqual(dropsDoDeck(cfg, 'para_dox', 'Guardiao do Portao'),
+      { quantidade: 5, pool: p(333) });
+  });
+
+  t('cada deck tem o seu, sem um vazar no outro', () => {
+    assert.deepEqual(dropsDoDeck(cfg, 'para_dox', 'Bem-vindo ao Labirinto'),
+      { quantidade: 2, pool: p(222) });
+  });
+
+  t('deck SEM pool proprio cai na reserva do NPC', () => {
+    assert.deepEqual(dropsDoDeck(cfg, 'para_dox', 'Um Deck Novo'),
+      { quantidade: 1, pool: p(111) });
+  });
+
+  t('config so no formato antigo vale para qualquer deck', () => {
+    assert.deepEqual(dropsDoDeck(cfg, 'wevil', 'Furia dos Insetos'),
+      { quantidade: 3, pool: p(444) });
+  });
+
+  t('NPC sem configuracao nenhuma continua sem drop', () => {
+    assert.equal(dropsDoDeck(cfg, 'kaiba', 'Legend of Blue-Eyes'), null);
+  });
+
+  t('sem o nome do deck, vale a reserva do NPC', () => {
+    assert.deepEqual(dropsDoDeck(cfg, 'para_dox', ''), { quantidade: 1, pool: p(111) });
+  });
+
+  // Um NPC pode ter SO' pools por deck, sem reserva nenhuma. Nesse caso o deck
+  // configurado dropa e o que nao esta' na lista nao dropa — e' o unico jeito
+  // de dizer "so' o deck dificil da' premio".
+  const soDeck = {
+    para_dox: { decks: { 'Guardiao do Portao': { quantidade: 4, pool: p(555) } } },
+  };
+  t('NPC so com pool por deck: o configurado dropa', () => {
+    assert.deepEqual(dropsDoDeck(soDeck, 'para_dox', 'Guardiao do Portao'),
+      { quantidade: 4, pool: p(555) });
+  });
+  t('...e o deck de fora dele nao dropa', () => {
+    assert.equal(dropsDoDeck(soDeck, 'para_dox', 'Bem-vindo ao Labirinto'), null);
+  });
+  t('...e o NPC nao some da configuracao por nao ter reserva', () => {
+    assert.ok(normalizarDrops(soDeck).para_dox);
+  });
+
+  // As mesmas travas do pool do NPC valem dentro de cada deck: um deck com
+  // carta e quantidade 0 e' o mesmo que nao ter drop.
+  t('deck com quantidade 0 e descartado, como o do NPC', () => {
+    const zerado = { para_dox: { decks: { 'X': { quantidade: 0, pool: p(1) } } } };
+    assert.ok(!normalizarDrops(zerado).para_dox);
+  });
+
+  t('normalizar duas vezes da o mesmo, tambem com decks', () => {
+    const uma = normalizarDrops(cfg);
+    assert.deepEqual(normalizarDrops(uma), uma);
+  });
+
+  // `dropsDoNpc` continua existindo e continua devolvendo a RESERVA — as telas
+  // que ainda nao sabem de deck nenhum seguem funcionando.
+  t('dropsDoNpc devolve a reserva, sem o mapa de decks dentro', () => {
+    assert.deepEqual(dropsDoNpc(cfg, 'para_dox'), { quantidade: 1, pool: p(111) });
   });
 }
 

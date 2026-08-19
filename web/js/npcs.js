@@ -19,7 +19,8 @@ import { Deck } from './deck.js';
 import {
   listProjectDecks, saveProjectDeck, deleteProjectDeck, npcDeckPath, canWrite, slugify,
 } from './projectdecks.js';
-import { pushFile, pullFileEx } from './projectstore.js';
+import { pushFileGuardado, pullFileEx } from './projectstore.js';
+import { normalizarDificuldade, normalizarLibera } from './decksnpc.js';
 
 /** Os 3 NPCs fixos desta fase. `signatureId` é o drop padrão de um deck novo. */
 const BASE_NPCS = [
@@ -100,8 +101,9 @@ let leuCustomDisco = false;
 
 function writeCustom(list) {
   writeJson(KEY_CUSTOM, list);
-  if (leuCustomDisco) pushFile('npcs', list);   // store/npcs.json (vai no git)
-  else console.warn('[npcs] gravação de adversário customizado não espelhada: disco ainda não foi lido');
+  // O `console.warn` que havia aqui era invisivel para quem edita: a edicao
+  // sumia e a tela dizia 'salvo'. Agora ela fica na fila e sobe sozinha.
+  pushFileGuardado('npcs', list, leuCustomDisco);   // store/npcs.json (vai no git)
 }
 
 // Os 3 NPCs fixos não têm registro próprio (são um array const embutido no
@@ -119,8 +121,7 @@ function readBaseMeta() {
 
 function writeBaseMeta(meta) {
   writeJson(KEY_BASE_META, meta);
-  if (leuBaseMetaDisco) pushFile('npc-base-meta', meta);   // store/npc-base-meta.json
-  else console.warn('[npcs] gravação de metadados do NPC fixo não espelhada: disco ainda não foi lido');
+  pushFileGuardado('npc-base-meta', meta, leuBaseMetaDisco);   // store/npc-base-meta.json
 }
 
 function applyBaseMeta() {
@@ -325,8 +326,9 @@ export async function loadNpcDecks() {
     const npcId = m[1];
     if (!cache[npcId]) continue;            // pasta de um NPC que não existe mais
     const sig = Number(meta.signature) || getNpc(npcId)?.signatureId;
+    const nomeDoDeck = meta.name || deck.name;
     cache[npcId].push({
-      name: meta.name || deck.name,
+      name: nomeDoDeck,
       main: deck.main,
       extra: deck.extra,
       signatureId: sig,
@@ -334,6 +336,13 @@ export async function loadNpcDecks() {
       coverId: Number(meta.cover) || sig,
       // Quanto DP este deck dá ao ser vencido (0 é válido: um NPC sem prêmio).
       rewardDp: Number.isFinite(Number(meta.reward)) ? Number(meta.reward) : DEFAULT_REWARD,
+      // O rótulo de dificuldade é TEXTO LIVRE de quem edita ("fácil", "iniciante",
+      // o que fizer sentido naquela campanha) e não muda como o adversário joga:
+      // quem decide se ele lê a sua mão continua sendo o `level` do NPC.
+      dificuldade: normalizarDificuldade(meta.dificuldade),
+      // Qual OUTRO deck deste NPC esta vitória destranca, pelo NOME — índice
+      // trocaria de significado quando um deck novo entrasse (migrations 0030/0032).
+      libera: normalizarLibera(meta.libera, nomeDoDeck),
       updatedAt: meta.updated ?? null,
       path,
     });
@@ -393,6 +402,10 @@ export function getNpcDecks(id) {
     signatureId: d.signatureId ?? npc.signatureId, updatedAt: d.updatedAt ?? null,
     coverId: d.coverId ?? d.signatureId ?? npc.signatureId,
     rewardDp: Number.isFinite(Number(d.rewardDp)) ? Number(d.rewardDp) : DEFAULT_REWARD,
+    // Rótulo livre de dificuldade e o deck que esta vitória destranca. Ver
+    // `decksnpc.js`, que é quem sabe transformar isso em trilha.
+    dificuldade: d.dificuldade ?? '',
+    libera: d.libera ?? null,
     // `path` null = o deck ainda não está versionado no projeto (só no navegador).
     path: d.path ?? null,
   }));
@@ -420,7 +433,29 @@ export function getNpcActiveDeck(id) {
  *
  * @returns {Promise<{index:number, path?:string, downloaded?:boolean, error?:string}>}
  */
-export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverId, rewardDp }) {
+/**
+ * Reaponta para `nomeNovo` todo deck deste NPC que liberava `nomeAntigo`.
+ *
+ * Regrava o `.ydk` de cada um (que é onde a cadeia mora) e o cache em memória.
+ * Só toca em quem apontava: os demais nem são reescritos, para renomear um deck
+ * não republicar o NPC inteiro.
+ */
+async function religarLibera(id, nomeAntigo, nomeNovo, list, recemSalvo) {
+  for (const d of list) {
+    if (d === recemSalvo || d.libera !== nomeAntigo || !d.path) continue;
+    d.libera = nomeNovo;
+    await saveProjectDeck(d.path, new Deck({ name: d.name, main: d.main, extra: d.extra }), {
+      name: d.name, npc: id, signature: d.signatureId, cover: d.coverId,
+      reward: d.rewardDp, updated: new Date().toISOString(),
+      ...(d.dificuldade ? { dificuldade: d.dificuldade } : {}),
+      libera: nomeNovo,
+    });
+  }
+}
+
+export async function saveNpcDeckAt(id, index, {
+  name, deck, signatureId, coverId, rewardDp, dificuldade, libera,
+}) {
   const npc = getNpc(id);
   if (!npc) return { index: -1, error: 'NPC inexistente' };
 
@@ -431,6 +466,8 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverI
   // 0 é um prêmio válido (NPC que não dá DP), então só cai no padrão quando o
   // valor não é um número — não use `||`, que trocaria 0 por 100.
   const reward = Number.isFinite(Number(rewardDp)) ? Math.max(0, Number(rewardDp)) : DEFAULT_REWARD;
+  const dif = normalizarDificuldade(dificuldade);
+  const abre = normalizarLibera(libera, finalName);
   const entry = {
     name: finalName,
     main: [...deck.main],
@@ -438,6 +475,8 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverI
     signatureId: sig,
     coverId: cover,
     rewardDp: reward,
+    dificuldade: dif,
+    libera: abre,
     updatedAt: new Date().toISOString(),
     path: null,
   };
@@ -445,14 +484,25 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverI
   const old = (index != null && index >= 0 && index < list.length) ? list[index] : null;
   const path = npcDeckPath(id, finalName);
 
+  // Só entra no .ydk o que tem valor: um `#dificuldade` vazio viraria a string
+  // "undefined" na leitura seguinte, porque `metaDoYdk` devolve o texto cru.
   const r = await saveProjectDeck(path, deck, {
     name: finalName, npc: id, signature: sig, cover, reward, updated: entry.updatedAt,
+    ...(dif ? { dificuldade: dif } : {}),
+    ...(abre ? { libera: abre } : {}),
   });
   entry.path = r.ok ? r.path : null;
 
   // Renomear muda o arquivo: apaga o antigo para não ficarem dois.
   if (r.ok && old?.path && old.path !== entry.path) {
     await deleteProjectDeck(old.path);
+    // A cadeia de liberação aponta pelo NOME, então renomear deixaria os
+    // apontadores mirando um deck que não existe mais. A regra é tolerante com
+    // isso — o alvo perdido não tranca ninguém —, e é justamente esse o
+    // estrago: o deck difícil ficaria destrancado para sempre, em silêncio.
+    if (old.name && old.name !== finalName) {
+      await religarLibera(id, old.name, finalName, list, entry);
+    }
   }
 
   let i = index;
@@ -460,7 +510,14 @@ export async function saveNpcDeckAt(id, index, { name, deck, signatureId, coverI
   else list[i] = entry;
 
   setNpcActiveIndex(id, i);
-  return { index: i, path: entry.path, downloaded: r.downloaded, error: r.error };
+  // `publicado`/`erroRemoto` vinham de `saveProjectDeck` e morriam aqui. Um deck
+  // de NPC salvo com a sessao vencida gravava no disco, respondia `ok` e a tela
+  // dizia "salvo em decks/..." — sem ter chegado em ninguem. E' exatamente o
+  // caso do deck do Pegasus, que precisou ser inserido no banco na mao.
+  return {
+    index: i, path: entry.path, downloaded: r.downloaded, error: r.error,
+    publicado: r.publicado, erroRemoto: r.erroRemoto,
+  };
 }
 
 /** Remove um deck do NPC, apagando o arquivo do projeto. */
@@ -491,7 +548,7 @@ export function setNpcActiveIndex(id, index) {
   // alfabética anterior trocar o adversário de todo mundo.
   all[id] = { i, nome: (cache[id] ?? [])[i]?.name ?? null };
   const ok = writeJson(KEY_ACTIVE, all);
-  if (leuAtivoDisco) pushFile('npc-deck-ativo', all);
+  pushFileGuardado('npc-deck-ativo', all, leuAtivoDisco);
   return ok;
 }
 

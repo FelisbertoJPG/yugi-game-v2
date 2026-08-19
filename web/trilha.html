@@ -38,6 +38,37 @@
     color: var(--gold); font-size: 14px; overflow-wrap: anywhere;
   }
   .painel .titulo .adv { display: block; font-size: 11px; color: var(--blue); margin-top: 2px; }
+
+  /* ---------- o seletor de DECK ----------
+     Cada adversário pode ter vários decks, e cada deck tem a sua dificuldade e
+     o seu pool de drop. O "▾" no título abre a lista; quem ainda não foi
+     destrancado aparece com cadeado, sem revelar o que larga. */
+  .painel .titulo.com-seletor { cursor: pointer; position: relative; padding-right: 26px; }
+  .painel .titulo.com-seletor:hover { border-color: var(--gold); }
+  .painel .titulo .seta { position: absolute; right: 9px; top: 7px; color: var(--gold); font-size: 12px; }
+  .painel .titulo .dif {
+    display: inline-block; margin-top: 6px; font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--bg); background: var(--gold);
+    border-radius: 3px; padding: 1px 6px;
+  }
+  .deck-lista {
+    display: flex; flex-direction: column; gap: 4px;
+    border: 1px solid var(--gold); border-radius: 4px; padding: 5px; background: var(--panel2);
+  }
+  .deck-op {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    text-align: left; font-size: 11px; padding: 6px 8px;
+  }
+  .deck-op .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-op .dif {
+    font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--gold); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+  }
+  .deck-op .ok { color: var(--green, #3fd68a); }
+  .deck-op.atual { border-color: var(--gold); color: var(--gold); }
+  /* Trancado continua clicável de propósito: o clique explica por que não abre,
+     e um botão `disabled` não entrega evento nenhum para dizer isso. */
+  .deck-op.trancado { opacity: .5; cursor: not-allowed; }
   .painel .arte {
     border: 1px solid var(--line); border-radius: 4px; background: var(--panel2) center/contain no-repeat;
     aspect-ratio: 59 / 86; min-height: 150px;

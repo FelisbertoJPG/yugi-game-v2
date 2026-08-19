@@ -89,5 +89,37 @@ t('campanha vazia devolve vazio', ordenarCampanha([], ['a']).length === 0);
     String(liberados(ordenada, venceu('wevil'))) === String([true, true, false]));
 }
 
+// ---------------------------------------------------------------- o CHAMADOR
+//
+// Tudo acima prova a REGRA, e a regra sempre esteve certa. Mesmo assim a trilha
+// não desenhava um único adversário: `trilha.js` chamava `liberados(lista)` sem
+// o segundo argumento, e `vencidos.has(...)` estourava na PRIMEIRA volta do
+// laço — `podeOProximo = aberto && vencidos.has(npc.id)` avalia sempre, o
+// curto-circuito do `||` acima não protege. O boot morria ali, `render()` não
+// chegava a criar nenhum quadro e a tela ficava com a moldura vazia.
+//
+// Estes 16 testes passavam verdes o tempo todo: os dez usos aqui SEMPRE
+// passaram os dois argumentos. Provar a função pura não prova quem a chama —
+// e era o chamador que estava quebrado. Daí este bloco, que lê o fonte de quem
+// usa a regra de verdade.
+{
+  const fonte = await import('node:fs/promises')
+    .then((fs) => fs.readFile(new URL('./trilha.js', import.meta.url), 'utf8'));
+
+  const chamadas = [...fonte.matchAll(/\bliberados\s*\(([^)]*)\)/g)].map((m) => m[1]);
+  t('trilha.js chama liberados() em algum lugar', chamadas.length > 0);
+  t('toda chamada a liberados() passa a lista E os vencidos',
+    chamadas.every((args) => args.split(',').length === 2));
+}
+
+// E a exigência do outro lado: sem o Set, a função tem de FALHAR — nunca
+// devolver uma trilha toda liberada. Um default `= new Set()` faria a tela
+// voltar a desenhar e apagaria em silêncio todo o progresso de quem joga.
+{
+  let estourou = false;
+  try { liberados(trilha('a', 'b'), undefined); } catch { estourou = true; }
+  t('liberados() sem os vencidos falha alto, nao libera tudo', estourou);
+}
+
 console.log(`\n  ${ok} passaram, ${falhou} falharam`);
 process.exit(falhou ? 1 : 0);

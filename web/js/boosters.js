@@ -9,7 +9,7 @@
  * Quando houver backend, só esta camada muda. Espelha o papel de storage.js.
  */
 
-import { pushFile, pullFileEx } from '/web/js/projectstore.js';
+import { pushFile, pushFileGuardado, pullFileEx } from '/web/js/projectstore.js';
 
 /** Raridades, da mais alta para a mais baixa (a ordem importa: define a "maior"). */
 export const RARITIES = ['UR', 'SR', 'R', 'N'];
@@ -43,8 +43,7 @@ let leuODisco = false;
 function write(list) {
   try {
     localStorage.setItem(KEY, JSON.stringify(list));
-    if (leuODisco) pushFile('boosters', list);   // store/boosters.json (vai no git)
-    else console.warn('[boosters] gravação não espelhada: o disco ainda não foi lido');
+    pushFileGuardado('boosters', list, leuODisco);   // store/boosters.json (vai no git)
     return true;
   } catch (e) {
     console.error('[boosters] falha ao gravar', e);

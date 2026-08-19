@@ -300,6 +300,25 @@
     <input type="number" id="npc-reward" min="0" step="50" placeholder="100"
            style="width:74px; font-size:11px"> DP
   </label>
+  <!-- Rótulo LIVRE: quem edita escreve o que fizer sentido na campanha dele
+       ("fácil", "iniciante", "final"). É só o que o jogador lê na Trilha —
+       quem decide se o adversário lê a sua mão continua sendo o nível DELE,
+       nas configurações do NPC. -->
+  <label style="display:flex; gap:5px; align-items:center"
+         title="rótulo livre mostrado ao jogador na Trilha (ex.: fácil, difícil, iniciante). Não muda como o NPC joga.">
+    dificuldade:
+    <input type="text" id="npc-dificuldade" maxlength="24" placeholder="—"
+           style="width:96px; font-size:11px">
+  </label>
+  <!-- A cadeia: vencer ESTE deck destranca aquele. É o que dá motivo a encarar
+       o deck difícil, já que o pool de drop passou a ser por deck. -->
+  <label style="display:flex; gap:5px; align-items:center"
+         title="qual OUTRO deck deste adversário o jogador destranca ao vencer este">
+    libera:
+    <select id="npc-libera" style="max-width:150px; font-size:11px">
+      <option value="">— nenhum —</option>
+    </select>
+  </label>
   <label style="display:flex; gap:5px; align-items:center"
          title="adversário não precisa respeitar a banlist (pontos/grupos) — só ele, o jogador nunca pode ignorar">
     <input type="checkbox" id="npc-ignore-banlist"> ignorar banlist
@@ -357,13 +376,14 @@
     </div><!-- /aba-deck -->
 
     <!-- POOL DE DROP — aba própria, só no modo NPC. Não é parte do deck: são
-         as cartas que ESTE adversário pode largar ao ser derrotado, cada
-         raridade no seu quadro. O sorteio é do servidor (`premiar_vitoria`) e
+         as cartas que ESTE DECK pode largar ao ser derrotado, cada
+         raridade no seu quadro. É por deck (e não por adversário) porque é
+         isso que dá motivo a destrancar o deck difícil: prêmio melhor. O sorteio é do servidor (`premiar_vitoria`) e
          ele confia na gaveta gravada aqui: pesa a raridade primeiro, depois
          sorteia uma carta dentro dela. -->
     <div class="aba" id="aba-drops" hidden>
       <div class="drop-topo">
-        <span>POOL DE DROP</span>
+        <span title="o pool e' DESTE deck; o deck sem pool proprio cai no do adversario">POOL DE DROP <b style="color:var(--gold)">deste deck</b></span>
         <span class="n" id="drop-count" style="color:var(--ink)">0</span>
         <span class="spacer"></span>
         <label style="display:flex; gap:5px; align-items:center"

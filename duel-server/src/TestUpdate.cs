@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -51,6 +51,7 @@ namespace DuelServer
                 RaizesSobrepostasNaoSeApagam(Sub(bancada, "8-sobreposicao"));
                 InstalacaoNovaNaoOfereceAtualizacaoFantasma(Sub(bancada, "9-fantasma"));
                 InstalacaoComNomeAntigoEMigrada(Sub(bancada, "10-renomeacao"));
+                MotorNovoFicaEmEstagio(Sub(bancada, "11-motor"));
             }
             finally
             {
@@ -481,16 +482,68 @@ namespace DuelServer
         }
 
         /// <summary>Monta um `payload.zip` no mesmo formato que o `tools/pack.ps1` gera.</summary>
+        /// <summary>
+        /// O MOTOR nao pode ser trocado por baixo de quem esta' jogando.
+        ///
+        /// Quem baixa a atualizacao e' o proprio motor, e nesse instante ele e a
+        /// `ocgcore.dll` estao carregados — o Windows recusa sobrescrever DLL em
+        /// uso, e mesmo que deixasse, trocar o codigo debaixo de um duelo em
+        /// andamento e' pior que esperar. Entao o pacote cai em `.staged/` e a
+        /// casca (`host/Estagio.cs`) aplica no boot seguinte.
+        ///
+        /// O par CONTROLE e' a segunda metade: sem pacote de motor no plano,
+        /// `TrocaMotor` tem de ser falso — senao o jogo pediria para reabrir a
+        /// cada atualizacao de front, que e' o oposto do que esta mudanca existe
+        /// para fazer.
+        /// </summary>
+        static void MotorNovoFicaEmEstagio(string dir)
+        {
+            var (raiz, fonte) = Cenario(dir, comMotor: true);
+            var eng = NovaEngine(raiz, fonte);
+            var m = eng.CarregarManifestoAsync().GetAwaiter().GetResult();
+
+            var plano = eng.Montar(m);
+            Checa(plano.TrocaMotor, "o plano avisa que ha' troca de motor");
+
+            eng.AplicarAsync(plano).GetAwaiter().GetResult();
+
+            Checa(File.Exists(Path.Combine(raiz, ".staged", "engine", "DuelServer.Engine.dll")),
+                  "o motor novo ficou em .staged/");
+            Checa(!File.Exists(Path.Combine(raiz, "engine", "DuelServer.Engine.dll")),
+                  "o motor EM USO nao foi tocado (quem troca e' a casca, no boot)");
+
+            // Segunda checagem: o marcador do pacote foi gravado, entao nao ha'
+            // o que fazer. Sem isso o jogo ofereceria a mesma atualizacao a cada
+            // boot, e o jogador ficaria num laco de "reabrir para aplicar".
+            var plano2 = eng.Montar(m);
+            Checa(plano2.NadaAFazer, "depois de aplicado, nao ha' mais o que baixar");
+            Checa(!plano2.TrocaMotor, "e nao ha' mais troca de motor pendente");
+
+            // CONTROLE: o mesmo cenario sem o pacote do motor.
+            var (raiz2, fonte2) = Cenario(Path.Combine(dir, "controle"));
+            var eng2 = NovaEngine(raiz2, fonte2);
+            var m2 = eng2.CarregarManifestoAsync().GetAwaiter().GetResult();
+            Checa(!eng2.Montar(m2).TrocaMotor,
+                  "atualizacao so' de front NAO pede para reabrir o jogo");
+        }
+
         static void MontarPayload(string destino, string release, Manifest m, bool comMarcadores)
         {
             using var fs = File.Create(destino);
             using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
 
-            foreach (var nome in new[] { "game.zip", "cards.zip" })
+            // TODOS os pacotes do manifesto, e nao uma lista escrita a mao: e'
+            // assim que o pack.ps1 monta o payload de verdade. Com a lista fixa,
+            // o dia em que um pacote novo apareceu (o `engine`, com o motor em
+            // C#) a semente sairia sem ele — e a instalacao recem-feita ja'
+            // ofereceria um download do que acabou de instalar.
+            foreach (var pacote in m.Payloads)
             {
-                var e = zip.CreateEntry(nome, CompressionLevel.NoCompression);
+                string arquivo = Path.Combine(release, pacote.Asset ?? (pacote.Id + ".zip"));
+                if (!File.Exists(arquivo)) continue;
+                var e = zip.CreateEntry(Path.GetFileName(arquivo), CompressionLevel.NoCompression);
                 using var saida = e.Open();
-                using var origem = File.OpenRead(Path.Combine(release, nome));
+                using var origem = File.OpenRead(arquivo);
                 origem.CopyTo(saida);
             }
 
@@ -731,7 +784,8 @@ namespace DuelServer
 
         /// <summary>Monta uma raiz de instalação vazia + um Release falso ao lado dela.</summary>
         static (string raiz, FonteDeAssets fonte) Cenario(
-            string dir, bool zipMalicioso = false, bool zipComDadoDeConta = false)
+            string dir, bool zipMalicioso = false, bool zipComDadoDeConta = false,
+            bool comMotor = false)
         {
             string raiz = Path.Combine(dir, "game");
             string release = Path.Combine(dir, "release");
@@ -770,6 +824,20 @@ namespace DuelServer
             };
             string zipCards = Path.Combine(release, "cards.zip");
             CriarZip(zipCards, cards);
+
+            // --- pacote 'engine': o MOTOR em C#, que nao pode ser trocado com o
+            // jogo aberto (a ocgcore.dll esta carregada). Ele cai em `.staged/` e
+            // a casca aplica no boot seguinte. So' entra quando o caso pede, para
+            // nao mudar a conta dos outros testes.
+            string zipEngine = null;
+            if (comMotor)
+            {
+                zipEngine = Path.Combine(release, "engine.zip");
+                CriarZip(zipEngine, new Dictionary<string, string>
+                {
+                    [".staged/engine/DuelServer.Engine.dll"] = "sou o motor NOVO"
+                });
+            }
 
             // --- arquivos avulsos: conteúdo GLOBAL do jogo
             string banlist = Path.Combine(release, "banlist.json");
@@ -813,6 +881,7 @@ namespace DuelServer
                                 "duel_academy/Assets/StreamingAssets/YGODemo")
                 }
             };
+            if (comMotor) m.Payloads.Add(NovoPayload("engine", zipEngine, ".staged/engine"));
 
             // sem BOM, de propósito — é o que o publish-release.ps1 faz
             File.WriteAllText(Path.Combine(release, "manifest.json"), m.ToJson(),

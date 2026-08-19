@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -60,6 +60,7 @@ namespace DuelServer
                 ShaErradoNaoTrocaNada(Sub(bancada, "2-sha"));
                 MarcaDaWebSaiDoExeNovo(Sub(bancada, "3-marca"));
                 CoreografiaCompleta(Sub(bancada, "4-troca"));
+                ReaberturaParaTrocarOMotor(Sub(bancada, "5-reabertura"));
             }
             finally
             {
@@ -71,6 +72,59 @@ namespace DuelServer
         }
 
         // ------------------------------------------------------------------ casos
+
+        /// <summary>
+        /// A REABERTURA — o irmão mais novo da troca do exe, e o passo que fecha
+        /// a atualização do MOTOR.
+        ///
+        /// O pacote `engine` cai em `.staged/` e quem o aplica é a casca, no
+        /// boot. Falta então só o boot acontecer: o jogo fecha e reabre sozinho.
+        /// Sem isto o jogador ficaria com o motor novo baixado, a tela dizendo
+        /// "pronto" e o motor VELHO ainda rodando — a pior das duas mentiras
+        /// possíveis aqui.
+        ///
+        /// O `.bat` espera o PID morrer antes de reabrir, e não é frescura:
+        /// subir o processo novo enquanto o antigo ainda segura as portas
+        /// 8080/8770 faz o servidor "andar para a próxima porta livre", e o
+        /// jogador cairia num jogo na 8081 enquanto o outro morre.
+        ///
+        /// Aqui o "executável" é um `.cmd` que escreve um arquivo e sai — é o
+        /// que permite provar que ele foi MESMO reaberto, sem abrir o jogo.
+        /// </summary>
+        static void ReaberturaParaTrocarOMotor(string dir)
+        {
+            Directory.CreateDirectory(dir);
+            string alvo = Path.Combine(dir, "ClassicDuels-de-mentira.cmd");
+            string prova = Path.Combine(dir, "abriu.txt");
+            File.WriteAllText(alvo,
+                "@echo off" + Environment.NewLine +
+                "echo abri > " + "\"" + prova + "\"" + Environment.NewLine +
+                // `exit` (e nao `exit /b`) porque o `start` do Windows abre um
+                // .cmd com `cmd /K`, que fica com a janela aberta para sempre —
+                // e o teste nunca terminaria. O alvo de verdade e' um .exe, que
+                // o `start` executa direto; isto e' so' para o alvo de mentira.
+                "exit" + Environment.NewLine,
+                Encoding.ASCII);
+
+            var batsAntes = new System.Collections.Generic.HashSet<string>(
+                Directory.EnumerateFiles(Path.GetTempPath(), "classicduels-reabrir-*.bat"),
+                StringComparer.OrdinalIgnoreCase);
+
+            int pidMorto = PidDeUmProcessoQueJaMorreu();
+            bool agendou = SelfUpdater.AgendarReabertura(exeAtual: alvo, pidEsperar: pidMorto);
+            Checa(agendou, "a reabertura foi agendada (o .bat foi escrito e disparado)");
+            if (!agendou) return;
+
+            Checa(Esperar(() => File.Exists(prova), TimeSpan.FromSeconds(20)),
+                  "o .bat reabriu o jogo depois de o processo antigo morrer",
+                  "passaram 20s e o alvo nao foi executado");
+
+            Checa(Esperar(() => !Directory.EnumerateFiles(Path.GetTempPath(), "classicduels-reabrir-*.bat")
+                                           .Any(b => !batsAntes.Contains(b)),
+                  TimeSpan.FromSeconds(5)),
+                  "o .bat se autodeletou");
+        }
+
 
         /// <summary>
         /// O estado de HOJE em produção: `"installer": null` no manifesto. Não pode

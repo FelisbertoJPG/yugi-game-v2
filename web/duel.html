@@ -639,7 +639,7 @@
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, hydrateDecks } from '/web/js/storage.js';
-import { getNpc, loadNpcDecks, getNpcActiveDeck, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
+import { getNpc, loadNpcDecks, getNpcActiveDeck, getNpcDecks, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
 import { encerrarDuelo, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
@@ -662,7 +662,12 @@ if (!username) throw new Error('redirecionando para login');
 // recompensa). Com npc, o NPC usa o próprio deck e vencer dá o prêmio em DP
 // definido no deck (padrão 100) + a carta-assinatura dele.
 const advId = new URLSearchParams(location.search).get('npc');
+// `&deck=<nome>` escolhe QUAL deck do adversário enfrentar (o seletor da Trilha
+// de Duelos). Sem ele vale o deck ativo, que é como todo link antigo funciona.
+// Vai pelo NOME, a mesma chave do deck ativo (migration 0030) e do `#libera`.
+const advDeckParam = new URLSearchParams(location.search).get('deck');
 let advNpc = advId ? getNpc(advId) : null;
+let advDeckNome = null;    // nome do deck do NPC neste duelo (registrado no banco)
 let advDeck = null;        // deck do NPC (main ids), carregado no boot
 let advExtra = null;       // extra do NPC (fusões etc.), idem
 let advSignature = null;
@@ -1187,7 +1192,7 @@ async function start() {
     // Registra o duelo no servidor. E' este id que destrava o premio depois —
     // sem ele, `premiar_vitoria` recusa. Só vale contra adversário: o Treino
     // (duel.html sem ?npc=) nao paga nada.
-    dueloId = advNpc ? await iniciarDuelo(advNpc.id) : null;
+    dueloId = advNpc ? await iniciarDuelo(advNpc.id, advDeckNome) : null;
     rewardGiven = false;
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
     log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)${vs}`, true);
@@ -3045,11 +3050,19 @@ if (advNpc) {
   if (h1) h1.textContent = `▚ ADVERSÁRIO — vs ${advNpc.name}`;
   try {
     await loadNpcDecks();
-    const active = getNpcActiveDeck(advId);
+    // O deck pedido na URL, quando existe; senão o ativo. Um nome que não casa
+    // com deck nenhum (link velho, deck renomeado) cai no ativo em vez de
+    // deixar o duelo sem deck — o adversário tem de ser jogável de qualquer jeito.
+    const escolhido = advDeckParam
+      ? getNpcDecks(advId).find((d) => d.name === advDeckParam)
+      : null;
+    const active = escolhido ?? getNpcActiveDeck(advId);
+    advDeckNome = active?.name ?? null;
     advDeck = active?.deck?.main?.length ? active.deck.main : null;
     advExtra = active?.deck?.extra?.length ? active.deck.extra : null;
     advSignature = active?.signatureId ?? advNpc.signatureId;
     advReward = Number.isFinite(Number(active?.rewardDp)) ? Number(active.rewardDp) : WIN_REWARD;
+    if (h1 && active?.name) h1.textContent = `▚ ADVERSÁRIO — vs ${advNpc.name} · ${active.name}`;
   } catch { advSignature = advNpc.signatureId; }
 }
 

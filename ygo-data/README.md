@@ -80,7 +80,7 @@ decodifica tudo; esta seção existe para quem for ler o `.cdb` direto.
 | `def` | Em monstros **Link**, guarda os *link markers*, não a defesa. Link não tem DEF. |
 | `setcode` | Até 4 arquétipos de 16 bits empacotados num inteiro de 64 bits. |
 | `atk`/`def` | `-2` significa **"?"** (ATK variável), não zero. 104 cartas usam isso. |
-| `alias` | `!= 0` ⇒ é **arte alternativa** de outra carta. 298 cartas. Só a canônica (`alias == 0`) tem script Lua e é a que o motor espera. |
+| `alias` | `!= 0` ⇒ o **NOME** desta carta é tratado como o da carta `alias`. 298 cartas, e elas se dividem em DOIS casos que não podem ser confundidos: **mesmo nome** da base (283) é só outra arte — esconda, senão a listagem duplica; **nome diferente** (15) é uma **carta distinta**, com efeito e Lua próprios, que apenas conta como o outro nome nas regras (Harpie Lady 1/2/3 e Cyber Harpie Lady → Harpie Lady; A Legendary Ocean → Umi; Fusion Substitute → Polymerization). Use `isAlternateArt` (ou `alt` no índice), que já faz essa distinção — **não** teste `alias != 0` na mão: era assim que as 15 sumiam do Deck Builder e do editor de listas. |
 | `ot` | Legalidade: `0x1` OCG, `0x2` TCG. `3` = ambos. |
 | `category` | Dicas de efeito para a IA. **Pouco confiável** — Monster Reborn aparece como `RECOVER`. Não use como regra. |
 

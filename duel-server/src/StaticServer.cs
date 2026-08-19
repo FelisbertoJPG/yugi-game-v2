@@ -314,7 +314,18 @@ namespace DuelServer
         /// <summary>So' um nome simples de .json dentro de store/ (sem subpastas).</summary>
         static string CaminhoStore(string root, string nome)
         {
-            if (string.IsNullOrEmpty(nome) || !Regex.IsMatch(nome, @"^[a-zA-Z0-9_-]+\.json$")) return null;
+            // `bkp/` e' a UNICA subpasta aceita, e existe por uma regra do
+            // projeto: copia local nunca e' lida de volta — ela e' ARQUIVADA. O
+            // rascunho do Deck Estrutural vencia a nuvem no boot, entao editar
+            // numa maquina e abrir noutra trazia a versao velha por cima da
+            // publicada.
+            //
+            // O `StartsWith` abaixo continua sendo a trava de verdade contra
+            // `..`; o regex so' decide o formato do nome. Tem de casar com o
+            // `safeStorePath` de tools/serve.mjs — sao os dois back-ends do
+            // MESMO front, e divergir aqui faz a gravacao funcionar no
+            // `npm run dev` e falhar no jogo instalado (ou o contrario).
+            if (string.IsNullOrEmpty(nome) || !Regex.IsMatch(nome, @"^(bkp/)?[a-zA-Z0-9_-]+\.json$")) return null;
             string store = Path.Combine(root, "store");
             string full = Path.GetFullPath(Path.Combine(store, nome));
             if (!full.StartsWith(store + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

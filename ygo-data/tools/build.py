@@ -233,7 +233,10 @@ def decode_card(row, tables, archetypes, script_index):
         "legal": legal,
         "otRaw": ot,
         "alias": alias,
-        "isAlternateArt": alias != 0,
+        # Preenchido no 2o passo (`marcar_artes_alternativas`): decidir aqui e'
+        # impossivel, porque depende do NOME da carta base, que pode ainda nem
+        # ter sido decodificada.
+        "isAlternateArt": False,
         "archetypes": card_archetypes,
         "categories": decode_flags(category, tables["CATEGORY"]),
         "categoryRaw": category,
@@ -332,6 +335,42 @@ def write_json(path, payload, compact=False):
     return os.path.getsize(path)
 
 
+def marcar_artes_alternativas(cards):
+    """Decide, para cada `alias != 0`, se e' ARTE ALTERNATIVA ou CARTA DISTINTA.
+
+    `alias` no cards.cdb quer dizer "o NOME desta carta e' tratado como o da
+    carta X". Isso cobre dois casos bem diferentes, e tratar os dois como um so'
+    escondia carta de verdade:
+
+      * MESMO NOME  -> e' so' outra arte da mesma carta (as tres impressoes de
+        "Harpie's Feather Duster"). A UI deve esconder, senao a listagem
+        duplica.
+
+      * NOME DIFERENTE -> e' uma CARTA DISTINTA, com efeito e status proprios,
+        que apenas conta como o outro nome nas regras. "Harpie Lady 1/2/3" e
+        "Cyber Harpie Lady" sao tratadas como "Harpie Lady"; "A Legendary
+        Ocean" e' tratada como "Umi"; "Fusion Substitute", como
+        "Polymerization". Esconder essas era um bug: elas sumiam do Deck
+        Builder e do editor de listas, e nao havia como coloca-las em lista
+        nenhuma.
+
+    Eram 15 cartas sumindo em silencio contra 283 artes alternativas legitimas.
+    """
+    por_id = {c["id"]: c for c in cards}
+    alt = distintas = 0
+    for c in cards:
+        base = por_id.get(c["alias"]) if c["alias"] else None
+        # Base ausente do banco: nao da' para comparar nome nenhum. Fica visivel
+        # — some' uma carta por engano e' pior que listar uma a mais.
+        c["isAlternateArt"] = bool(base) and base["name"] == c["name"]
+        if c["alias"]:
+            if c["isAlternateArt"]:
+                alt += 1
+            else:
+                distintas += 1
+    return alt, distintas
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=DEFAULT_SOURCE,
@@ -405,7 +444,10 @@ def main():
 
     cards = [decode_card(r, tables, archetypes, script_index) for r in rows]
     db.close()
+    alt, distintas = marcar_artes_alternativas(cards)
     print(f"[4/6] cards.cdb           -> {len(cards)} cartas decodificadas")
+    print(f"      alias: {alt} arte(s) alternativa(s), "
+          f"{distintas} carta(s) distinta(s) com nome tratado como outro")
 
     # --- 5. arquivos de saida -------------------------------------------
     shutil.copy2(cdb, os.path.join(out_dir, "cards.cdb"))

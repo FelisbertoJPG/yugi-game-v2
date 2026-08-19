@@ -18,14 +18,25 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 19 testes do drop por NPC (pool por raridade, a % de cada uma
-                             # e o descarte de quem tem carta mas quantidade zero)
+node web/js/drops.test.mjs   # 31 testes do drop por DECK (pool por raridade, a % de cada
+                             # uma, o descarte de quem tem carta mas quantidade zero, e a
+                             # reserva por NPC de quem ainda não tem pool próprio)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
-node web/js/estrutural.test.mjs # 7 testes do rascunho do Deck Estrutural (não perder deck)
-node web/js/trilha.test.mjs  # 16 testes da Trilha de Duelos: a liberação (cada vitória
-                             # abre o próximo) e a ordem publicada por campanha
+node web/js/estrutural.test.mjs # 10 testes do rascunho do Deck Estrutural: ele salva
+                             # o trabalho, mas NUNCA é carregado de volta — ao abrir a
+                             # tela vai para store/bkp/ e sai do navegador
+node web/js/trilha.test.mjs  # 19 testes da Trilha de Duelos: a liberação (cada vitória
+                             # abre o próximo), a ordem publicada por campanha e o
+                             # CHAMADOR — trilha.js passando os vencidos a liberados()
+node web/js/decksnpc.test.mjs # 27 testes da trilha de DECKS dentro de um adversário
+                             # (o `#libera` de cada deck, a dificuldade como rótulo
+                             # livre, e a config torta que nunca pode deixar um
+                             # adversário injogável)
 node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
                              # resolvido pelo nome — não pelo índice)
+node web/js/pendencias.test.mjs # 23 testes da fila do que ainda não subiu para a
+                             # nuvem (uma pendência por chave, sempre a mais nova;
+                             # sai quando o BANCO aceita — o disco não conta)
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run conteudo:check       # o que o admin editou chegou ao BANCO? (conteudo,
                              # decks de NPC e tabuleiros, disco x Supabase).
@@ -48,9 +59,12 @@ npm run atalho               # poe "Classic Duels" na area de trabalho apontando
                              # é feito dos MESMOS game.zip/cards.zip do Release, senão a
                              # instalação nova oferece uma atualização do que ela já tem
 
-npm run update:test          # 79 asserções do instalador/auto-updater (sem rede):
-                             # --test-update + --test-offline + --test-selfupdate
-                             #   + --test-update-duelo
+npm run update:test          # 126 asserções do instalador/auto-updater (sem rede):
+                             # --test-casca + --test-update + --test-offline
+                             #   + --test-selfupdate + --test-update-duelo
+                             # (--test-casca é a troca do MOTOR em disco: o pacote
+                             #  que ficou em .staged/, a quarentena de um motor que
+                             #  não sobe, e o motor anterior voltando)
 npm run release:build        # DRY-RUN: gera dist/release/ (game.zip, cards.zip, manifest.json)
                              # o cards.zip (21 mil .lua) é CACHEADO em dist/.cache por
                              # impressão digital das entradas: ~4s quando o banco não
@@ -172,6 +186,16 @@ pela armadilha ativada do campo, a Magia Contínua ficando na zona e a De-Spell 
 destruindo. E, no fim, que nenhuma pergunta do motor caiu fora do que o front
 sabe desenhar: uma carta que peça um `kind` novo vira "⚠ ação não suportada" na
 tela e o duelo morre ali, sem erro nenhum no servidor),
+`--test-mai` (o deck de HARPIAS da Mai: os efeitos de cada carta conferidos no
+MOTOR pelo evento `stats` — Harpie Lady 1 dando +300 a todo WIND inclusive a
+quem JA' estava em campo, Cyber Shield +500, Gust Fan +400 e a Mountain +200 —
+mais o `NpcBrain` decidindo sozinho: equipa da mao pela tabela `EQUIPAMENTOS` e
+ativa magia de campo pela `CAMPOS`, com o par CONTROLE de que a Mountain NAO
+sai quando so' o outro lado ganharia. Foi este deck que trouxe a regra 5.355
+(equipamento da mao, generica): antes so' saia equipamento com regra propria por
+id ou buscado do deck, e o NPC carregava Gust Fan/Cyber Shield/Sword of Dark
+Destruction a partida inteira sem equipar — nenhum teste acusava, porque cada
+deck novo so' provava as cartas com regra propria),
 `--test-atk-vivo` (o NPC decide pelo ATK/DEF **de agora** — equipamento, magia
 de campo, efeito contínuo —, e não pelo statline impresso no `cards.cdb`, que
 era o que ele lia: o jogador punha +700 num monstro e o NPC atacava assim mesmo,
@@ -184,14 +208,26 @@ mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
 `--test-summons`; as outras suítes precisam ser chamadas na mão (ver
 `package.json`).
 
-> **Mexeu em C#? O Release comum NÃO leva a sua mudança.** `game.zip` é front +
-> índices; `cards.zip` é banco + Lua. O `duel-server` (o motor, o `NpcBrain`, o
-> `InteractiveDuel`) viaja **só dentro do `ClassicDuels.exe`**. Então a sequência
-> depois de qualquer mudança no C# é `npm run release:build` → `npm run pack` →
-> `npm run release:publish -- -ComExe`; sem o `pack`, o `dist/ClassicDuels.exe`
-> que você distribui continua sendo o de antes. Foi assim que a varredura de
-> ATK/DEF (magia de campo) saiu publicada no front e ausente no motor: na tela do
-> jogador o Umi seguia sem efeito nenhum, e os testes todos passavam aqui.
+> **Mexeu em C#? O Release comum LEVA a sua mudança** — desde 19/08/2026. O motor
+> deixou de morar dentro do executável: ele é o pacote **`engine`** (o
+> `DuelServer.Engine.dll`, ~200 KB) mais o **`native`** (`ocgcore`+`sqlite3`,
+> ~1,9 MB), publicados pelo `release:build` como `game`/`cards` sempre foram.
+> Então a sequência voltou a ser a mesma do front: `npm run release:build` →
+> `npm run release:publish`. Sem `pack`, sem `-ComExe`, sem bump de versão na mão.
+>
+> Antes disto, o `duel-server` viajava **só dentro do `ClassicDuels.exe`**: uma
+> correção de 800 KB no `NpcBrain` custava 67,8 MB ao jogador e dependia de um
+> ritual manual que já foi esquecido em produção — a varredura de ATK/DEF (magia
+> de campo) saiu publicada no front e ausente no motor, o Umi seguia sem efeito na
+> tela de quem jogava, e os testes todos passavam aqui. Hoje o `pack.ps1` recusa
+> um `engine.zip` mais velho que os fontes em C#, que é a mesma checagem que ele
+> já fazia para o front.
+>
+> **O `.exe` só precisa ser republicado quando a CASCA muda** (`duel-server/host/`
+> — ~400 linhas que resolvem a instalação, aplicam o motor em estágio e o
+> carregam). Aí sim: `npm run pack` + bump da `InstallerVersion` +
+> `npm run release:publish -- -ComExe`. Quanto menos a casca fizer, mais raro isso
+> é — e é de propósito.
 
 > **Compile sempre com o servidor parado.** O `.exe` fica travado enquanto roda,
 > o `dotnet build` falha *e o teste seguinte roda o binário antigo* — parece que a
@@ -273,10 +309,37 @@ ignorado, mas o modo NPC do builder tem um checkbox "ignorar banlist" (dá
 mais liberdade pros decks de adversário). Persiste em `store/banlist.json`
 via a API genérica `/__store/`, sem rota nova.
 
-**Drop por vitória** (`web/js/drops.js`): cada NPC pode ter um **pool** de
-cartas e uma **quantidade** por vitória — pool de 20, quantidade 3, e cada
+**Drop por vitória** (`web/js/drops.js`): cada **deck** de NPC pode ter um
+**pool** de cartas e uma **quantidade** por vitória — pool de 20, quantidade 3, e cada
 vitória sorteia 3 dentro dos 20. Antes a vitória dava sempre a mesma carta de
 assinatura, o que fazia a décima vitória entregar a décima cópia dela.
+
+> **O pool é por DECK, não por adversário** (`decks[<nome do deck>]` dentro de
+> `conteudo/npc-drops`). É o que dá sentido a destrancar o deck difícil: se o
+> prêmio fosse o mesmo, escolher o caminho duro não teria motivo. O pool do
+> **NPC inteiro** continua existindo debaixo dele como **reserva** — vale para
+> todo deck que ainda não tem o seu, então quem montou um pool antes disto não
+> perde nada e um deck recém-criado já nasce dropando. A resolução (deck
+> primeiro, NPC depois) está em `dropsDoDeck` e é repetida no servidor
+> (`premiar_vitoria`, migration 0033); as duas precisam concordar.
+
+**Cada deck de um NPC pode destrancar OUTRO deck dele** (`web/js/decksnpc.js`).
+No `.ydk`, dois metadados novos: `#dificuldade` (rótulo **livre** — quem edita
+escreve "fácil", "iniciante", o que fizer sentido — e que **não** muda como o
+adversário joga: quem decide se ele lê a sua mão continua sendo o `level` do
+NPC) e `#libera <nome do outro deck>`. Um deck é porta de entrada quando
+ninguém aponta para ele; os demais abrem quando um dos que apontam cai. Pelo
+**nome**, nunca pelo índice — a mesma regra do deck ativo (0030) e da ordem da
+trilha (0032). No painel da Trilha, o nome do deck virou um seletor **▾** com a
+dificuldade de cada um e o cadeado de quem ainda não foi liberado. Qual deck
+foi enfrentado viaja em `duel.html?npc=<id>&deck=<nome>` e é gravado em
+`duelos.deck_npc` — sem isso o servidor não saberia de que pool sortear nem
+qual deck a vitória destranca.
+
+> Renomear um deck reaponta sozinho quem o liberava (`religarLibera`) e move o
+> pool de drop para a chave nova. Sem isso a cadeia apontaria para um deck
+> inexistente — e a regra é tolerante com isso de propósito, o que faria o deck
+> difícil ficar destrancado **para sempre**, em silêncio.
 
 O pool é **dividido em quatro gavetas por raridade** (UR/SR/R/N) e o sorteio
 tem dois passos: primeiro a raridade, pelos pesos de `DROP_ODDS` renormalizados
@@ -489,7 +552,25 @@ nenhuma lógica de camada.
 > alcançar. `buildMap()` já descarta `spot` em cima de sólido, mas não avisa.
 
 **`duel-server/`** — .NET 8 que hospeda o `ocgcore` (edo9300) via P/Invoke e o
-expõe como **RPC HTTP** em 8770: `POST /start {deck,npcDeck?,seed?,flags?,npc?}`
+expõe como **RPC HTTP** em 8770. São **dois projetos** desde 19/08/2026:
+`engine/duel-engine.csproj` compila `src/**` como **`DuelServer.Engine.dll`** (o
+motor: `InteractiveDuel`, `NpcBrain`, `WebServer`, `StaticServer`, o updater e as
+suítes) e `duel-server.csproj` compila só `host/**` — a **casca**, o executável
+que resolve a instalação, aplica o motor que ficou em estágio e o carrega **do
+disco, por bytes** (`Assembly.Load(byte[])` — `LoadFrom` travaria o arquivo e a
+atualização seguinte não conseguiria substituí-lo). Os fontes do motor **não
+mudaram de lugar**: continuam em `duel-server/src/`.
+
+> É essa separação que faz uma correção no `NpcBrain` chegar ao jogador como um
+> pacote de 0,2 MB (`engine.zip`) em vez de um executável de 66 MB. A casca chama
+> o motor por **reflexão** (`DuelServer.EngineEntry.Main`) e nunca usa um tipo
+> dele: uma referência estática faria o runtime carregar a cópia embutida antes
+> de a gente ter a chance de preferir a do disco. A cópia embutida existe e é a
+> rede de segurança — é ela que roda em desenvolvimento e quando o motor baixado
+> não sobe (`--motor-embutido` força na mão; `CLASSICDUELS_RAIZ` aponta uma
+> instalação de mentira, que é como se testa o caminho do jogador daqui).
+
+O contrato do RPC: `POST /start {deck,npcDeck?,seed?,flags?,npc?}`
 e `POST /respond {action,arg,args?}` → `{events:[…], question:{…}|null, ended}`.
 `InteractiveDuel.cs` é o coração: avança o motor até a *sua* decisão, resolve
 sozinho o que não é decisão (correntes, posição, oponente) e traduz o buffer
@@ -539,6 +620,35 @@ abre pra rede local, imprimindo o IP pro celular digitar nas Configurações do
 app. Ver `mobile/README.md`. É uma segunda casca por cima da mesma engine —
 `web/` continua existindo do jeito que sempre foi, sem nenhuma dependência
 nova.
+
+### Cópia local nunca vence a nuvem
+
+O `localStorage` é cópia de TRABALHO. Onde ele é cache, só substitui o valor
+local quando a leitura **alcançou** a fonte (`alcancou` em `pullFileEx`) — sem
+rede, quem joga fica com o último estado conhecido em vez de cair num padrão
+inventado. Isso vale para `npcs`, `npc-base-meta`, `npc-deck-ativo`, `banlist`,
+`boosters` e `cardlists`, e é por isso que eles nunca competem com o publicado.
+
+O **rascunho do Deck Estrutural** era a exceção, e custou caro: o boot fazia
+`if (!restaurarRascunho()) limpar()`, então a cópia local vencia a nuvem
+**sempre**. Um deck editado e publicado numa máquina (o comprador recebe na
+hora, pelo gatilho da 0025) abria VELHO ao reabrir o editor noutra, porque ali
+havia um rascunho pendurado — e ele só era apagado ao publicar **com sucesso
+naquela máquina**, então quem publicou de outro lugar nunca o limpava.
+
+Hoje o rascunho é **arquivado, não carregado**: ao abrir a tela ele vai para
+`store/bkp/estrutural-<slug>-<carimbo>.json` e sai do navegador. Nada se perde e
+nada compete com o publicado. Se o servidor estiver fora do ar ele **fica** no
+navegador para a próxima tentativa — jogá-lo fora ali seria destruir o backup
+por falta de servidor.
+
+> `bkp/` é a **única** subpasta que `/__store/` aceita, e a regra está nos DOIS
+> back-ends: `safeStorePath` (`tools/serve.mjs`) e `CaminhoStore`
+> (`duel-server/src/StaticServer.cs`). Divergir faz a gravação funcionar no
+> `npm run dev` e falhar no jogo instalado. O `startsWith`/`StartsWith` continua
+> sendo a trava contra `..` — o regex só decide o formato do nome.
+> `store/bkp/` está no `.gitignore` (é registro de uma máquina, não conteúdo) e
+> sobrevive à atualização, porque `store/` é intocável (`UpdateEngine.Intocaveis`).
 
 ### Persistência em três níveis
 
@@ -612,14 +722,29 @@ nenhuma conta nova herda esses dados automaticamente.
 
 ## Armadilhas conhecidas
 
-- **Publicar é `fire-and-forget` — e a recusa era invisível.** As telas gravam a
-  cada tecla e não podem esperar a rede, então `pushFile` não devolve nada. Só a
-  Banlist e o editor de drop registravam um ouvinte; nas outras, um 403 de quem
-  não é admin, uma sessão vencida ou a rede caída gravavam o disco, a tela dizia
-  "salvo" e a edição **não existia para mais ninguém** — o pior desfecho para
-  conteúdo compartilhado, porque quem editou continua vendo o certo. Hoje o
-  `projectstore.js` mostra o aviso sozinho, em qualquer página, e o
-  `npm run conteudo:check` responde depois a pergunta "está tudo publicado?".
+- **Publicar é `fire-and-forget`, e o que não sobe fica numa FILA.** As telas
+  gravam a cada tecla e não podem esperar a rede, então `pushFile` não devolve
+  nada. Um 403 de quem não é admin, uma sessão vencida ou a rede caída gravavam
+  o disco, a tela dizia "salvo" e a edição **não existia para mais ninguém** — o
+  pior desfecho para conteúdo compartilhado, porque quem editou continua vendo o
+  certo. Hoje o `projectstore.js` avisa sozinho em qualquer página **e guarda a
+  edição** (`pendencias.js`, no `localStorage`), reenviando no boot de qualquer
+  página, quando a conexão volta e a cada 20s enquanto sobrar pendência. O aviso
+  some sozinho quando a fila esvazia, e `npm run conteudo:check` continua
+  respondendo depois a pergunta "está tudo publicado?".
+- **A trava `leu*Disco` não descarta mais a edição.** Seis chaves (`banlist`,
+  `boosters`, `cardlists`, `npcs`, `npc-base-meta`, `npc-deck-ativo`) só
+  publicam depois de terem LIDO a fonte — sem isso, uma máquina offline
+  sobrescreveria o banco com um estado que ela mesma inventou por padrão. A
+  trava está certa; errado era o que ela fazia com a edição do admin:
+  **descartava**, e em quatro das seis sem nem um `console.warn`. Hoje é
+  `pushFileGuardado(chave, dados, fonteLida)`, que enfileira em vez de jogar
+  fora.
+- **Deck de NPC salvo ≠ deck de NPC publicado.** `saveProjectDeck` devolve
+  `publicado`/`erroRemoto`, e `saveNpcDeckAt` os descartava: com a sessão
+  vencida o `.ydk` gravava no disco, a tela dizia "salvo em decks/…" e o
+  adversário não chegava em ninguém — foi assim que o deck do Pegasus precisou
+  ser inserido no banco na mão. Hoje o builder diz as duas coisas, separadas.
 - **O que é CONTEÚDO do jogo não pode morar no `localStorage`.** A lista de
   decks de cada NPC sempre veio do banco (`decks_npc`, leitura aberta), mas
   **qual deles estava ativo** era preferência do navegador — e o sintoma
@@ -671,8 +796,10 @@ nenhuma conta nova herda esses dados automaticamente.
 - **`.gitignore`:** não adicione `*.csproj`/`*.sln` — `duel-server` e `launcher`
   são projetos .NET de verdade e precisam ser versionados.
 - Pegadinhas do formato dos dados (`level` empacota 3 valores, `def` guarda link
-  markers em Link, `atk == -2` significa "?", `alias != 0` é arte alternativa sem
-  script) estão em `ygo-data/README.md` — leia antes de tocar em decodificação.
+  markers em Link, `atk == -2` significa "?", `alias != 0` quer dizer que o
+  **nome** é tratado como o de outra carta — e isso é arte alternativa só quando
+  o nome BATE; com nome diferente é carta distinta, com efeito e Lua próprios,
+  então use `isAlternateArt`/`alt` e nunca `alias != 0` na mão) estão em `ygo-data/README.md` — leia antes de tocar em decodificação.
 - O pool do builder renderiza no máximo `MAX_RENDER` (240) miniaturas de 13.728.
 
 ## Onde ler antes de mexer

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -51,6 +51,14 @@ namespace DuelServer.Update
 
         public long BytesTotais =>
             ABaixar.Sum(a => a.Bytes) + PayloadsPendentes.Sum(p => p.Fonte.Size);
+
+        /// <summary>
+        /// Algum pacote pendente e' de motor (cai em `.staged/`)? Quem pergunta e'
+        /// o <see cref="UpdateService"/>: depois de instalar, o jogo tem de
+        /// REABRIR para a casca aplicar a troca — senao o jogador continuaria
+        /// jogando o motor velho achando que atualizou.
+        /// </summary>
+        public bool TrocaMotor => PayloadsPendentes.Any(p => p.Fonte != null && p.Fonte.EmEstagio);
 
         public bool NadaAFazer =>
             !ABaixar.Any() && !PayloadsPendentes.Any() && Orfaos.Count == 0;

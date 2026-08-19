@@ -30,7 +30,7 @@
  * Persistência: mesmo padrão de `boosters.js`/`wallet.js` — localStorage é a
  * cópia de trabalho síncrona, `store/banlist.json` é a verdade versionada.
  */
-import { pushFile, pullFileEx } from './projectstore.js';
+import { pushFileGuardado, pullFileEx } from './projectstore.js';
 
 const KEY = 'ygo:banlist';
 const AXES = ['points', 'limit', 'group'];
@@ -103,8 +103,9 @@ function write(banlist) {
   const n = normalize(banlist);
   try {
     localStorage.setItem(KEY, JSON.stringify(n));
-    if (leuODisco) pushFile('banlist', n);   // store/banlist.json (vai no git)
-    else console.warn('[banlist] gravação não espelhada: o disco ainda não foi lido');
+    // Sem ter lido a fonte a edicao NAO e' descartada: vai para a fila e sobe
+    // sozinha depois (`pushFileGuardado`, em projectstore.js).
+    pushFileGuardado('banlist', n, leuODisco);   // store/banlist.json (vai no git)
     return true;
   } catch (e) {
     console.error('[banlist] falha ao gravar', e);

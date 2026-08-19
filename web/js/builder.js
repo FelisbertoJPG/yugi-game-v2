@@ -16,7 +16,8 @@ import {
   renderFramedCard, RACES, ATTRIBUTES, MONSTER_KINDS, SUBTYPES, isExtraKind,
 } from '/web/js/customcards.js';
 import {
-  getNpc, getNpcState, getNpcDeckAt, saveNpcDeckAt, loadNpcDecks, hydrateCustomNpcs,
+  getNpc, getNpcState, getNpcDeckAt, getNpcDecks, saveNpcDeckAt, loadNpcDecks,
+  hydrateCustomNpcs,
 } from '/web/js/npcs.js';
 import { inLista1 } from '/web/js/lista1.js';
 import { hydrateCardLists } from '/web/js/cardlists.js';
@@ -24,7 +25,7 @@ import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters, reprintsOf } from '/web/js/boosters.js';
 import {
-  carregarDrops, salvarDrops, chancesDe, totalDoPool, poolVazio,
+  carregarDrops, salvarDrops, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
   RARIDADES, MAX_DROPS,
 } from '/web/js/drops.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
@@ -70,12 +71,17 @@ let npcMode = null;
 let npcDeckIndex = null;
 let npcSignature = null;
 // ---------------------------------------------------------------- pool de drop
-// As cartas que ESTE adversário pode largar ao ser derrotado, por raridade, e
-// quantas ele larga por vitória. Não é parte do deck: mora em
-// `conteudo/npc-drops`, por NPC (não por deck), e quem sorteia é o servidor.
+// As cartas que ESTE DECK do adversário pode largar ao ser derrotado, por
+// raridade, e quantas ele larga por vitória. Não é parte do deck: mora em
+// `conteudo/npc-drops`, hoje por DECK (`decks[<nome>]`, com o pool do NPC como
+// reserva), e quem sorteia é o servidor.
 let dropsCfg = {};              // a configuração de TODOS os NPCs (é uma chave só)
-let dropPool = poolVazio();     // a do NPC aberto aqui
+let dropPool = poolVazio();     // a do DECK aberto aqui
 let dropQtd = 0;
+// Sob qual nome o pool foi CARREGADO. Renomear o deck e salvar precisa mover o
+// pool de chave; sem isto ele ficaria órfão na chave antiga e o deck renomeado
+// nasceria sem drop.
+let nomeDoDropAntigo = null;
 // Qual QUADRO de raridade está aberto. O quadro aberto é o alvo do clique nas
 // cartas do pool da direita — é o que dá um caminho que não depende de arrastar.
 let dropAberto = null;
@@ -615,6 +621,27 @@ function tryPickCover(id) {
   return true;
 }
 
+/**
+ * Preenche o select "libera" com os OUTROS decks deste adversário.
+ *
+ * O próprio deck fica de fora: um deck que se libera seria um nó que só abre
+ * depois de já estar aberto. Quando o valor gravado aponta para um deck que não
+ * existe mais (apagado, ou renomeado noutra máquina), ele entra na lista como
+ * uma opção "(ausente)" em vez de sumir calado — sumindo, salvar de novo
+ * apagaria a cadeia sem ninguém pedir.
+ */
+function preencherLibera(npcId, nomeDoProprio, atual) {
+  const sel = $('npc-libera');
+  const nomes = getNpcDecks(npcId)
+    .map((d) => d.name)
+    .filter((n) => n && n !== nomeDoProprio);
+
+  sel.replaceChildren(new Option('— nenhum —', ''));
+  for (const n of nomes) sel.append(new Option(n, n));
+  if (atual && !nomes.includes(atual)) sel.append(new Option(`${atual} (ausente)`, atual));
+  sel.value = atual || '';
+}
+
 async function saveNpcDeckFromUI() {
   const st = deckStatus({ ignoreBanlist: $('npc-ignore-banlist').checked });
   if (!st.ok) return void toast(`não é possível salvar: ${st.message}`);
@@ -630,19 +657,40 @@ async function saveNpcDeckFromUI() {
 
   const r = await saveNpcDeckAt(npcMode.id, npcDeckIndex, {
     name, deck, signatureId: sig, coverId: npcCover || sig, rewardDp,
+    dificuldade: $('npc-dificuldade').value,
+    libera: $('npc-libera').value,
   });
   if (r.index < 0) return void toast(r.error ?? 'falha ao salvar');
+  // Salvou no disco mas NAO publicou: o adversario continua so' nesta maquina.
+  // O aviso e' separado do "salvo em decks/..." de proposito — sao dois fatos
+  // diferentes, e juntar os dois foi o que escondeu o problema ate' agora.
+  if (r.publicado === false) {
+    toast(`deck NAO publicado: ${r.erroRemoto || 'sem sessao de admin'} — vale so nesta maquina`);
+  }
   npcDeckIndex = r.index;
   npcSignature = sig;
   markDirty(false);
 
-  // O pool de drop vai junto, mas para OUTRO lugar: `conteudo/npc-drops`, por
-  // NPC. O resultado e' dito na tela — uma configuracao que nao chegou ao
-  // banco e' exatamente uma que 'nao funciona' sem explicar por que.
+  // O pool de drop vai junto, mas para OUTRO lugar: `conteudo/npc-drops`. Ele
+  // e' por DECK — e' o que faz destrancar o deck dificil valer a pena, ja' que
+  // o premio de cada um e' diferente. O pool do NPC continua existindo debaixo
+  // dele, como reserva de quem ainda nao tem pool proprio.
+  //
+  // A chave e' o nome do deck RECEM-SALVO (`name`), nao o que estava carregado:
+  // renomear e salvar na mesma acao gravaria o pool na chave velha, e o deck
+  // novo nasceria sem drop nenhum.
   dropQtd = Math.max(0, Math.min(MAX_DROPS, Number($('npc-drop-qtd').value) || 0));
   const temCarta = totalDoPool(dropPool) > 0;
-  if (temCarta && dropQtd > 0) dropsCfg[npcMode.id] = { quantidade: dropQtd, pool: dropPool };
+  const doNpc = { ...(dropsCfg[npcMode.id] ?? {}) };
+  const porDeck = { ...(doNpc.decks ?? {}) };
+  if (nomeDoDropAntigo && nomeDoDropAntigo !== name) delete porDeck[nomeDoDropAntigo];
+  if (temCarta && dropQtd > 0) porDeck[name] = { quantidade: dropQtd, pool: dropPool };
+  else delete porDeck[name];
+
+  if (Object.keys(porDeck).length) doNpc.decks = porDeck; else delete doNpc.decks;
+  if (Object.keys(doNpc).length) dropsCfg[npcMode.id] = doNpc;
   else delete dropsCfg[npcMode.id];
+  nomeDoDropAntigo = name;
   const pub = await salvarDrops(dropsCfg);
 
   // O caso que passava em SILÊNCIO: pool montado, quantidade em zero. A
@@ -1484,11 +1532,18 @@ if (npc) {
   // prêmio em DP do deck (deixa em branco = usa o padrão ao salvar)
   $('npc-reward').value = slot && Number.isFinite(Number(slot.rewardDp)) ? slot.rewardDp : '';
 
-  // O POOL DE DROP e' do NPC, nao do deck: ele vive em `conteudo/npc-drops` e
-  // vale para qualquer deck que este adversario use. Falha de rede nao derruba
-  // o builder — so' deixa o pool vazio, e o aviso aparece ao tentar salvar.
+  // A cadeia e' por NOME, entao a lista de "libera" so' pode ser montada com os
+  // decks que ja' existem — e nunca com o proprio, que seria um no' que so' abre
+  // depois de ja' estar aberto.
+  $('npc-dificuldade').value = slot?.dificuldade ?? '';
+  preencherLibera(npcId, slot?.name ?? null, slot?.libera ?? '');
+
+  // O POOL DE DROP e' do DECK (`conteudo/npc-drops`, em `decks[<nome>]`), com o
+  // pool do NPC como reserva para o deck que ainda nao tem o seu. Falha de rede
+  // nao derruba o builder — so' deixa o pool vazio, e o aviso aparece ao salvar.
   try { dropsCfg = await carregarDrops(); } catch { dropsCfg = {}; }
-  const meuDrop = dropsCfg[npcId];
+  nomeDoDropAntigo = slot?.name ?? null;
+  const meuDrop = dropsDoDeck(dropsCfg, npcId, nomeDoDropAntigo);
   dropPool = meuDrop ? meuDrop.pool : poolVazio();
   dropQtd = meuDrop ? meuDrop.quantidade : 0;
   $('npc-drop-qtd').value = dropQtd ? String(dropQtd) : '';

@@ -311,7 +311,14 @@ async function handleBoards(action, req, res) {
 
 /** Só um nome simples de arquivo .json dentro de store/ (sem subpastas). */
 function safeStorePath(name) {
-  if (typeof name !== 'string' || !/^[a-zA-Z0-9_-]+\.json$/.test(name)) return null;
+  // `bkp/` e' a UNICA subpasta aceita, e existe por uma regra do projeto: copia
+  // local nunca e' lida de volta — ela e' ARQUIVADA. O rascunho do Deck
+  // Estrutural vencia a nuvem no boot, entao editar numa maquina e abrir noutra
+  // trazia a versao velha por cima da publicada.
+  //
+  // O `startsWith` abaixo continua sendo a trava de verdade contra `..`; o
+  // regex so' decide o formato do nome.
+  if (typeof name !== 'string' || !/^(bkp\/)?[a-zA-Z0-9_-]+\.json$/.test(name)) return null;
   const full = join(STORE, name);
   if (!full.startsWith(STORE + sep)) return null;
   return full;

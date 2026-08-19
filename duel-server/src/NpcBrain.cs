@@ -500,12 +500,40 @@ namespace DuelServer
             [83225447] = new(700, 0, 0),               // Stim-Pack — perde 200 por Standby sua
             [98495314] = new(500, 0, 0),               // Sword of Deep-Seated
 
-            // Reforço nenhum (ver o comentário acima).
+            // Harpias (deck da Mai). Cyber Shield exige "Harpie Lady" pelo NOME,
+            // e nome não se lê do `cards.cdb` — a raça abaixo é só o filtro
+            // GROSSO que evita oferecer a carta a um monstro sem chance nenhuma.
+            // Quem recusa de verdade é o Lua: o motor só põe o equipamento em
+            // `activatable` quando existe alvo legal, e o select só oferece
+            // esses. Errar aqui para MAIS custa uma passada do cérebro; errar
+            // para menos deixaria a carta morta na mão.
+            [63224564] = new(500, R_WINGEDBEAST, 0),   // Cyber Shield (+500 numa "Harpie Lady")
+
+            // Reforço nenhum: existem para atrapalhar o monstro do OUTRO, e
+            // Premature Burial é um revive disfarçado de equipamento.
             [20436034] = new(0, 0, 0),                 // Ring of Magnetism
             [50152549] = new(0, 0, 0),                 // Paralyzing Potion
             [24668830] = new(0, 0, 0),                 // Germ Infection
             [70828912] = new(0, 0, 0),                 // Premature Burial
         };
+
+        /// <summary>
+        /// MAGIA DE CAMPO que reforça os MEUS: a raça que ganha e quanto.
+        ///
+        /// Mesma razão de a tabela de equipamentos existir — o bônus mora no Lua
+        /// e não há de onde lê-lo. Aqui a tabela é mais necessária ainda: uma
+        /// magia de campo é global, então ativar a errada reforça o adversário
+        /// junto. Sem saber quem ganha, o certo é NÃO ativar.
+        ///
+        /// `Raca` é uma máscara: Mountain pega Dragão, Alado e Trovão de uma vez.
+        /// </summary>
+        static readonly Dictionary<uint, Equipamento> CAMPOS = new()
+        {
+            // Mountain — +200 ATK/DEF para Dragão/Alado/Trovão. É o campo do deck
+            // de Harpias da Mai: pega as Harpie Lady e o Pet Dragon juntos.
+            [50913601] = new(200, R_DRAGON | R_WINGEDBEAST | R_THUNDER, 0),
+        };
+
 
         readonly DatabaseManager _cards;
         readonly Func<int, IReadOnlyList<uint>> _fieldOf;   // monstros face-up em campo
@@ -1000,6 +1028,60 @@ namespace DuelServer
                 }
                 _log("guarda Armory Call: nenhum monstro meu com a face para cima " +
                      "para receber o equipamento");
+            }
+
+            // 5.355 EQUIPAMENTO DA MÃO — a regra GENÉRICA, por tabela.
+            //
+            //   Até aqui só saía equipamento com regra própria por id (Cocoon,
+            //   Insect Armor) ou buscado do deck (Armory Call). O resultado era
+            //   um NPC que carregava Gust Fan, Cyber Shield ou Sword of
+            //   Dark Destruction na mão a partida inteira sem nunca equipar —
+            //   e nenhum teste acusava, porque cada deck novo só provava as
+            //   cartas com regra própria.
+            //
+            //   Duas travas, e as duas importam:
+            //
+            //     • **só com monstro meu com a face para cima**. Sem alvo o
+            //       motor nem oferece, mas o `MonstrosFaceUp` mantém a decisão
+            //       legível no log em vez de depender do silêncio do core;
+            //     • **só equipamento que a tabela conhece com bônus > 0**. O
+            //       silêncio da tabela significa "não sei o que faz", e Ring of
+            //       Magnetism / Paralyzing Potion existem para atrapalhar o
+            //       monstro do OUTRO — gastá-las no meu seria pior que não jogar.
+            //
+            //   Vem DEPOIS do Armory Call (que busca do deck e é 1x por turno) e
+            //   ANTES das buscas de corpo: reforçar quem já está em campo é o
+            //   ganho imediato, e a mão continua lá no turno seguinte.
+            {
+                var equip = MelhorEquipDaMao(q, me);
+                if (equip.index >= 0)
+                    return new Play("activate", equip.index,
+                        $"equipa {equip.code} (+{equip.ganho} ATK) no melhor alvo em campo");
+            }
+
+            // 5.356 MAGIA DE CAMPO que reforça os MEUS (tabela `CAMPOS`).
+            //
+            //   Magia de campo é GLOBAL: ela vale para os dois lados. Por isso a
+            //   regra não é "tenho uma, ativo" — é "tenho monstro em campo de
+            //   uma raça que ELA reforça". Sem isso o NPC ativaria a Mountain
+            //   para dar +200 ao Dragão do adversário.
+            //
+            //   Não confere se já existe campo ativo: se for a MESMA carta o
+            //   motor nem oferece; se for outra, trocar é justamente o que se
+            //   quer (a que estava ali era do outro, ou pior que esta).
+            {
+                var campo = AtivavelSe(q, c => CAMPOS.ContainsKey(c) && CAMPOS[c].Bonus > 0);
+                if (campo.code != 0)
+                {
+                    var cfg = CAMPOS[campo.code];
+                    int beneficiados = MonstrosFaceUp(me)
+                        .Count(c => (_cards.Stats(c).Race & cfg.Raca) != 0);
+                    if (beneficiados > 0)
+                        return new Play("activate", campo.index,
+                            $"magia de campo {campo.code}: +{cfg.Bonus} em {beneficiados} monstro(s) meu(s)");
+                    _log($"guarda a magia de campo {campo.code}: nenhum monstro meu " +
+                         "da raca que ela reforca — ativaria so' para o outro lado");
+                }
             }
 
             // 5.36 SUMMONER'S ART — busca 1 Normal Nv5+ do deck.
@@ -1670,6 +1752,43 @@ namespace DuelServer
         /// o silêncio da tabela significa "não sei o que faz", e levar uma carta
         /// que não reforça nada é pior que levar a segunda melhor.
         /// </summary>
+        /// <summary>
+        /// O melhor equipamento ATIVÁVEL agora (da mão), e quanto ele dá.
+        ///
+        /// Mesma tabela e mesmo critério do <see cref="MelhorEquipEntre"/> — que
+        /// olha o que o Armory Call trouxe do deck —, só que sobre
+        /// `q.activatable`. São duas listas de tipos diferentes (`Act` × `Sel`),
+        /// e é só por isso que existem duas funções.
+        ///
+        /// `index` −1 quando não há nada que valha a pena: sem monstro meu com a
+        /// face para cima, ou só equipamento que a tabela não conhece.
+        /// </summary>
+        (int index, uint code, int ganho, uint alvo) MelhorEquipDaMao(
+            InteractiveDuel.Question q, int me)
+        {
+            var meus = MonstrosFaceUp(me).Select(c => (code: c, st: _cards.Stats(c))).ToList();
+            (int index, uint code, int ganho, uint alvo) melhor = (-1, 0, 0, 0);
+            if (meus.Count == 0) return melhor;
+
+            foreach (var a in q.activatable)
+            {
+                if (!EQUIPAMENTOS.TryGetValue(a.code, out var e) || e.Bonus <= 0) continue;
+
+                foreach (var m in meus)
+                {
+                    bool serve = (e.Raca == 0 || (m.st.Race & e.Raca) != 0)
+                              && (e.Atributo == 0 || (m.st.Attribute & e.Atributo) != 0);
+                    if (!serve) continue;
+                    // Mesmo desempate do outro: com bônus igual, reforça o MAIOR
+                    // ATK — é ele que ataca.
+                    if (e.Bonus > melhor.ganho ||
+                        (e.Bonus == melhor.ganho && m.st.AtkValue > _cards.Stats(melhor.alvo).AtkValue))
+                        melhor = (a.index, a.code, e.Bonus, m.code);
+                }
+            }
+            return melhor;
+        }
+
         (int index, uint code, int ganho, uint alvo) MelhorEquipEntre(
             IReadOnlyList<InteractiveDuel.Sel> opcoes, int me)
         {

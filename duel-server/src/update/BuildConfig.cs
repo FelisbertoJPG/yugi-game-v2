@@ -140,7 +140,20 @@ namespace DuelServer.Update
         // repetir a pergunta — a tela para e nao ha' erro nenhum. As escolhas
         // dirigidas do DecideSelect devolvem UMA carta e passaram a exigir
         // pedido de uma; e o host completa resposta curta em vez de congelar.
-        public const string InstallerVersion = "0.12.2";
+        // 0.15.0 (19/08/2026): O EXECUTAVEL DEIXOU DE SER O VEICULO DO MOTOR.
+        // Ate' aqui todo o C# viajava dentro dele, entao uma correcao de 800 KB
+        // no NpcBrain custava 67,8 MB ao jogador — e so' chegava se alguem
+        // lembrasse do `pack` + `-ComExe` + bump desta constante. Agora o exe e'
+        // uma CASCA (`duel-server/host/`) que carrega `DuelServer.Engine.dll` do
+        // disco, e o motor e' o pacote `engine` (~200 KB) + `native` (~1,9 MB)
+        // do manifesto, como game/cards sempre foram.
+        //
+        // ESTE E' O ULTIMO `-ComExe` OBRIGATORIO. Quem esta' com a 0.14.0 ou
+        // anterior tem o motor preso dentro do exe: sem trocar o exe uma vez, os
+        // pacotes `engine`/`native` chegam ao disco dele e nada os carrega —
+        // ficam parados em `.staged/` sem ninguem para aplicar. Daqui em diante,
+        // so' se `host/` mudar.
+        public const string InstallerVersion = "0.15.0";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 
@@ -170,17 +183,24 @@ namespace DuelServer.Update
                 if (_tokenLido) return _token;
                 _tokenLido = true;
 
-                try
+                // A CASCA (`duel-server.exe`) e' quem carrega o token — este
+                // motor e' um .dll baixado, e embutir o segredo nele seria
+                // publica-lo no pacote. Por isso o assembly de ENTRADA vem
+                // primeiro; o proprio assembly continua valendo para quem rodar
+                // o motor fora da casca.
+                foreach (var asm in new[] { Assembly.GetEntryAssembly(), typeof(BuildConfig).Assembly })
                 {
-                    var asm = typeof(BuildConfig).Assembly;
-                    using var s = asm.GetManifestResourceStream(RecursoToken);
-                    if (s != null)
+                    if (asm == null) continue;
+                    try
                     {
+                        using var s = asm.GetManifestResourceStream(RecursoToken);
+                        if (s == null) continue;
                         using var r = new StreamReader(s);
                         _token = r.ReadToEnd().Trim();
+                        if (!string.IsNullOrWhiteSpace(_token)) break;
                     }
+                    catch { }
                 }
-                catch { }
 
                 if (string.IsNullOrEmpty(_token))
                     _token = Environment.GetEnvironmentVariable("DUELACADEMY_TOKEN");

@@ -43,6 +43,8 @@ namespace ClassicDuels.Casca
                 PrimeiraFalhaEToleradaSegundaReverte(Sub(bancada, "3-sentinela"));
                 RevertePorCimaSemAnterior(Sub(bancada, "4-sem-anterior"));
                 QuarentenaNaoAcumula(Sub(bancada, "5-poda"));
+                TrocaQueFalhaNoMeioNaoDeixaMotorPelaMetade(Sub(bancada, "7-meia-troca"));
+                ReverterCompletaOQueOBackupNaoTinha(Sub(bancada, "8-completar"));
                 ConstantesBatemComOMotor();
             }
             finally
@@ -185,6 +187,70 @@ namespace ClassicDuels.Casca
         }
 
         /// <summary>
+        /// A troca morreu no meio (disco cheio, antivirus segurando o arquivo).
+        ///
+        /// Meia troca e' o pior desfecho possivel: um motor novo com uma nativa
+        /// velha nao e' nem uma versao nem a outra. Aqui o arquivo de destino
+        /// fica ABERTO com FileShare.None, que e' como o Windows faz um
+        /// `File.Copy` falhar de verdade, e o que se cobra e' que o `engine/`
+        /// volte inteiro ao que era — sem quarentena, porque o motor que esta'
+        /// no disco e' o ANTERIOR, que funcionava.
+        /// </summary>
+        static void TrocaQueFalhaNoMeioNaoDeixaMotorPelaMetade(string raiz)
+        {
+            Console.WriteLine("[7] troca que falha no meio nao deixa o motor pela metade");
+
+            Escrever(Path.Combine(raiz, "engine", Estagio.DLL), "MOTOR VELHO");
+            Escrever(Path.Combine(raiz, "engine", "ocgcore.dll"), "CORE VELHO");
+            Escrever(Path.Combine(raiz, ".staged", "engine", Estagio.DLL), "MOTOR NOVO");
+            Escrever(Path.Combine(raiz, ".staged", "engine", "ocgcore.dll"), "CORE NOVO");
+
+            // A ocgcore vem DEPOIS do .dll na ordem alfabetica, entao quando ela
+            // falha o motor novo ja' foi escrito — que e' exatamente o estado
+            // pela metade que este caso existe para desfazer.
+            string travado = Path.Combine(raiz, "engine", "ocgcore.dll");
+            using (var _ = new FileStream(travado, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                int n = Estagio.AplicarPendentes(raiz);
+                Checa(n == 0, "a troca nao conta nenhum arquivo trocado", "contou " + n);
+            }
+
+            Checa(Ler(Path.Combine(raiz, "engine", Estagio.DLL)) == "MOTOR VELHO",
+                  "o motor voltou a ser o anterior (a meia troca foi desfeita)");
+            Checa(Ler(Path.Combine(raiz, "engine", "ocgcore.dll")) == "CORE VELHO",
+                  "a nativa continua a anterior");
+            Checa(Directory.Exists(Path.Combine(raiz, ".staged")),
+                  "o estagio FICA — a atualizacao continua pendente para o proximo boot");
+            Checa(Directory.GetDirectories(raiz, "engine.ruim-*").Length == 0,
+                  "e o motor bom nao foi para a quarentena por causa de um erro de disco");
+            Console.WriteLine();
+        }
+
+        /// <summary>
+        /// O `.staged-bak/` guarda so' o que a ULTIMA troca substituiu. Um pacote
+        /// `engine` sozinho nao toca nas nativas — entao restaurar apenas o
+        /// backup devolveria um `engine/` sem a `ocgcore.dll`, e o jogo abriria
+        /// so' por sorte (a sondagem padrao ainda acha a que o executavel
+        /// auto-extrai). O que falta vem da propria quarentena.
+        /// </summary>
+        static void ReverterCompletaOQueOBackupNaoTinha(string raiz)
+        {
+            Console.WriteLine("[8] reverter completa o que o backup nao tinha");
+
+            Escrever(Path.Combine(raiz, "engine", Estagio.DLL), "MOTOR NOVO QUEBRADO");
+            Escrever(Path.Combine(raiz, "engine", "ocgcore.dll"), "CORE (nunca foi trocado)");
+            Escrever(Path.Combine(raiz, ".staged-bak", "engine", Estagio.DLL), "MOTOR ANTERIOR BOM");
+
+            Estagio.Reverter(raiz, "teste");
+
+            Checa(Ler(Path.Combine(raiz, "engine", Estagio.DLL)) == "MOTOR ANTERIOR BOM",
+                  "o motor anterior voltou do backup");
+            Checa(Ler(Path.Combine(raiz, "engine", "ocgcore.dll")) == "CORE (nunca foi trocado)",
+                  "a nativa, que nao estava no backup, veio da quarentena");
+            Console.WriteLine();
+        }
+
+        /// <summary>
         /// A casca duplica as constantes de caminho do `DuelServer.Payload` —
         /// ela precisa saber onde o jogo mora ANTES de poder olhar dentro do
         /// motor. Duplicata sem guarda envelhece: se as duas discordarem, a casca
@@ -192,7 +258,7 @@ namespace ClassicDuels.Casca
         /// </summary>
         static void ConstantesBatemComOMotor()
         {
-            Console.WriteLine("[7] a casca e o motor concordam sobre onde o jogo mora");
+            Console.WriteLine("[9] a casca e o motor concordam sobre onde o jogo mora");
             try
             {
                 var asm = Assembly.Load(new AssemblyName(Motor.NOME));

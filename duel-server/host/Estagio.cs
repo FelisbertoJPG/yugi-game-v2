@@ -94,9 +94,14 @@ namespace ClassicDuels.Casca
                 {
                     // Meia troca e' pior que nenhuma: desfaz o que ja' foi feito e
                     // deixa o `.staged/` no lugar para tentar no proximo boot.
+                    //
+                    // NAO e' caso de quarentena: o motor que esta' no disco e' o
+                    // ANTERIOR, que funcionava. Poe-lo de castigo por um erro de
+                    // disco (espaco, antivirus segurando o arquivo) seria jogar
+                    // fora o unico motor bom que existe ali.
                     CascaLog.Err("nao consegui trocar " + rel + ": " + e.Message);
-                    Reverter(raiz, "a troca do motor falhou no meio");
-                    return trocados;
+                    DesfazerMerge(raiz);
+                    return 0;
                 }
             }
 
@@ -176,11 +181,12 @@ namespace ClassicDuels.Casca
             string backup = Path.Combine(raiz, BACKUP, MOTOR);
             LimparTentativa(raiz);
 
+            string castigo = null;
             try
             {
                 if (Directory.Exists(motor))
                 {
-                    string castigo = Path.Combine(raiz, MOTOR + ".ruim-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+                    castigo = Path.Combine(raiz, MOTOR + ".ruim-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
                     if (Directory.Exists(castigo)) Apagar(castigo);
                     Directory.Move(motor, castigo);
                     CascaLog.Err(motivo + " — motor movido para " + Path.GetFileName(castigo));
@@ -190,6 +196,13 @@ namespace ClassicDuels.Casca
                 if (Directory.Exists(backup))
                 {
                     Copiar(backup, motor);
+
+                    // O `.staged-bak/` guarda so' o que a ultima troca SUBSTITUIU,
+                    // e nao o motor inteiro: um pacote `engine` sozinho nao toca
+                    // nas nativas, entao restaurar so' o backup deixaria o
+                    // `engine/` sem a ocgcore. O que faltar vem da propria
+                    // quarentena, que e' o estado completo de um segundo atras.
+                    if (castigo != null) CompletarCom(Path.Combine(castigo, ""), motor);
                     CascaLog.Info("motor anterior restaurado");
                 }
                 else
@@ -203,6 +216,23 @@ namespace ClassicDuels.Casca
                 CascaLog.Err("nao consegui reverter o motor: " + e.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Desfaz uma troca que morreu no meio: devolve por cima do `engine/` o
+        /// que tinha sido guardado em `.staged-bak/`. O `.staged/` FICA — a
+        /// atualizacao ainda esta' pendente e o proximo boot tenta de novo.
+        /// </summary>
+        static void DesfazerMerge(string raiz)
+        {
+            string backup = Path.Combine(raiz, BACKUP, MOTOR);
+            if (!Directory.Exists(backup)) return;
+            try
+            {
+                Copiar(backup, Path.Combine(raiz, MOTOR));
+                CascaLog.Info("a troca foi desfeita — o motor anterior continua no lugar");
+            }
+            catch (Exception e) { CascaLog.Err("nao consegui desfazer a troca: " + e.Message); }
         }
 
         /// <summary>Guarda so' a quarentena mais recente: sao ~5 MB por copia.</summary>
@@ -232,7 +262,13 @@ namespace ClassicDuels.Casca
         /// </summary>
         public static bool GarantirMotor(string raiz)
         {
-            if (File.Exists(CaminhoDoMotor(raiz))) return true;
+            // A conta e' o motor E as nativas: um `engine/` com o .dll e sem a
+            // ocgcore roda so' por sorte (a sondagem padrao acha a que o
+            // executavel auto-extrai), e o dia em que ela nao achar o jogo nao
+            // abre sem dizer por que.
+            bool completo = File.Exists(CaminhoDoMotor(raiz))
+                            && File.Exists(Path.Combine(raiz, MOTOR, "ocgcore.dll"));
+            if (completo) return true;
             if (!Instalacao.TemPayload) return false;
 
             CascaLog.Info("primeira execucao — instalando o motor");
@@ -329,6 +365,25 @@ namespace ClassicDuels.Casca
         static void Apagar(string dir)
         {
             try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { }
+        }
+
+        /// <summary>Copia de `de` para `para` SO' o que ainda nao existe la'.</summary>
+        static void CompletarCom(string de, string para)
+        {
+            if (!Directory.Exists(de)) return;
+            foreach (var arq in Directory.GetFiles(de, "*", SearchOption.AllDirectories))
+            {
+                string rel = Rel(de, arq);
+                if (rel == null) continue;
+                string destino = Path.Combine(para, rel.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(destino)) continue;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(destino));
+                    File.Copy(arq, destino);
+                }
+                catch (Exception e) { CascaLog.Warn("nao consegui repor " + rel + ": " + e.Message); }
+            }
         }
 
         static void Copiar(string de, string para)

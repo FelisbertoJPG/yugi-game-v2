@@ -6,6 +6,8 @@
 <title>Loja — Classic Duels</title>
 <link rel="icon" href="/web/img/icone.png">
 <link rel="stylesheet" href="/web/css/ui.css">
+<!-- As gavetas por raridade — as MESMAS da lista de drops da Trilha. -->
+<link rel="stylesheet" href="/web/css/gavetas.css">
 <style>
   body { display: flex; flex-direction: column; overflow: hidden; }
   .dp {
@@ -32,6 +34,9 @@
   .pack .meta { font-size: 10px; color: var(--dim); }
   .pack .buy { margin-top: 4px; }
   .pack .buy:disabled { opacity: .5; }
+  /* "ver as cartas" nunca desliga: saber o que vem dentro não custa DP, e é
+     justamente quem NÃO tem saldo que precisa decidir onde gastar o próximo. */
+  .pack .ver { font-size: 11px; padding: 4px 8px; }
   .empty { color: var(--dim); font-style: italic; padding: 30px 4px; }
 
   /* revelação do pacote aberto */
@@ -73,6 +78,8 @@
   Cada pacote custa <b>100 DP</b> e revela <b>5 cartas</b> aleatórias
   (raridade pesa: N mais comum, UR rara). As cartas vão para a sua Coleção e
   ficam disponíveis no Deck Builder. Ganhe DP vencendo Adversários.
+  Use <b>ver as cartas</b> em qualquer conteúdo para conferir, por raridade, o
+  que vem dentro e o que você já tem.
 </div>
 
 <div class="shop">
@@ -89,6 +96,17 @@
   <div class="empty" id="empty" hidden>
     Nenhum booster na Loja ainda. Abra o <b>Booster Builder</b> (Área de Teste),
     monte um booster e clique em <b>“inserir na Loja”</b>.
+  </div>
+</div>
+
+<!-- A lista de cartas de um conteúdo (booster ou Deck Estrutural). Mesma
+     caixa da lista de drops da Trilha — ver `web/js/gavetas.js`. -->
+<div id="conteudo-back" class="gav-back">
+  <div class="gav-box">
+    <h2 id="conteudo-titulo">Cartas deste conteúdo</h2>
+    <div class="sub" id="conteudo-sub"></div>
+    <div id="conteudo-corpo"></div>
+    <div style="margin-top:14px"><button id="conteudo-fechar">fechar</button></div>
   </div>
 </div>
 

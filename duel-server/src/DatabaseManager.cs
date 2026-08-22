@@ -48,6 +48,14 @@ public class DatabaseManager : IDisposable
     [DllImport("sqlite3", EntryPoint = "sqlite3_finalize", CallingConvention = CallingConvention.Cdecl)]
     private static extern int sqlite3_finalize(IntPtr pStmt);
 
+    /// <summary>
+    /// Coluna de TEXTO. Devolve um ponteiro para UTF-8 do proprio SQLite — que
+    /// so' vale ate' o `sqlite3_step`/`finalize` seguinte, entao a string tem de
+    /// ser copiada na hora (`PtrToStringUTF8`) e nunca guardada como IntPtr.
+    /// </summary>
+    [DllImport("sqlite3", EntryPoint = "sqlite3_column_text", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr sqlite3_column_text(IntPtr pStmt, int iCol);
+
     /// <summary>Onde moram o banco e os scripts — o `Perfil` precisa dos dois.</summary>
     private readonly string _sa;
 
@@ -143,6 +151,65 @@ public class DatabaseManager : IDisposable
         }
         _statsCache[code] = s;
         return s;
+    }
+
+    // ================= o TEXTO de um efeito (a descricao) =================
+    //
+    // Toda pergunta do motor que envolve UM efeito carrega uma `description`
+    // de 64 bits, montada pelo proprio script em `aux.Stringid(code, i)`:
+    //
+    //     (i & 0xfffff) | code << 20
+    //
+    // ou seja, QUAL carta e QUAL das descricoes dela (`str1`..`str16` da tabela
+    // `texts` do cards.cdb, com `i = 0` sendo a `str1`). E' o unico jeito de
+    // saber qual dos efeitos de uma carta esta' em jogo: o Forgotten Temple of
+    // the Deep aparece na janela de corrente com o mesmo nome e a mesma arte
+    // para "banir 1 peixe" (str1) e para "Invocar Especialmente o banido"
+    // (str2), e sem esta linha o jogador ativa um achando que ativou o outro.
+    //
+    // Quem resolve e' o SERVIDOR, e nao o navegador, porque a fonte certa e' a
+    // tabela `texts` **com o indice preservado**: o `cards.json` do `ygo-data`
+    // guarda `strings` compactado (descarta as vazias), e em 373 cartas do
+    // banco ha' buraco no meio — ali o indice do motor apontaria para a
+    // descricao ERRADA, que e' exatamente o problema que este campo existe para
+    // resolver.
+    //
+    // Descricao de SISTEMA (o motor tem uma tabela propria de textos genericos,
+    // que nao mora no cards.cdb) sai como `code == 0` e devolve null: a tela
+    // simplesmente nao mostra frase nenhuma, em vez de mostrar uma inventada.
+
+    private readonly System.Collections.Generic.Dictionary<ulong, string> _textoCache = new();
+
+    /// <summary>
+    /// O texto da descricao de um efeito (`aux.Stringid`), ou null quando nao
+    /// da' para saber (descricao vazia, texto de sistema, carta sem `str`).
+    /// </summary>
+    public string TextoDoEfeito(ulong desc)
+    {
+        if (desc == 0) return null;
+        if (_textoCache.TryGetValue(desc, out string hit)) return hit;
+
+        uint code = (uint)(desc >> 20);
+        int i = (int)(desc & 0xfffff);
+        string texto = null;
+
+        if (code != 0 && i >= 0 && i < 16 && db != IntPtr.Zero)
+        {
+            string query = $"SELECT str{i + 1} FROM texts WHERE id = {code}";
+            if (sqlite3_prepare_v2(db, query, -1, out IntPtr stmt, IntPtr.Zero) == 0)
+            {
+                if (sqlite3_step(stmt) == 100)
+                {
+                    IntPtr raw = sqlite3_column_text(stmt, 0);
+                    string s2 = raw == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(raw);
+                    if (!string.IsNullOrWhiteSpace(s2)) texto = s2.Trim();
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
+
+        _textoCache[desc] = texto;
+        return texto;
     }
 
     // ================= o que o EFEITO de uma carta faz =================

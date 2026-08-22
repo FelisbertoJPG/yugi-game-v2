@@ -33,6 +33,36 @@ Ordenado por **impacto no jogador**, não por esforço.
 
 `npm run update:test` roda as cinco suítes que não precisam de rede.
 
+## §0.1 — O exe passou a viajar em TODA publicação (22/08/2026)
+
+O §0 previu que o `-ComExe` "ainda precisa acontecer UMA vez". Ele aconteceu — nos dois
+Releases de 19/08/2026 — e isso **não bastou**, porque a janela entre eles e o Release
+seguinte foi de 25 minutos. Todo Release depois disso saiu com `installer: null`, e quem
+não abriu o jogo naquela janela nunca foi informado de que existe um exe novo: o campo
+`installer` do manifesto é a única fonte dessa notícia (`UpdateEngine.Montar`).
+
+O resultado é a pior combinação possível: o cliente preso recebe o `game.zip` **todo dia**,
+baixa o `engine.zip` para `.staged/` e não tem casca para aplicá-lo. Front sempre novo,
+motor congelado para sempre, sem um erro sequer. Os dois sintomas relatados por quem joga
+foram a magia de campo do tabuleiro entrando do lado do JOGADOR em vez do NPC
+(`fieldSpellController`, motor 0.3.0) e o ATK/DEF sem aparecer impresso na carta (o evento
+`stats` da `VarrerStats`, motor 0.6.0) — ambos corrigidos no repositório havia dias.
+
+Correção, em `tools/publish-release.ps1`: o `installer` é preenchido **sempre** que houver
+um `dist/ClassicDuels.exe`, com ou sem `-ComExe`. O custo é de quem publica (~66 MB de
+upload); o jogador em dia não baixa nada, porque o cliente compara `installer.version` com a
+compilada dentro dele. Junto veio a recusa de publicar um exe empacotado antes da última
+mexida na casca (compara `dist/.cache/casca.digital`, a mesma digital que o `publicar.exe`
+já usava) — sem ela, "sempre incluir o exe" viraria "sempre incluir uma casca velha".
+
+Descartada a alternativa de apontar `installer.url` para o asset de um Release anterior (que
+pouparia o upload): o `FonteGitHub.AbrirAsync` só troca o `Accept` para `application/octet-stream`
+no caminho do `asset`; pelo `url` vale o default `application/vnd.github+json` e viria o JSON
+de metadados no lugar do binário. Consertar isso no motor não ajudaria justamente quem está
+preso — o binário deles é o de antes.
+
+---
+
 ## §0 — O motor virou conteúdo (19/08/2026)
 
 Era a pendência mais cara e não estava nesta lista, porque parecia "o jeito que as coisas
@@ -205,7 +235,7 @@ uma nota de fluxo de trabalho.
 
 | # | Item | Por quê primeiro |
 |---|---|---|
-| 1 | §2 — publicar com `-ComExe` e provar a troca do exe | é o que sobrou do caminho mais frágil — e a 0.15.0 é a última vez que ele é obrigatório (§0) |
+| ~~1~~ | ~~§2 — publicar com `-ComExe`~~ | **feito** em 22/08/2026 (`release-20260822-1346`), e o exe passou a ir em toda publicação (§0.1) |
 | 2 | §11 — decidir sobre `decks/npc/` | conteúdo que hoje não alcança quem já instalou |
 | 3 | §4 — virar as outras duas `managedRoots` | depois de uma atualização real rodando limpa |
 | 4 | §8, §12 | manutenção, sem pressa |

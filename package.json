@@ -11,6 +11,7 @@
     "boosters:check": "node tools/conferir-boosters.mjs",
     "conteudo:check": "node tools/conferir-conteudo.mjs",
     "launcher:build": "dotnet publish launcher -c Release -o . -v q --nologo && dotnet publish launcher/stop -c Release -o . -v q --nologo",
+    "publicar:build": "dotnet publish publicar -c Release -o . -v q --nologo",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/pack.ps1",
     "atalho": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/criar-atalho.ps1",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish-release.ps1",

@@ -63,19 +63,28 @@ export function zoneIds(player) {
   ids.push({ id: `${p}:deck`, kind: 'slot', label: 'Deck' });
   ids.push({ id: `${p}:extra`, kind: 'slot', label: 'Extra' });
   ids.push({ id: `${p}:gy`, kind: 'slot', label: 'Cemitério' });
+  // Banidas (`LOCATION_REMOVED`, 0x20). Não é uma zona das REGRAS — o ocgcore
+  // não tem "zona de banimento", tem uma localização — mas é uma pilha que
+  // precisa de um lugar na mesa, como o cemitério. Sem ela, carta banida
+  // sumia da tela e não ia para lugar nenhum.
+  ids.push({ id: `${p}:banido`, kind: 'slot', label: 'Banidas' });
   ids.push({ id: `${p}:hand`, kind: 'area', label: 'Mão' });
   return ids;
 }
 
 /**
- * Elementos de UI que não são zona do motor (LP e indicador de fase não têm
+ * Elementos de UI que não são zona do motor (o indicador de fase não tem
  * localização nenhuma pro `ocgcore` — não existe carta que "more" ali), mas
- * o usuário quer poder posicionar do mesmo jeito. Um item só, não é por
- * jogador: LP dos dois lados e as fases moram na mesma barra.
+ * o usuário quer poder posicionar do mesmo jeito.
+ *
+ * Os LP saíram daqui: eles moram no placar do topo da tela (`.hud` em
+ * `duel.html`), que fica FORA da arena e por isso não é posicionável. Pôr o
+ * placar sob o editor é tarefa própria — precisa de zona nova no schema, e
+ * todo tabuleiro já gravado teria de ganhar uma posição padrão para ela.
  */
 export function uiZoneIds() {
   return [
-    { id: 'mid', kind: 'area', label: 'Fases / LP' },
+    { id: 'mid', kind: 'area', label: 'Fase' },
     // Os botões "próxima fase"/"End Phase". Moram ao lado do Deck, e não no
     // centro junto das fases: escolher entre avançar e pular direto pro fim
     // do turno é ação do jogador, então fica do lado de onde ele já está
@@ -154,6 +163,15 @@ export function defaultLayout(name = 'Padrão') {
 
     row([`${p}:f`, `${p}:m0`, `${p}:m1`, `${p}:m2`, `${p}:m3`, `${p}:m4`, `${p}:gy`], monstroY, FIELD_X);
     row([`${p}:s0`, `${p}:s1`, `${p}:s2`, `${p}:s3`, `${p}:s4`, `${p}:deck`, `${p}:extra`], magiaY, FIELD_X);
+    // Banidas: à ESQUERDA da fileira de monstro, espelhando o cemitério que
+    // fica na ponta direita dela. O espaço ali está livre (a fileira começa em
+    // FIELD_X = 436 de 1600) e é o único canto do canvas que não disputa lugar
+    // com nada — a direita já tem os botões de fase e a caixa das correntes.
+    //
+    // Esta posição é também a que TODO tabuleiro antigo vai herdar no backfill,
+    // então ela precisa ser defensável sozinha, e não só bonita ao lado das
+    // outras deste layout.
+    zones[`${p}:banido`] = { x: FIELD_X - SIZE - GAP, y: monstroY, size: SIZE };
     zones[`${p}:hand`] = { x: (CANVAS.w - 1000) / 2, y: handY, w: 1000, h: 110 };
   }
 

@@ -15,6 +15,10 @@
  */
 
 import { req, sessao } from '/web/js/supabase.js';
+// O formato `.ydk` mora em `ydk.js`: sem `supabase.js` por perto ele é
+// importável no Node e tem teste (`ydk.test.mjs`). Reexportado aqui para
+// quem já pedia `paraYdk`/`deYdk` a este módulo continuar funcionando.
+export { paraYdk, deYdk, gavetasDoDeck, totalDoDeck } from './ydk.js';
 
 /** `[{id, nome, preco, capa, ydk, na_loja, ordem}]`, na ordem da vitrine. */
 export async function listarEstruturais({ soLoja = false } = {}) {
@@ -145,28 +149,6 @@ export function travadaPorBooster(id, boosters) {
   return null;
 }
 
-/** `{ [id]: quantidade }` -> texto .ydk (só main; estrutural não usa extra/side hoje). */
-export function paraYdk(quantidades, { criadoPor = 'classic duels' } = {}) {
-  const linhas = [`#created by ${criadoPor}`, '#main'];
-  for (const [id, n] of Object.entries(quantidades))
-    for (let i = 0; i < n; i++) linhas.push(String(id));
-  linhas.push('#extra', '!side', '');
-  return linhas.join('\n');
-}
-
-/** O inverso: texto .ydk -> `{ [id]: quantidade }` do main. */
-export function deYdk(ydk) {
-  const out = {};
-  let secao = 'main';
-  for (const cru of String(ydk ?? '').split(/\r?\n/)) {
-    const l = cru.trim();
-    if (!l) continue;
-    if (/^#extra/i.test(l)) { secao = 'extra'; continue; }
-    if (/^!side/i.test(l))  { secao = 'side';  continue; }
-    if (/^#main/i.test(l))  { secao = 'main';  continue; }
-    if (l.startsWith('#') || l.startsWith('!')) continue;
-    if (secao !== 'main' || !/^\d{1,10}$/.test(l)) continue;
-    out[l] = (out[l] ?? 0) + 1;
-  }
-  return out;
-}
+// `paraYdk` e `deYdk` estão em `ydk.js` e são reexportados no topo deste
+// arquivo — junto com `gavetasDoDeck`, que é a raridade carta a carta na
+// MESMA ordem do servidor (booster primeiro; ver `raridade_da_carta`).

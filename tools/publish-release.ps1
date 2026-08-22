@@ -16,8 +16,10 @@ param(
   # Vazio = carimbo de data/hora. O cliente busca /releases/latest, entao o nome
   # da tag nao precisa ser bonito - precisa ser unico.
   [string]$Tag = "",
-  # Suba junto o exe novo (auto-update do proprio instalador). Precisa de um
-  # `npm run pack` feito antes, e do bump da InstallerVersion no BuildConfig.cs.
+  # EXIGE o exe: falha se dist\ClassicDuels.exe nao existir. Desde 22/08/2026 o
+  # exe ja' vai em TODA publicacao que tenha um empacotado (ver a secao `o exe no
+  # manifesto`, la' embaixo), entao esta flag deixou de ser o que liga o
+  # auto-update do executavel — e' so' a recusa de publicar sem ele.
   [switch]$ComExe,
   # Apaga os Releases antigos, mantendo os N mais recentes. 0 = nao apaga nada
   # (o padrao). Fica FORA do caminho normal de proposito: apagar Release e'
@@ -40,6 +42,27 @@ function Passo($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t)        { Write-Host "  OK   $t" -ForegroundColor Green }
 function Aviso($t)     { Write-Host "  !    $t" -ForegroundColor Yellow }
 function Falhar($t)    { Write-Host "  ERRO $t" -ForegroundColor Red; exit 1 }
+
+# Impressao digital dos fontes da CASCA (duel-server\host). A MESMA conta do
+# `DigitalDaCasca` do tools\pack.ps1 e do publicar\Program.cs — por CONTEUDO, e
+# nunca por data de modificacao: copiar a pasta do projeto entre maquinas
+# reescreve a data de todo arquivo e acusaria mudanca em fonte que ninguem tocou.
+function DigitalDaCasca($raiz) {
+  $host_ = Join-Path $raiz 'duel-server\host'
+  if (-not (Test-Path $host_)) { return '' }
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $linhas = [System.Collections.Generic.List[string]]::new()
+  foreach ($f in Get-ChildItem $host_ -Recurse -File -Filter *.cs) {
+    $rel = $f.FullName.Substring($host_.Length).TrimStart('\', '/').Replace('\', '/')
+    $h = [System.BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($f.FullName)))
+    $linhas.Add("$rel|$($h.Replace('-', '').ToLowerInvariant())")
+  }
+  $linhas.Sort([StringComparer]::Ordinal)
+
+  $tudo = [System.Text.Encoding]::UTF8.GetBytes(($linhas -join "`n"))
+  return [System.BitConverter]::ToString($sha.ComputeHash($tudo)).Replace('-', '').ToLowerInvariant()
+}
 
 # ---------------------------------------------------------------- tabuleiros
 # Um campo criado NO JOGO grava em %LOCALAPPDATA%\ClassicDuels\game\boards\, nao
@@ -166,6 +189,49 @@ function SincronizarDecksNpc {
 
 function Sha256($caminho) {
   (Get-FileHash -Algorithm SHA256 -Path $caminho).Hash.ToLowerInvariant()
+}
+
+# Impressao digital do CONTEUDO de um pacote: uma linha "entrada|sha256" por
+# arquivo dentro do zip, ordenadas por ordinal, e o sha256 disso tudo.
+#
+# POR QUE NAO O SHA DO PROPRIO .ZIP, que e' o que o marcador usava ate'
+# 19/08/2026: dois zips com exatamente os mesmos arquivos dentro nao tem os
+# mesmos bytes fora. A saida do deflate muda com a versao do runtime que
+# comprimiu, entao empacotar noutra maquina gerava marcador novo para conteudo
+# identico — e o cliente compara MARCADOR, nao conteudo. O sintoma foi medido:
+# game.zip (92 entradas) e cards.zip (20.951 entradas) publicados e regerados
+# aqui batiam entrada por entrada, com 0 diferencas, e mesmo assim ganhavam
+# marcador novo. Publicar de outra maquina custava 28 MB de download a cada
+# jogador para entregar os arquivos que ele ja' tinha.
+#
+# O campo `sha256` do manifesto continua sendo o do ARQUIVO: e' o que o cliente
+# confere depois de baixar, e ali o que importa e' o zip ter chegado inteiro.
+# Sao perguntas diferentes — "preciso baixar?" e "o que baixei esta' intacto?".
+#
+# Custo: ~1,7s no cards.zip (27 MB). Roda uma vez por publicacao.
+function DigitalDoConteudo($zipPath) {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+  try {
+    $linhas = [System.Collections.Generic.List[string]]::new()
+    $buf = New-Object byte[] 131072
+    foreach ($e in $zip.Entries) {
+      $ms = New-Object System.IO.MemoryStream
+      $s = $e.Open()
+      try { while (($n = $s.Read($buf, 0, $buf.Length)) -gt 0) { $ms.Write($buf, 0, $n) } }
+      finally { $s.Dispose() }
+      $h = [System.BitConverter]::ToString($sha.ComputeHash($ms.ToArray())).Replace('-', '').ToLowerInvariant()
+      $ms.Dispose()
+      $linhas.Add("$($e.FullName)|$h")
+    }
+    # Ordinal, e nao Sort-Object: a ordenacao por CULTURA muda de maquina, que e'
+    # justamente o tipo de diferenca que esta funcao existe para nao ter.
+    $linhas.Sort([StringComparer]::Ordinal)
+    $tudo = [System.Text.Encoding]::UTF8.GetBytes(($linhas -join "`n"))
+    return [System.BitConverter]::ToString($sha.ComputeHash($tudo)).Replace('-', '').ToLowerInvariant()
+  }
+  finally { $zip.Dispose() }
 }
 
 # O GitHub RENOMEIA assets ao subir (espacos e especiais viram '.'). Gravamos o
@@ -467,21 +533,64 @@ Ok "$($avulsos.Count) arquivo(s) global(is)"
 Passo 4 'escrevendo o manifest.json'
 
 function PayloadInfo($id, $zip, $roots) {
-  $sha = Sha256 $zip
+  $sha = Sha256 $zip                      # o ARQUIVO: e' o que o cliente confere
+  $digital = DigitalDoConteudo $zip       # o que esta' DENTRO: e' o que decide baixar
   [ordered]@{
     id      = $id
-    version = "$id-$($sha.Substring(0,12))"   # identidade pelo CONTEUDO: nao da'
-    asset   = NomeSeguro (Split-Path -Leaf $zip)  # para esquecer de incrementar
+    # Identidade pelo CONTEUDO — nao da' para esquecer de incrementar, e nao muda
+    # so' porque o zip foi montado noutra maquina. Ver DigitalDoConteudo.
+    version = "$id-$($digital.Substring(0,12))"
+    asset   = NomeSeguro (Split-Path -Leaf $zip)
     sha256  = $sha
     size    = (Get-Item $zip).Length
     roots   = $roots
   }
 }
 
+# ------------------------------------------------------------- o exe no manifesto
+# O campo `installer` vai SEMPRE que houver um exe empacotado em dist\ - nao so'
+# com -ComExe.
+#
+# POR QUE. O cliente so' descobre que existe um executavel novo por este campo
+# (`UpdateEngine.Montar`: `if (m.Installer != null) …`). Com ele nulo, quem esta'
+# com um exe antigo nao e' avisado de nada — e desde 19/08/2026 isso deixou de
+# ser um detalhe cosmetico: o MOTOR passou a viajar como pacote em `.staged/`, e
+# quem aplica o estagio e' a CASCA do exe >= 0.15.0. Um exe 0.14.x baixa o
+# `engine.zip`, ele fica parado em `.staged/` e nada o carrega — front novo,
+# motor congelado PARA SEMPRE, sem um erro sequer.
+#
+# Nao e' hipotese: so' os dois Releases de 19/08/2026 sairam com o exe, e todos
+# os seguintes com `installer: null`. Quem nao abriu o jogo naquela janela de 25
+# minutos ficou preso — e o sintoma, do lado de quem joga, e' a magia de campo do
+# tabuleiro entrando do lado errado e o ATK/DEF sem aparecer na carta, dois
+# consertos publicados no repositorio ha' dias.
+#
+# O custo e' de quem PUBLICA (~66 MB de upload), nunca de quem joga: o cliente
+# compara `installer.version` com a compilada dentro dele e nao baixa nada quando
+# sao iguais. `-ComExe` continua aceito e agora significa so' "exija o exe":
+# falha em vez de avisar quando dist\ClassicDuels.exe nao existe.
 $exe = Join-Path $root 'dist\ClassicDuels.exe'
 $instalador = $null
-if ($ComExe) {
-  if (-not (Test-Path $exe)) { Falhar 'nao achei dist\ClassicDuels.exe (rode npm run pack antes de -ComExe)' }
+if (-not (Test-Path $exe)) {
+  if ($ComExe) { Falhar 'nao achei dist\ClassicDuels.exe (rode npm run pack antes de -ComExe)' }
+  Aviso 'nao achei dist\ClassicDuels.exe — o manifesto vai SEM `installer`.'
+  Write-Host "       Quem tiver um exe antigo nao sera' avisado de que existe um novo, e um" -ForegroundColor Yellow
+  Write-Host "       exe anterior a 0.15.0 nao aplica o motor que ele mesmo baixa." -ForegroundColor Yellow
+  Write-Host "       Rode npm run pack antes de publicar." -ForegroundColor Yellow
+} else {
+  # A casca (duel-server\host) e' a unica parte que ainda viaja DENTRO do exe.
+  # Publicar um exe empacotado antes da ultima mexida nela entregaria uma casca
+  # velha carregando um motor novo, em silencio. A digital e' gravada pelo
+  # `npm run pack` (dist\.cache\casca.digital) e comparada por CONTEUDO.
+  $digitalPack = Join-Path $root 'dist\.cache\casca.digital'
+  $agoraCasca = DigitalDaCasca $root
+  if ((Test-Path $digitalPack) -and $agoraCasca) {
+    $doPack = (Get-Content $digitalPack -Raw).Trim()
+    if ($doPack -and $doPack -ne $agoraCasca) {
+      Falhar 'a casca (duel-server\host) mudou depois do ultimo `npm run pack`: o exe em dist\ esta velho. Rode npm run pack.'
+    }
+  }
+
   $versao = Select-String -Path (Join-Path $root 'duel-server\src\update\BuildConfig.cs') `
                           -Pattern 'InstallerVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
   if (-not $versao) { Falhar 'nao consegui ler a InstallerVersion do BuildConfig.cs' }

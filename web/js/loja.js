@@ -5,17 +5,23 @@
  */
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
-  listShopBoosters, boosterSize, hydrateBoosters,
-  DEFAULT_PRICE, PITY_EVERY, UR_PITY_DP,
+  listShopBoosters, boosterSize, hydrateBoosters, rarityIndex,
+  chancesDoPacote, DEFAULT_PRICE, PACK_SIZE, PITY_EVERY, UR_PITY_DP,
 } from '/web/js/boosters.js';
+import { renderGavetas, fraseDaColecao } from '/web/js/gavetas.js';
 import { listCustom } from '/web/js/customcards.js';
 import {
   getDP, getPity, hydrateWallet, abrirPacote, getUrSpend,
 } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
-import { listarEstruturais, jaComprados, comprarEstrutural } from '/web/js/estruturais.js';
+import {
+  listarEstruturais, jaComprados, comprarEstrutural,
+} from '/web/js/estruturais.js';
+import { deYdk, gavetasDoDeck, totalDoDeck } from '/web/js/ydk.js';
 
 const priceOf = (b) => (Number.isFinite(b.price) ? b.price : DEFAULT_PRICE);
+// O tamanho do pacote vem do modulo, nao de um "5" escrito na frase.
+const PACK_SIZE_TXT = String(PACK_SIZE);
 const pityKey = (b) => b.name;   // identidade do booster para o contador "a cada 10"
 
 const $ = (id) => document.getElementById(id);
@@ -83,8 +89,10 @@ function renderShop() {
         pityLinha +
         urLinha +
         `<button class="buy btn-primary" ${canBuy ? '' : 'disabled'}>abrir pacote (${price} DP)</button>` +
+        `<button class="ver">ver as cartas</button>` +
       `</div>`;
     el.querySelector('.buy').onclick = (e) => { e.currentTarget.disabled = true; buy(b); };
+    el.querySelector('.ver').onclick = () => verBooster(b);
     frag.append(el);
   }
   $('packs').replaceChildren(frag);
@@ -156,7 +164,9 @@ async function renderEstruturais() {
         `<button class="comprar btn-primary" ${podeComprar ? '' : 'disabled'}>` +
           (tem ? 'adquirido' : `comprar (${d.preco} DP)`) +
         `</button>` +
+        `<button class="ver">ver as cartas</button>` +
       `</div>`;
+    el.querySelector('.ver').onclick = () => verEstrutural(d);
 
     if (podeComprar) {
       el.querySelector('.comprar').onclick = async (e) => {
@@ -172,6 +182,72 @@ async function renderEstruturais() {
     frag.append(el);
   }
   $('estruturais').replaceChildren(frag);
+}
+
+// --------------------------------------------------- o que vem no conteúdo
+/**
+ * **A lista de cartas de um conteúdo da Loja, por raridade.**
+ *
+ * É a mesma caixa da lista de drops da Trilha de Duelos — literalmente a mesma
+ * (`gavetas.js` + `web/css/gavetas.css`). A pergunta do jogador é idêntica nos
+ * dois lugares: *o que vem aqui dentro, e o que disso ainda me falta?* Comprar
+ * às cegas um pacote de 60 cartas das quais já se tem 55 é o tipo de coisa que
+ * só dá para descobrir depois de gastar.
+ *
+ * A caixa não desliga por falta de DP: quem está sem saldo é justamente quem
+ * mais precisa escolher onde gastar o próximo.
+ */
+function abrirConteudo(titulo, sub, pool, { chances = null, copias = null } = {}) {
+  $('conteudo-titulo').textContent = titulo;
+  const resumo = renderGavetas($('conteudo-corpo'), pool, {
+    nomeDe: nameOf, arte: (id) => ART(id, true), chances, copias,
+  });
+  $('conteudo-sub').innerHTML = `${sub} `
+    + '<b style="color:var(--green,#3fd68a)">✔</b> = já está na sua Coleção — '
+    + fraseDaColecao(resumo);
+  $('conteudo-back').classList.add('show');
+}
+
+/**
+ * Booster: as gavetas já vêm prontas (`b.cards`), e a CHANCE sai de
+ * `chancesDoPacote` — a conta que reproduz o sorteio do banco, cascata e tudo.
+ * Escrever a porcentagem à mão aqui seria prometer o que `abrir_pacote()` não
+ * cumpre.
+ */
+function verBooster(b) {
+  abrirConteudo(
+    `${b.name} — o que vem no pacote`,
+    `${boosterSize(b)} cartas diferentes · cada pacote sorteia ${PACK_SIZE_TXT} delas, `
+      + 'a raridade primeiro (pelas chances abaixo) e a carta depois. '
+      + 'As garantias (SR e UR) entram por cima disto.',
+    b.cards,
+    { chances: chancesDoPacote(b.cards) },
+  );
+}
+
+/**
+ * Deck Estrutural: aqui não há sorteio — vem tudo, e vem repetido. As gavetas
+ * são montadas do `.ydk`, e a raridade segue a MESMA ordem do servidor
+ * (`raridade_da_carta`, migration 0019): **o booster vence**, o mapa do próprio
+ * estrutural entra depois, e o que não está em lugar nenhum é N. Inverter essa
+ * ordem faria a mesma carta aparecer UR na Loja e N no Inventário, onde ela é
+ * vendida pela raridade.
+ */
+function verEstrutural(d) {
+  const quantidades = deYdk(d.ydk);
+  // O indice sai UMA vez: `rarityOf` reconstroi a varredura de todos os
+  // boosters a cada chamada, e um deck de 40 cartas a chamaria 40 vezes.
+  const idx = rarityIndex();
+  const pool = gavetasDoDeck(quantidades, d.raridades,
+                             (id) => idx.get(Number(id))?.rarity ?? null);
+  abrirConteudo(
+    `${d.nome} — o deck inteiro`,
+    `${totalDoDeck(quantidades)} cartas no deck `
+      + `(${Object.keys(quantidades).length} diferentes), `
+      + 'todas creditadas na sua Coleção na compra — sem sorteio.',
+    pool,
+    { copias: (id) => quantidades[String(id)] ?? 1 },
+  );
 }
 
 function showReveal(booster, pulls) {
@@ -198,6 +274,10 @@ function escapeHtml(s) {
 }
 
 $('btn-home').onclick = () => (location.href = '/web/index.html');
+$('conteudo-fechar').onclick = () => $('conteudo-back').classList.remove('show');
+$('conteudo-back').addEventListener('click', (e) => {
+  if (e.target === $('conteudo-back')) $('conteudo-back').classList.remove('show');
+});
 $('reveal-close').onclick = () => $('reveal-back').classList.remove('show');
 $('reveal-back').addEventListener('click', (e) => {
   if (e.target === $('reveal-back')) $('reveal-back').classList.remove('show');

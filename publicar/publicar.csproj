@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- O PUBLICADOR. Um duplo-clique que leva as alteracoes daqui para a nuvem:
+       compila, roda as suites do instalador, gera os pacotes, mostra o que
+       mudou, pede confirmacao e sobe o Release.
+
+       POR QUE ELE EXISTE: publicar era uma sequencia de comandos com ordem e
+       flags que so' quem escreveu lembrava — e o custo de errar e' alto, porque
+       um manifesto ruim quebra a instalacao de quem ja' tem o jogo e nao da'
+       para "despublicar" um download que ja' aconteceu.
+
+       ELE NAO REIMPLEMENTA NADA. Toda a inteligencia continua em
+       tools/publish-release.ps1 e nas suites do duel-server; este exe so'
+       chama, na ordem certa, e recusa de sair quando alguma coisa esta' fora
+       do lugar. E' de proposito: dois caminhos que "publicam" divergiriam. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>publicar</AssemblyName>
+    <RootNamespace>Publicador</RootNamespace>
+
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- Framework-dependent, como o launcher: ~150 KB em vez de ~70 MB. Quem
+         publica tem o SDK .NET 8 instalado por definicao — sem ele nao ha' o
+         que publicar. -->
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <ApplicationIcon>$(MSBuildThisFileDirectory)../assets/icone.ico</ApplicationIcon>
+  </PropertyGroup>
+
+</Project>

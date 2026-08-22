@@ -31,6 +31,117 @@ namespace DuelServer
         const uint TIME_WIZARD = 71625222;        // moeda: cara varre o campo dele, coroa varre o meu
         const uint TOON_WORLD = 15259703;         // habilita o pacote Toon inteiro
 
+        // Pacote do Mako (Água). O TEMPLO é uma Armadilha Contínua cujo nome vira
+        // "Umi" (é assim que ela liga o Legendary Fisherman) e que, uma vez por
+        // turno, BANE um Fish/Sea Serpent/Aqua de Nível ≤4 do PRÓPRIO dono,
+        // devolvendo-o na End Phase de um turno DELE (`Duel.IsTurnPlayer(tp)` na
+        // condição do Lua).
+        //
+        // Ela é a razão de este pacote existir. O banco marca o Templo com o bit
+        // 0x100000 (INVOCAÇÃO ESPECIAL) por causa DESSE RETORNO — e o cérebro lia
+        // isso como "esta carta põe corpo em campo". É o contrário: ativar TIRA
+        // um corpo do campo. Como o efeito é `EVENT_FREE_CHAIN`, o motor abre a
+        // janela dela em toda oportunidade de corrente, e o NPC banía o próprio
+        // monstro turno após turno, de graça. Ver `MotivoDoTemplo`.
+        const uint FORGOTTEN_TEMPLE = 43889633;  // Templo Esquecido das Profundezas
+        const uint INSTANT_FUSION = 1845204;     // paga 1000 LP → Fusão Nv≤5, morre na End Phase
+        const uint READY_FUSION = 63854005;      // paga 1000 LP → Fusão Nv≤6 sem efeito, idem
+        const uint TORRENTIAL_REBORN = 7092142;  // WATER destruído volta — e queima 500 por cabeça
+        const uint PREMATURE_BURIAL = 70828912;  // paga 800 LP → reanima e equipa
+
+        /// <summary>
+        /// **O que conta como "Umi" em campo.** Meia dúzia de cartas ligam as
+        /// condições "enquanto 'Umi' estiver em campo" sem se chamarem Umi: umas
+        /// trocam o próprio NOME (`EFFECT_CHANGE_CODE` → `CARD_UMI`), outras fazem
+        /// o CAMPO ser tratado como Umi. Quem olha só o id 22702055 conclui que
+        /// não há Umi nenhuma e desliga metade do deck do Mako.
+        ///
+        /// Levantadas do banco pelo texto ("name becomes"/"treated as" + "Umi"),
+        /// não de memória.
+        /// </summary>
+        const uint UMI = 22702055;
+        static readonly HashSet<uint> CONTAM_COMO_UMI = new()
+        {
+            UMI,
+            295517,           // A Legendary Ocean
+            2819435,          // Pacifis, the Phantasm City
+            26534688,         // Magellanica, the Deep Sea City
+            34103656,         // Lemuria, the Forgotten City
+            58203736,         // Sea Stealth II       (Magia Contínua)
+            FORGOTTEN_TEMPLE, // Forgotten Temple…    (Armadilha Contínua)
+        };
+
+        /// <summary>
+        /// Monstro que faz o campo virar "Umi" só ENQUANTO não houver magia de
+        /// campo aberta (Maiden of the Aqua). Fica à parte porque a condição dela
+        /// é o contrário das outras: qualquer magia de campo com a face para cima
+        /// — inclusive uma do oponente que não tem nada a ver com água — desliga.
+        /// </summary>
+        const uint MAIDEN_OF_THE_AQUA = 17214465;
+
+        // NÃO EXISTE AQUI uma tabela de "não pode ser alvo de ataque com a Umi".
+        // Ela chegou a existir e foi removida no mesmo dia, porque não mudava
+        // decisão nenhuma: a única carta do banco com essa proteção é o
+        // The Legendary Fisherman (1850/1600), e `DecidePosicao` devolve ATAQUE
+        // para todo statline com ATK > DEF antes de a regra da parede ser
+        // consultada. Quem tem a proteção nunca vira parede de qualquer jeito.
+        //
+        // Ficou registrado para a próxima pessoa não reescrever a mesma coisa: o
+        // dia em que entrar uma carta com essa proteção E DEF maior que o ATK, a
+        // regra passa a valer e o lugar dela é a primeira trava de
+        // `BaterRendeMaisQueAParede`.
+
+        /// <summary>
+        /// Enquanto "Umi" estiver em campo, estes são IMUNES A MAGIA. Muda uma
+        /// decisão concreta e só uma: não vale gastar o Templo banindo um monstro
+        /// para escapar de uma MAGIA que não o alcança.
+        ///
+        /// (O Legendary Fisherman II ganha imunidade a efeito de MONSTRO, que é
+        /// outra coisa, e por isso não está aqui.)
+        /// </summary>
+        static readonly HashSet<uint> IMUNES_A_MAGIA_COM_UMI = new()
+        {
+            3643300,          // The Legendary Fisherman
+            24128274,         // Deepsea Warrior
+            90337190,         // Torpedo Fish
+            95614612,         // Cannonball Spear Shellfish
+        };
+
+        /// <summary>
+        /// **Existe "Umi" em campo?** Vale para os DOIS lados — as cartas da
+        /// tabela mudam o campo inteiro, não um lado dele.
+        ///
+        /// LIMITE CONHECIDO: uma magia de campo INJETADA pelo tabuleiro (o Bônus
+        /// de Campo de `boards/*.json`) é posta no motor antes do `OCG_StartDuel`
+        /// e não gera `MSG_MOVE`, então não está no `_stBoard` e não é vista aqui.
+        /// Uma Umi ATIVADA da mão, essa sim, é vista. Coberto pelo `--test-mako`.
+        /// </summary>
+        bool UmiNoCampo()
+        {
+            for (int p = 0; p <= 1; p++)
+            {
+                foreach (var c in _faceUpStOf(p)) if (CONTAM_COMO_UMI.Contains(c)) return true;
+                foreach (var c in _fieldOf(p)) if (CONTAM_COMO_UMI.Contains(c)) return true;
+            }
+
+            // A Maiden só faz o campo virar Umi ENQUANTO não houver magia de campo
+            // aberta — e serve qualquer uma, inclusive uma do oponente que não tem
+            // nada a ver com água. Por isso ela é testada depois e sob condição.
+            bool temCampoAberto = false;
+            for (int p = 0; p <= 1 && !temCampoAberto; p++)
+                foreach (var c in _faceUpStOf(p))
+                    if ((_cards.Stats(c).Type & TYPE_FIELD) != 0) { temCampoAberto = true; break; }
+
+            if (!temCampoAberto)
+                for (int p = 0; p <= 1; p++)
+                    if (_fieldOf(p).Contains(MAIDEN_OF_THE_AQUA)) return true;
+
+            return false;
+        }
+
+        /// <summary>Magia nenhuma o alcança agora.</summary>
+        bool ImuneAMagia(uint code) => IMUNES_A_MAGIA_COM_UMI.Contains(code) && UmiNoCampo();
+
         // Pacote do Wevil: o casulo transforma um Inseto fraco em Larvae/Great/
         // Perfectly Ultimate Great Moth depois de 2/4/6 turnos equipado — o motor
         // já faz a contagem sozinha (ver TestWeevil), o NPC só precisa: equipar
@@ -117,10 +228,12 @@ namespace DuelServer
             TRIBUTE_DOLL, MONSTER_GATE, METAMORPHOSIS, MAGICAL_LABYRINTH, MAUSOLEUM,
             COCOON_OF_EVOLUTION, INSECT_ARMOR_LASER, INSECT_IMITATION,
             SUMMONERS_ART, ANCIENT_RULES, ARMORY_CALL,
+            FORGOTTEN_TEMPLE,
         };
 
         const byte DECK = 0x1, HAND = 0x2, MZONE = 0x4, SZONE = 0x8, GRAVE = 0x10;
-        const uint TYPE_SPELL = 0x2, TYPE_TRAP = 0x4, TYPE_RITUAL = 0x80;
+        const uint TYPE_SPELL = 0x2, TYPE_TRAP = 0x4, TYPE_FUSION = 0x40, TYPE_RITUAL = 0x80,
+                   TYPE_FIELD = 0x80000;
 
         // ---------------- armadilhas de contra (negação) ----------------
         //
@@ -457,48 +570,67 @@ namespace DuelServer
         /// equipamento (o Armory Call até a busca, mas ela não equipa em nada
         /// que já esteja no campo).
         /// </summary>
-        readonly record struct Equipamento(int Bonus, uint Raca, uint Atributo);
+        readonly record struct Equipamento(int Bonus, uint Raca, uint Atributo)
+        {
+            /// <summary>
+            /// Quanto a carta muda a DEF de quem recebe — e isso não é enfeite.
+            ///
+            /// O ciclo por ATRIBUTO cobra 200 de DEF pelos +400 de ATK. Num
+            /// monstro DEITADO isso é o reforço ao contrário: a batalha ali usa a
+            /// DEF, então equipar TIRA 200 e não dá nada em troca. O ciclo por
+            /// TIPO dá +300 nos dois, e nesse vale a pena mesmo deitado.
+            ///
+            /// Só o `Bonus` (ATK) era lido, e ninguém perguntava em que posição
+            /// estava o alvo. Relatado num duelo real: o Wevil Invocou
+            /// Especialmente um inseto em DEFESA e equipou nele — o ATK ficou
+            /// maior que o do monstro do jogador (número que aquela batalha nem
+            /// ia usar) e a DEF ficou abaixo do ATK do jogador, que foi o número
+            /// que decidiu a batalha seguinte.
+            /// </summary>
+            public int BonusDef { get; init; }
+        }
 
         const uint R_WARRIOR = 0x1, R_SPELLCASTER = 0x2, R_FAIRY = 0x4, R_FIEND = 0x8,
                    R_ZOMBIE = 0x10, R_MACHINE = 0x20, R_AQUA = 0x40, R_WINGEDBEAST = 0x200,
                    R_PLANT = 0x400, R_INSECT = 0x800, R_THUNDER = 0x1000, R_DRAGON = 0x2000,
-                   R_BEAST = 0x4000, R_BEASTWARRIOR = 0x8000, R_DINOSAUR = 0x10000;
+                   R_BEAST = 0x4000, R_BEASTWARRIOR = 0x8000, R_DINOSAUR = 0x10000,
+                   R_FISH = 0x20000, R_SEASERPENT = 0x40000;
         const uint A_EARTH = 0x1, A_WATER = 0x2, A_FIRE = 0x4, A_WIND = 0x8,
                    A_LIGHT = 0x10, A_DARK = 0x20;
 
         static readonly Dictionary<uint, Equipamento> EQUIPAMENTOS = new()
         {
             // +300 ATK/DEF por TIPO — o ciclo clássico, um por raça.
-            [1435851]  = new(300, R_DRAGON, 0),        // Dragon Treasure
-            [91595718] = new(300, R_SPELLCASTER, 0),   // Book of Secret Arts
-            [61854111] = new(300, R_WARRIOR, 0),       // Legendary Sword
-            [46009906] = new(300, R_BEAST, 0),         // Beast Fangs
-            [25769732] = new(300, R_MACHINE, 0),       // Machine Conversion Factory
-            [77007920] = new(300, R_INSECT, 0),        // Laser Cannon Armor
-            [77027445] = new(300, R_AQUA, 0),          // Power of Kaishin
-            [51267887] = new(300, R_DINOSAUR, 0),      // Raise Body Heat
-            [39774685] = new(300, R_PLANT, 0),         // Vile Germs
-            [15052462] = new(300, R_ZOMBIE, 0),        // Violet Crystal
-            [1557499]  = new(300, R_FAIRY, 0),         // Silver Bow and Arrow
-            [4614116]  = new(300, R_FIEND, 0),         // Dark Energy
-            [37820550] = new(300, R_THUNDER, 0),       // Electro-Whip
-            [98252586] = new(300, R_WINGEDBEAST, 0),   // Follow Wind
-            [36607978] = new(300, R_BEASTWARRIOR, 0),  // Mystical Moon
+            [1435851]  = new(300, R_DRAGON, 0) { BonusDef = 300 },        // Dragon Treasure
+            [91595718] = new(300, R_SPELLCASTER, 0) { BonusDef = 300 },   // Book of Secret Arts
+            [61854111] = new(300, R_WARRIOR, 0) { BonusDef = 300 },       // Legendary Sword
+            [46009906] = new(300, R_BEAST, 0) { BonusDef = 300 },         // Beast Fangs
+            [25769732] = new(300, R_MACHINE, 0) { BonusDef = 300 },       // Machine Conversion Factory
+            [77007920] = new(300, R_INSECT, 0) { BonusDef = 300 },        // Laser Cannon Armor
+            [77027445] = new(300, R_AQUA, 0) { BonusDef = 300 },          // Power of Kaishin
+            [51267887] = new(300, R_DINOSAUR, 0) { BonusDef = 300 },      // Raise Body Heat
+            [39774685] = new(300, R_PLANT, 0) { BonusDef = 300 },         // Vile Germs
+            [15052462] = new(300, R_ZOMBIE, 0) { BonusDef = 300 },        // Violet Crystal
+            [1557499]  = new(300, R_FAIRY, 0) { BonusDef = 300 },         // Silver Bow and Arrow
+            [4614116]  = new(300, R_FIEND, 0) { BonusDef = 300 },         // Dark Energy
+            [37820550] = new(300, R_THUNDER, 0) { BonusDef = 300 },       // Electro-Whip
+            [98252586] = new(300, R_WINGEDBEAST, 0) { BonusDef = 300 },   // Follow Wind
+            [36607978] = new(300, R_BEASTWARRIOR, 0) { BonusDef = 300 },  // Mystical Moon
 
             // +400 ATK / −200 DEF por ATRIBUTO. Valem mais em ATK que os de tipo,
             // e o NPC ataca — por isso ganham deles no desempate.
-            [37120512] = new(400, 0, A_DARK),          // Sword of Dark Destruction
-            [2370081]  = new(400, 0, A_WATER),         // Steel Shell
-            [18937875] = new(400, 0, A_FIRE),          // Burning Spear
-            [39897277] = new(400, 0, A_LIGHT),         // Elf's Light
-            [55321970] = new(400, 0, A_WIND),          // Gust Fan
-            [98374133] = new(400, 0, A_EARTH),         // Invigoration
+            [37120512] = new(400, 0, A_DARK) { BonusDef = -200 },          // Sword of Dark Destruction
+            [2370081]  = new(400, 0, A_WATER) { BonusDef = -200 },         // Steel Shell
+            [18937875] = new(400, 0, A_FIRE) { BonusDef = -200 },          // Burning Spear
+            [39897277] = new(400, 0, A_LIGHT) { BonusDef = -200 },         // Elf's Light
+            [55321970] = new(400, 0, A_WIND) { BonusDef = -200 },          // Gust Fan
+            [98374133] = new(400, 0, A_EARTH) { BonusDef = -200 },         // Invigoration
 
             // Os grandes.
             [32268901] = new(700, 0, A_FIRE),          // Salamandra
             [3492538]  = new(700, R_INSECT, 0),        // Insect Armor with Laser Cannon
             [83225447] = new(700, 0, 0),               // Stim-Pack — perde 200 por Standby sua
-            [98495314] = new(500, 0, 0),               // Sword of Deep-Seated
+            [98495314] = new(500, 0, 0) { BonusDef = 500 },               // Sword of Deep-Seated
 
             // Harpias (deck da Mai). Cyber Shield exige "Harpie Lady" pelo NOME,
             // e nome não se lê do `cards.cdb` — a raça abaixo é só o filtro
@@ -532,6 +664,21 @@ namespace DuelServer
             // Mountain — +200 ATK/DEF para Dragão/Alado/Trovão. É o campo do deck
             // de Harpias da Mai: pega as Harpie Lady e o Pet Dragon juntos.
             [50913601] = new(200, R_DRAGON | R_WINGEDBEAST | R_THUNDER, 0),
+
+            // Umi — +200 para Peixe/Serpente-Marinha/Trovão/Aqua (e −200 para
+            // Máquina/Piro, que a tabela não modela: ela só responde "quem dos
+            // MEUS ganha"). É o campo do deck do Mako, e a falta dela aqui era
+            // cara de um jeito difícil de ver: o deck roda 3 Umi MAIS 3
+            // Terraforming para achá-la, o Legendary Fisherman só fica protegido
+            // com ela em campo — e o NPC nunca a ativava, porque a tabela só
+            // conhecia a Mountain. A busca funcionava, a carta chegava à mão e
+            // ficava lá.
+            [UMI] = new(200, R_FISH | R_SEASERPENT | R_THUNDER | R_AQUA, 0),
+
+            // A Legendary Ocean — o bônus dela é por ATRIBUTO (todo WATER +200),
+            // não por raça, e por isso alcança o Legendary Fisherman, que é
+            // Warrior e fica de fora da Umi.
+            [295517] = new(200, 0, A_WATER),
         };
 
 
@@ -648,6 +795,56 @@ namespace DuelServer
         /// de leitura para as regras que só comparam ataque.
         /// </summary>
         int AtkEmCampo(uint code, int player, int seq) => EmCampo(code, player, seq).atk;
+
+        /// <summary>
+        /// O statline IMPRESSO no número que a batalha usa naquela posição — o
+        /// par do <see cref="ValorNaBatalha"/> sem nenhum efeito por cima.
+        /// Comparar os dois é como se descobre que um corpo está reforçado
+        /// (equipamento, magia de campo) sem precisar rastrear a carta.
+        /// </summary>
+        int ValorImpressoNaPosicao(uint code, int pos)
+        {
+            var st = _cards.Stats(code);
+            return (pos & (POS_DEFESA | POS_DEFESA_VIRADA)) != 0 ? st.DefValue : st.AtkValue;
+        }
+
+        /// <summary>
+        /// **Quanto vale enfrentar a carta que o motor está OFERECENDO** — a
+        /// mesma conta do <see cref="ValorNaBatalha"/>, achando a posição e o
+        /// código reais pela zona.
+        ///
+        /// O `SELECT_CARD` não traz a posição, e a carta virada do outro lado
+        /// chega com o código zerado (o host oculta o que o NPC não deveria
+        /// ver). Quem sabe é o campo: com leitura, `_todoFieldPosOf` devolve o
+        /// código e a posição verdadeiros; sem ela, a carta virada do oponente
+        /// nem aparece ali e vale 0 — fica por último, que é exatamente o que um
+        /// humano faria com uma carta que ele não conhece.
+        /// </summary>
+        int AmeacaDoAlvo(InteractiveDuel.Sel c)
+        {
+            foreach (var m in _todoFieldPosOf(c.controller))
+                if (m.seq == c.sequence)
+                    return ValorNaBatalha(m.code, m.pos, c.controller, m.seq);
+            return c.code != 0 ? _cards.Stats(c.code).AtkValue : 0;
+        }
+
+        /// <summary>
+        /// O corpo MEU que sairia num custo de tributo — o mais barato pela conta
+        /// da batalha, que é exatamente quem o <see cref="DecideSelect"/> vai
+        /// escolher. As duas pontas têm de medir igual: uma regra que autoriza
+        /// pensando num corpo e uma seleção que paga com outro decidem coisas
+        /// diferentes.
+        /// </summary>
+        (uint code, int pos, int seq, int valor) CorpoMaisBarato(int me)
+        {
+            (uint code, int pos, int seq, int valor) menor = (0, 0, -1, int.MaxValue);
+            foreach (var m in AbertosDe(me))
+            {
+                int v = ValorNaBatalha(m.code, m.pos, me, m.seq);
+                if (v < menor.valor) menor = (m.code, m.pos, m.seq, v);
+            }
+            return menor.code == 0 ? (0, 0, -1, 0) : menor;
+        }
 
         /// <summary>
         /// Os monstros de um jogador que estão com a FACE PARA CIMA, com a
@@ -977,12 +1174,34 @@ namespace DuelServer
                     "Cocoon of Evolution: equipa no inseto mais fraco, comeca a contagem da evolucao");
             }
 
-            // 5.3 Insect Armor with Laser Cannon — +700 ATK fixo. O alvo default
-            //     do DecideSelect (maior ATK) já é o que se quer aqui: reforça o
-            //     melhor atacante em vez de pouco importar.
+            // 5.3 Insect Armor with Laser Cannon — +700 ATK fixo, e só em Inseto.
+            //
+            //     "O alvo default do `DecideSelect` (maior ATK) já é o que se
+            //     quer aqui" era falso do jeito mais caro possível: o Lua da
+            //     carta (`AddEquipProcedure` com o jogador em `nil`) aceita
+            //     equipar um Inseto do OUTRO lado, e o critério de maior ATK
+            //     nunca perguntava de quem era o monstro. Num duelo de teste o
+            //     NPC equipou quatro cópias no Petit Moth do JOGADOR e o levou
+            //     de 300 a 3800 de ATK — sem erro nenhum, com o log dizendo
+            //     "+700 ATK no melhor atacante" as quatro vezes.
+            //
+            //     Hoje quem escolhe é a mesma conta de todo equipamento
+            //     (`MelhorEquipPor`): alvo MEU, com a face para cima, e medido
+            //     na posição em que ele está.
             if (Ativavel(q, INSECT_ARMOR_LASER))
-                return new Play("activate", IdxAtivavel(q, INSECT_ARMOR_LASER),
-                    "Insect Armor with Laser Cannon: +700 ATK no melhor atacante");
+            {
+                int idx = IdxAtivavel(q, INSECT_ARMOR_LASER);
+                var armadura = MelhorEquipPor(new[] { (idx, INSECT_ARMOR_LASER) }, me);
+                if (armadura.index >= 0)
+                {
+                    _proximoAlvoDoEquip = armadura.zona;
+                    return new Play("activate", armadura.index,
+                        $"Insect Armor with Laser Cannon: +{armadura.ganho} no meu " +
+                        $"{armadura.alvo} (zona {armadura.zona})");
+                }
+                _log("guarda o Insect Armor with Laser Cannon: nenhum Inseto MEU de pe' " +
+                     "para receber os +700");
+            }
 
             // 5.34 ROUBAR O MONSTRO DO OPONENTE (Comic Hand, Relinquished,
             //      Thousand-Eyes Restrict — o deck do Pegasus).
@@ -1055,8 +1274,12 @@ namespace DuelServer
             {
                 var equip = MelhorEquipDaMao(q, me);
                 if (equip.index >= 0)
+                {
+                    _proximoAlvoDoEquip = equip.zona;
                     return new Play("activate", equip.index,
-                        $"equipa {equip.code} (+{equip.ganho} ATK) no melhor alvo em campo");
+                        $"equipa {equip.code} em {equip.alvo} (zona {equip.zona}): " +
+                        $"+{equip.ganho} no numero que a batalha dele usa");
+                }
             }
 
             // 5.356 MAGIA DE CAMPO que reforça os MEUS (tabela `CAMPOS`).
@@ -1074,13 +1297,34 @@ namespace DuelServer
                 if (campo.code != 0)
                 {
                     var cfg = CAMPOS[campo.code];
-                    int beneficiados = MonstrosFaceUp(me)
-                        .Count(c => (_cards.Stats(c).Race & cfg.Raca) != 0);
-                    if (beneficiados > 0)
+
+                    // Raça OU atributo: a Mountain reforça por RAÇA, A Legendary
+                    // Ocean por ATRIBUTO. Ler só a raça deixava a segunda de fora
+                    // em silêncio — e é justamente ela que alcança o Legendary
+                    // Fisherman, que é Warrior.
+                    int beneficiados = MonstrosFaceUp(me).Count(c =>
+                    {
+                        var st = _cards.Stats(c);
+                        return (cfg.Raca != 0 && (st.Race & cfg.Raca) != 0)
+                               || (cfg.Atributo != 0 && (st.Attribute & cfg.Atributo) != 0);
+                    });
+
+                    // O GANHO NÃO É SÓ ATK. Uma carta que conta como "Umi" liga a
+                    // proteção do Legendary Fisherman — ele passa a não poder ser
+                    // alvo de ataque. Medir só o bônus faria o NPC guardar a Umi
+                    // com o Fisherman em campo, que é o caso em que ela mais vale:
+                    // o Fisherman é Warrior e não ganha ATK nenhum dela.
+                    int protegidos = CONTAM_COMO_UMI.Contains(campo.code)
+                        ? MonstrosFaceUp(me).Count(c => IMUNES_A_MAGIA_COM_UMI.Contains(c))
+                        : 0;
+
+                    if (beneficiados > 0 || protegidos > 0)
                         return new Play("activate", campo.index,
-                            $"magia de campo {campo.code}: +{cfg.Bonus} em {beneficiados} monstro(s) meu(s)");
+                            $"magia de campo {campo.code}: +{cfg.Bonus} em {beneficiados} monstro(s) meu(s)" +
+                            (protegidos > 0 ? $" e protege {protegidos}" : ""));
+
                     _log($"guarda a magia de campo {campo.code}: nenhum monstro meu " +
-                         "da raca que ela reforca — ativaria so' para o outro lado");
+                         "ganha nem fica protegido — ativaria so' para o outro lado");
                 }
             }
 
@@ -1160,12 +1404,53 @@ namespace DuelServer
                      (!precisoDeCorpo ? "meu campo ja' resolve o turno" : $"o custo em LP me deixaria abaixo de {LP_PISO}"));
             }
 
-            // 5.4 Insect Imitation — tributa 1 inseto (o DecideSelect já sacrifica
-            //     o de menor ATK) para trazer um Inseto de nível +1 do PRÓPRIO
-            //     deck. Sempre vale: troca o inseto mais fraco por um mais forte.
+            // 5.376 TEMPLO ESQUECIDO DAS PROFUNDEZAS (Mako). Duas coisas na mesma
+            //       oferta: pôr a carta em campo (sempre bom — o nome vira "Umi")
+            //       e o efeito de banir, que só sai com motivo. Ver `MotivoDoTemplo`.
+            //
+            //       Vem logo depois da regra genérica do corpo de graça porque é
+            //       ela que o disparava errado: o banco marca o Templo como
+            //       INVOCAÇÃO ESPECIAL por causa do retorno na End Phase.
+            if (Ativavel(q, FORGOTTEN_TEMPLE))
+            {
+                var (ativar, alvo, porque) = MotivoDoTemplo(me, "", 0, -1);
+                if (ativar)
+                {
+                    _proximoAlvoDoTemplo = alvo;
+                    return new Play("activate", IdxAtivavel(q, FORGOTTEN_TEMPLE), $"Templo: {porque}");
+                }
+                _log($"guarda o Templo — {porque ?? "nenhum monstro meu esta' em risco"}");
+            }
+
+            // 5.4 Insect Imitation — tributa 1 monstro meu para trazer do PRÓPRIO
+            //     deck um Inseto de nível +1. Quem sai é o corpo mais barato do
+            //     campo (`_proximoTributoBarato`, cumprido no `DecideSelect`).
+            //
+            //     "Sempre vale" era falso, e o relato de um duelo real mostrou
+            //     as duas pontas do prejuízo:
+            //
+            //       • o corpo que sai não pode estar EQUIPADO — o equipamento vai
+            //         junto para o cemitério, e um Nv+1 qualquer do deck
+            //         raramente paga as duas cartas;
+            //       • se ele é o meu ÚNICO monstro e já segura a maior ameaça do
+            //         outro lado, tributá-lo é desmontar o campo às cegas: o Lua
+            //         traz um Inseto de nível +1, não um mais FORTE.
             if (Ativavel(q, INSECT_IMITATION))
-                return new Play("activate", IdxAtivavel(q, INSECT_IMITATION),
-                    "Insect Imitation: tributa o inseto mais fraco por um mais forte do deck");
+            {
+                var sai = CorpoMaisBarato(me);
+                bool equipado = sai.code != 0 && sai.valor > ValorImpressoNaPosicao(sai.code, sai.pos);
+                bool seguraSozinho = QtdMonstros(me) == 1 && ameaca > 0 && sai.valor >= ameaca;
+                if (!equipado && !seguraSozinho)
+                {
+                    _proximoTributoBarato = true;
+                    return new Play("activate", IdxAtivavel(q, INSECT_IMITATION),
+                        $"Insect Imitation: tributa o corpo mais barato ({sai.code}, vale {sai.valor}) " +
+                        "por um Inseto de nivel +1 do deck");
+                }
+                _log("guarda Insect Imitation: " + (equipado
+                    ? $"o corpo mais barato ({sai.code}) esta' equipado — o equipamento iria junto"
+                    : $"{sai.code} e' o meu unico monstro e ja' segura a ameaca ({ameaca})"));
+            }
 
             // 5.5 Remoção e burn (decks de queima como o do Joey):
             //   • remoção de monstro (Raigeki/Dark Hole/Fissure) só com alvo;
@@ -1629,7 +1914,8 @@ namespace DuelServer
                 var escolha = MelhorEquipEntre(q.choices, me);
                 if (escolha.index >= 0)
                 {
-                    _log($"Armory Call: escolhe {escolha.code} (+{escolha.ganho} ATK em {escolha.alvo})");
+                    _proximoAlvoDoEquip = escolha.zona;
+                    _log($"Armory Call: escolhe {escolha.code} (+{escolha.ganho} em {escolha.alvo}, zona {escolha.zona})");
                     return new List<int> { escolha.index };
                 }
                 _log("Armory Call: nenhum equipamento do deck serve ao meu campo — " +
@@ -1694,6 +1980,105 @@ namespace DuelServer
 
             byte loc = q.choices[0].location;
 
+            // Alvo do Templo: a regra já escolheu QUEM salvar (o que morre na End
+            // Phase, ou o que a destruição do outro lado mira). Sem isto a escolha
+            // cairia no critério genérico de maior ATK e baniria o monstro errado
+            // — tirando do campo justamente o que estava segurando o turno.
+            if (escolhaUnica && loc == MZONE && _proximoAlvoDoTemplo != 0)
+            {
+                uint alvo = _proximoAlvoDoTemplo;
+                _proximoAlvoDoTemplo = 0;
+                var mira = q.choices.FirstOrDefault(c => c.code == alvo);
+                if (mira.code == alvo) return new List<int> { mira.index };
+            }
+
+            // ALVO DO EQUIPAMENTO: a regra já escolheu a ZONA (`MelhorEquipPor`),
+            // porque foi olhando aquele monstro — e a posição dele — que ela
+            // decidiu que valia gastar a carta. A zona, e não o código: duas
+            // cópias do mesmo monstro não se distinguem pelo código, e é comum
+            // uma estar de pé e a outra deitada.
+            if (escolhaUnica && loc == MZONE && _proximoAlvoDoEquip >= 0)
+            {
+                int zona = _proximoAlvoDoEquip;
+                _proximoAlvoDoEquip = -1;
+                var mira = q.choices.FirstOrDefault(c => c.controller == me && c.sequence == zona);
+                if (mira.code != 0)
+                {
+                    _log($"equipamento: no alvo que a regra escolheu ({mira.code}, zona {zona})");
+                    return new List<int> { mira.index };
+                }
+                // A zona não veio na lista (o motor pode ter recusado aquele
+                // alvo). Cair no critério geral aqui seria pôr o reforço no
+                // monstro do OUTRO lado: vários equipamentos aceitam alvo dos
+                // dois lados (o `AddEquipProcedure` com o jogador em `nil`), e o
+                // geral abaixo mira justamente o campo do oponente. Então o pior
+                // caso é o melhor corpo MEU, nunca um deles.
+                var meuMelhorAlvo = q.choices
+                    .Where(c => c.controller == me)
+                    .OrderByDescending(AmeacaDoAlvo)
+                    .FirstOrDefault();
+                if (meuMelhorAlvo.code != 0)
+                {
+                    _log($"equipamento: a zona {zona} nao foi oferecida — vai no meu melhor corpo " +
+                         $"({meuMelhorAlvo.code})");
+                    return new List<int> { meuMelhorAlvo.index };
+                }
+                _log($"equipamento: a zona {zona} nao foi oferecida e nao ha' corpo meu na lista");
+            }
+
+            // CUSTO DE RELEASE (Insect Imitation): paga com o corpo mais barato,
+            // a MESMA conta do ramo de tributo lá em cima. Sem isto ele caía na
+            // regra genérica de "o mais forte", que é certa para remoção e
+            // exatamente o avesso do que um custo quer.
+            if (loc == MZONE && _proximoTributoBarato)
+            {
+                _proximoTributoBarato = false;
+                var meusEmCampo = q.choices.Where(c => c.controller == me).ToList();
+                if (meusEmCampo.Count >= need)
+                {
+                    foreach (var c in meusEmCampo.OrderBy(c => AmeacaDoAlvo(c)))
+                    {
+                        if (picks.Count >= need) break;
+                        picks.Add(c.index);
+                    }
+                    _log("custo: paga com o(s) corpo(s) mais barato(s) do meu campo");
+                    return picks;
+                }
+            }
+
+            // ALVO EM CAMPO com os DOIS LADOS na mesma lista: isso é REMOÇÃO, e
+            // remoção mira o monstro do OUTRO.
+            //
+            // O critério genérico lá embaixo ordena por ATK sem perguntar de
+            // QUEM é a carta — então bastava o meu monstro ser o maior ATK da
+            // mesa para o efeito virar contra mim. Foi o que o jogador relatou:
+            // o Wevil virou o Inseto Devorador de Homens com dois monstros do
+            // jogador de pé do outro lado, e destruiu o próprio inseto, que
+            // estava com o maior ATK porque ele mesmo o tinha acabado de
+            // equipar.
+            //
+            // A ordem é pelo número que a BATALHA usa (`AmeacaDoAlvo`): de pé
+            // vale o ATK, deitado vale a DEF, e sempre pelo valor de AGORA.
+            //
+            // Só entra quando o lado dele tem quantos alvos o motor pediu —
+            // responder menos que o `selMin` faz o core repetir a pergunta e o
+            // duelo trava sem erro nenhum.
+            {
+                var noCampo = q.choices.Where(c => c.location == MZONE).ToList();
+                var dele = noCampo.Where(c => c.controller != me).ToList();
+                if (noCampo.Any(c => c.controller == me) && dele.Count >= need)
+                {
+                    foreach (var c in dele.OrderByDescending(AmeacaDoAlvo))
+                    {
+                        if (picks.Count >= need) break;
+                        picks.Add(c.index);
+                    }
+                    _log($"alvo em campo: a lista tinha carta minha junto — mira o lado do oponente " +
+                         $"({string.Join(", ", picks.Select(i => q.choices[i].code))})");
+                    return picks;
+                }
+            }
+
             // Alvo de uma remoção de magia/armadilha: o critério genérico abaixo
             // ordena por ATK, que para magia/armadilha é sempre 0 — na prática
             // ele estourava a primeira zona da lista. Com a leitura, escolhe a
@@ -1743,6 +2128,52 @@ namespace DuelServer
             _fieldOf(me).Where(c => _cards.Stats(c).IsMonster).ToList();
 
         /// <summary>
+        /// **Quanto um equipamento rende NA POSIÇÃO em que o alvo está.**
+        ///
+        /// De pé, o que conta é o ATK; deitado, a DEF — a mesma conta do
+        /// <see cref="ValorNaBatalha"/>, e pelo mesmo motivo: é esse o número
+        /// que a batalha usa. Um Gust Fan (+400 ATK / −200 DEF) num monstro
+        /// deitado não rende +400: rende −200.
+        /// </summary>
+        static int GanhoDoEquip(Equipamento e, int pos) =>
+            (pos & (POS_DEFESA | POS_DEFESA_VIRADA)) != 0 ? e.BonusDef : e.Bonus;
+
+        /// <summary>
+        /// Os meus monstros que podem RECEBER um equipamento, já com a posição e
+        /// a zona. Mesmo conjunto que o <see cref="MonstrosFaceUp"/> devolve (o
+        /// `eqfilter` do Lua exige a face para cima); a diferença é carregar
+        /// junto o que decide se o bônus vale alguma coisa.
+        /// </summary>
+        List<(uint code, int pos, int seq, DatabaseManager.CardStats st)> AlvosDeEquip(int me) =>
+            AbertosDe(me).Select(m => (m.code, m.pos, m.seq, st: _cards.Stats(m.code))).ToList();
+
+        /// <summary>Este equipamento serve neste monstro? (raça/atributo da
+        /// tabela × banco de cartas — ver <see cref="EQUIPAMENTOS"/>).</summary>
+        static bool EquipServe(Equipamento e, DatabaseManager.CardStats st) =>
+            (e.Raca == 0 || (st.Race & e.Raca) != 0)
+            && (e.Atributo == 0 || (st.Attribute & e.Atributo) != 0);
+
+        /// <summary>
+        /// O melhor reforço que está na MINHA MÃO para um monstro que ainda vai
+        /// entrar em campo — usado pela <see cref="DecidePosicao"/>.
+        ///
+        /// Não é leitura escondida: são cartas do próprio NPC.
+        /// </summary>
+        (uint code, int bonus, int bonusDef) ReforcoNaMaoPara(uint alvo, int me)
+        {
+            (uint code, int bonus, int bonusDef) melhor = (0, 0, 0);
+            var st = _cards.Stats(alvo);
+            if (!st.IsMonster) return melhor;
+            foreach (var c in _handOf(me))
+            {
+                if (!EQUIPAMENTOS.TryGetValue(c, out var e) || e.Bonus <= 0) continue;
+                if (!EquipServe(e, st)) continue;
+                if (e.Bonus > melhor.bonus) melhor = (c, e.Bonus, e.BonusDef);
+            }
+            return melhor;
+        }
+
+        /// <summary>
         /// Entre os equipamentos que o motor ofereceu, o que rende mais ATK num
         /// monstro que eu realmente controlo.
         ///
@@ -1763,37 +2194,45 @@ namespace DuelServer
         /// `index` −1 quando não há nada que valha a pena: sem monstro meu com a
         /// face para cima, ou só equipamento que a tabela não conhece.
         /// </summary>
-        (int index, uint code, int ganho, uint alvo) MelhorEquipDaMao(
-            InteractiveDuel.Question q, int me)
+        (int index, uint code, int ganho, uint alvo, int zona) MelhorEquipDaMao(
+            InteractiveDuel.Question q, int me) =>
+            MelhorEquipPor(q.activatable.Select(a => (a.index, a.code)), me);
+
+        (int index, uint code, int ganho, uint alvo, int zona) MelhorEquipEntre(
+            IReadOnlyList<InteractiveDuel.Sel> opcoes, int me) =>
+            MelhorEquipPor(opcoes.Select(o => (o.index, o.code)), me);
+
+        /// <summary>
+        /// **Qual equipamento, e em QUEM** — a conta única das duas pontas (a
+        /// carta ativável da mão e a carta que o Armory Call trouxe do deck).
+        /// Antes eram duas cópias da mesma regra, só porque as listas têm tipos
+        /// diferentes (`Act` × `Sel`); hoje as duas passam por aqui.
+        ///
+        /// O critério mudou em dois pontos, e os dois vieram de um duelo real:
+        ///
+        ///   • o ganho é medido **na posição em que o alvo está**
+        ///     (<see cref="GanhoDoEquip"/>). Um equipamento do ciclo por
+        ///     atributo (+400 ATK / −200 DEF) num monstro DEITADO não reforça
+        ///     nada: tira 200 do único número que aquela batalha vai usar. Ganho
+        ///     ≤ 0 não é candidato — a carta fica na mão para quando houver
+        ///     atacante;
+        ///   • a `zona` do alvo volta junto. Sem ela a regra escolhia a carta
+        ///     pensando num alvo e o `DecideSelect` seguinte equipava em OUTRO
+        ///     (o de maior ATK impresso, que é justamente o deitado). Duas
+        ///     pontas com contas diferentes decidem coisas diferentes — a mesma
+        ///     armadilha do `ValorDoTributoQueSai`.
+        ///
+        /// `index` −1 quando não há nada que valha a pena: sem monstro meu com a
+        /// face para cima, só equipamento que a tabela não conhece, ou só alvo
+        /// em quem o bônus não renderia nada.
+        /// </summary>
+        (int index, uint code, int ganho, uint alvo, int zona) MelhorEquipPor(
+            IEnumerable<(int index, uint code)> opcoes, int me)
         {
-            var meus = MonstrosFaceUp(me).Select(c => (code: c, st: _cards.Stats(c))).ToList();
-            (int index, uint code, int ganho, uint alvo) melhor = (-1, 0, 0, 0);
+            var meus = AlvosDeEquip(me);
+            (int index, uint code, int ganho, uint alvo, int zona) melhor = (-1, 0, 0, 0, -1);
+            int valorDoMelhorAlvo = -1;
             if (meus.Count == 0) return melhor;
-
-            foreach (var a in q.activatable)
-            {
-                if (!EQUIPAMENTOS.TryGetValue(a.code, out var e) || e.Bonus <= 0) continue;
-
-                foreach (var m in meus)
-                {
-                    bool serve = (e.Raca == 0 || (m.st.Race & e.Raca) != 0)
-                              && (e.Atributo == 0 || (m.st.Attribute & e.Atributo) != 0);
-                    if (!serve) continue;
-                    // Mesmo desempate do outro: com bônus igual, reforça o MAIOR
-                    // ATK — é ele que ataca.
-                    if (e.Bonus > melhor.ganho ||
-                        (e.Bonus == melhor.ganho && m.st.AtkValue > _cards.Stats(melhor.alvo).AtkValue))
-                        melhor = (a.index, a.code, e.Bonus, m.code);
-                }
-            }
-            return melhor;
-        }
-
-        (int index, uint code, int ganho, uint alvo) MelhorEquipEntre(
-            IReadOnlyList<InteractiveDuel.Sel> opcoes, int me)
-        {
-            var meus = MonstrosFaceUp(me).Select(c => (code: c, st: _cards.Stats(c))).ToList();
-            (int index, uint code, int ganho, uint alvo) melhor = (-1, 0, 0, 0);
 
             foreach (var o in opcoes)
             {
@@ -1801,15 +2240,19 @@ namespace DuelServer
 
                 foreach (var m in meus)
                 {
-                    bool serve = (e.Raca == 0 || (m.st.Race & e.Raca) != 0)
-                              && (e.Atributo == 0 || (m.st.Attribute & e.Atributo) != 0);
-                    if (!serve) continue;
-                    // Empate no bônus: reforça o MAIOR ATK. É ele que ataca, e
-                    // +400 num 1800 vira 2200 — passa por cima de mais coisa que
-                    // os mesmos +400 num 1200.
-                    if (e.Bonus > melhor.ganho ||
-                        (e.Bonus == melhor.ganho && m.st.AtkValue > _cards.Stats(melhor.alvo).AtkValue))
-                        melhor = (o.index, o.code, e.Bonus, m.code);
+                    if (!EquipServe(e, m.st)) continue;
+                    int ganho = GanhoDoEquip(e, m.pos);
+                    if (ganho <= 0) continue;
+                    // Empate no ganho: reforça quem já vale mais na mesa. É ele
+                    // que resolve a batalha, e +400 num 1800 passa por cima de
+                    // mais coisa que os mesmos +400 num 1200.
+                    int valorAlvo = ValorNaBatalha(m.code, m.pos, me, m.seq);
+                    if (ganho > melhor.ganho ||
+                        (ganho == melhor.ganho && valorAlvo > valorDoMelhorAlvo))
+                    {
+                        melhor = (o.index, o.code, ganho, m.code, m.seq);
+                        valorDoMelhorAlvo = valorAlvo;
+                    }
                 }
             }
             return melhor;
@@ -1999,13 +2442,25 @@ namespace DuelServer
             // prejuízo é o mesmo 1-por-1, então que seja com o corpo mais barato.
             var punidora = SetadaDele(foe, PUNE_O_ATACANTE);
 
-            // ataque direto: dano de graça. Só o corpo escolhido muda com a leitura.
+            // ATAQUE DIRETO: dano de graça, e sempre a melhor jogada disponível
+            // para o corpo que pode fazê-lo. Só o corpo escolhido muda com a
+            // leitura.
+            //
+            // `canDirect` vem do BYTE do motor, não de uma conta nossa — e é por
+            // isso que esta regra já cobre um caso que ninguém escreveu aqui: o
+            // Amphibious Bugroth MK-11 e o Mega Fortress Whale atacam direto
+            // ENQUANTO A UMI ESTIVER EM CAMPO, mesmo com o campo do oponente
+            // cheio, e o motor marca o flag sozinho. O comentário antigo dizia
+            // "campo do oponente vazio", e a explicação chegava assim à tela do
+            // jogador — errada exatamente nos casos mais interessantes.
             var diretos = q.attackers.Where(a => a.canDirect).ToList();
             if (diretos.Count > 0)
             {
                 var a = Atacante(diretos, punidora != 0, 0, me);
+                bool campoVazio = QtdMonstros(foe) == 0;
                 return new BattlePlay(true, a.index,
-                    $"campo do oponente vazio — ataque direto com {a.code} " +
+                    (campoVazio ? "campo do oponente vazio" : "passa por cima dos monstros dele") +
+                    $" — ataque direto com {a.code} " +
                     $"(ATK {AtkEmCampo(a.code, me, a.sequence)})" +
                     (punidora != 0 ? $" [o mais barato: ele tem {punidora} baixada]" : ""));
             }
@@ -2374,14 +2829,37 @@ namespace DuelServer
             if (!podeAtaque) return FACEUP_DEFESA;
 
             var st = _cards.Stats(code);
-            if (st.AtkValue > st.DefValue)
+            int atk = st.AtkValue, def = st.DefValue;
+
+            // **O equipamento que está na minha mão faz parte desta conta.**
+            //
+            // A posição é decidida ANTES de a regra do equipamento rodar, e a
+            // regra do equipamento só reforça quem está DE PÉ — então um corpo
+            // que entra deitado nunca recebe o reforço que estava reservado para
+            // ele, e o reforço nunca chega a existir. O relato foi exatamente
+            // este: o inseto entrou em DEFESA e ganhou o equipamento assim
+            // mesmo, ficando com ATK maior que o do monstro do jogador (número
+            // que aquela batalha nem usa) e DEF abaixo do ATK dele.
+            //
+            // Somando o bônus antes de comparar, o mesmo inseto entra DE PÉ e o
+            // equipamento passa a valer.
+            var reforco = ReforcoNaMaoPara(code, me);
+            if (reforco.bonus > 0)
             {
-                _log($"posicao de {code} ({st.AtkValue}/{st.DefValue}): ataque (ATK > DEF)");
+                atk += reforco.bonus;
+                def += reforco.bonusDef;
+                _log($"posicao de {code}: conta o {reforco.code} da minha mao " +
+                     $"({st.AtkValue}/{st.DefValue} vira {atk}/{def})");
+            }
+
+            if (atk > def)
+            {
+                _log($"posicao de {code} ({atk}/{def}): ataque (ATK > DEF)");
                 return POS_ATAQUE;
             }
 
-            var (bate, porque) = BaterRendeMaisQueAParede(st.AtkValue, st.DefValue, 1 - me);
-            _log($"posicao de {code} ({st.AtkValue}/{st.DefValue}): " +
+            var (bate, porque) = BaterRendeMaisQueAParede(atk, def, 1 - me);
+            _log($"posicao de {code} ({atk}/{def}): " +
                  (bate ? "ataque" : "defesa") + $" — {porque}");
             return bate ? POS_ATAQUE : FACEUP_DEFESA;
         }
@@ -2412,6 +2890,133 @@ namespace DuelServer
         /// responde a seleção é a chamada seguinte.
         /// </summary>
         uint _proximoAlvoStPerigosa;
+
+        /// <summary>
+        /// O monstro que o Templo vai banir — decidido por `MotivoDoTemplo` e
+        /// consumido pelo `DecideSelect`. Mesmo padrão do
+        /// `_proximoAlvoStPerigosa`: sem isto a seleção cai no critério genérico
+        /// (o de maior ATK) e o Templo baniria o monstro errado — justamente o
+        /// que segurava o campo, em vez do que ia morrer sozinho.
+        /// </summary>
+        uint _proximoAlvoDoTemplo;
+
+        /// <summary>
+        /// A ZONA do meu monstro que deve receber o próximo equipamento —
+        /// decidida por `MelhorEquipPor` e cumprida pelo `DecideSelect`. −1 =
+        /// nenhuma.
+        ///
+        /// Sem isto as duas pontas discordavam em silêncio: a regra escolhia a
+        /// carta pensando num alvo (o que está DE PÉ, onde o bônus de ATK rende)
+        /// e a seleção seguinte caía no critério genérico — maior ATK impresso
+        /// —, que é justamente o monstro deitado, para quem aquele bônus não
+        /// vale nada.
+        /// </summary>
+        int _proximoAlvoDoEquip = -1;
+
+        /// <summary>
+        /// A próxima seleção de monstro MEU em campo é um CUSTO (o release da
+        /// Insect Imitation), não um alvo: paga-se com o corpo mais barato, não
+        /// com o melhor.
+        ///
+        /// O custo dela chega como `MSG_SELECT_CARD`, não como
+        /// `MSG_SELECT_TRIBUTE` (é `Duel.SelectReleaseGroupCost`), então o ramo
+        /// de tributo do `DecideSelect` não o via e a regra genérica —
+        /// "alvo/reborn: o mais forte" — sacrificava o MAIOR monstro do campo.
+        /// A regra 5.4 sempre disse, no comentário, que tributava o mais fraco;
+        /// o código fazia o contrário, e nada acusava.
+        /// </summary>
+        bool _proximoTributoBarato;
+
+        /// <summary>Alvo legal do Templo: Nv≤4 e Fish/Sea Serpent/Aqua.</summary>
+        bool AlcancadoPeloTemplo(uint code)
+        {
+            var st = _cards.Stats(code);
+            return st.IsMonster && st.Level > 0 && st.Level <= 4
+                   && (st.Race & (R_FISH | R_SEASERPENT | R_AQUA)) != 0;
+        }
+
+        /// <summary>
+        /// Vale ativar o Templo AGORA — e em quem?
+        ///
+        /// A pergunta é uma só: "vou perder este monstro?". Banir sem motivo é
+        /// pior que não fazer nada — o monstro sai do campo, deixa de bloquear, e
+        /// só volta na End Phase de um turno MEU (`Duel.IsTurnPlayer(tp)` no Lua).
+        /// Banido à toa no meu turno ele volta no fim dele e nada mudou; banido à
+        /// toa no turno do oponente, eu fico sem bloqueador de graça.
+        ///
+        /// Dois motivos, nesta ordem:
+        ///
+        ///   A. **Condenado.** Instant Fusion e Ready Fusion trazem uma Fusão do
+        ///      Extra que elas mesmas DESTROEM na End Phase. Banido, o monstro
+        ///      não está em campo para ser destruído, e o Templo o devolve na
+        ///      mesma End Phase — o corpo fica de vez. Neste deck só o Rare Fish
+        ///      (Nv4, Fish) cabe nas duas regras: as outras quatro Fusões são
+        ///      Nv5/6 e o Templo não as alcança.
+        ///
+        ///   B. **Ameaçado.** O oponente acabou de ativar algo que destrói
+        ///      monstro. O efeito do Templo é RÁPIDO (`EFFECT_TYPE_QUICK_O`),
+        ///      então sai no turno dele e o monstro escapa.
+        ///
+        /// E uma trava, que veio de ver o NPC jogando bem: se eu JÁ TENHO como
+        /// trazer o monstro de volta — Torrential Reborn baixado, Premature Burial
+        /// na mão — deixar morrer é melhor que banir. O Torrential Reborn revive
+        /// E queima 500 por cabeça; o Templo só devolve. Gastar o uso do Templo
+        /// aqui é abrir mão da jogada melhor.
+        ///
+        /// `_setStOf(me)` são as MINHAS cartas baixadas: não é leitura escondida
+        /// nem depende do nível do NPC — são cartas dele, que ele mesmo baixou.
+        /// </summary>
+        (bool ativar, uint alvo, string porque) MotivoDoTemplo(int me, string gatilhoKind, uint gatilhoCode, int gatilhoPlayer)
+        {
+            // A MESMA oferta cobre duas coisas diferentes, e confundi-las custa a
+            // carta inteira: enquanto o Templo está BAIXADO, o que o motor oferece
+            // é a ativação da CARTA (o efeito de banir mora em `LOCATION_SZONE` e
+            // exige que ela já esteja em campo). Pôr o Templo em campo é sempre
+            // bom e não custa nada — o nome dele vira "Umi", que é o que liga o
+            // The Legendary Fisherman. Tratar isso como "banir sem motivo" e
+            // recusar deixaria o Templo baixado a partida inteira.
+            if (_setStOf(me).Contains(FORGOTTEN_TEMPLE))
+                return (true, 0, "poe o Templo em campo — o nome dele vira Umi e liga o Fisherman");
+
+            var elegiveis = _fieldOf(me).Where(AlcancadoPeloTemplo).ToList();
+            if (elegiveis.Count == 0) return (false, 0, null);
+
+            bool podeReviver = _setStOf(me).Contains(TORRENTIAL_REBORN)
+                               || NaMao(me, PREMATURE_BURIAL);
+
+            // A. O corpo com prazo de validade. Reconhecido pelo TIPO (0x40 =
+            //    Fusão): num deck sem Polymerization, uma Fusão em campo só pode
+            //    ter vindo do Instant/Ready Fusion, e as duas matam o que
+            //    trouxeram. Mesmo que viesse de uma fusão de verdade, banir
+            //    custaria pouco — ela volta na End Phase deste mesmo turno.
+            uint condenado = elegiveis.FirstOrDefault(c => (_cards.Stats(c).Type & TYPE_FUSION) != 0);
+            if (condenado != 0)
+            {
+                if (podeReviver)
+                    return (false, 0, $"guarda o Templo: {condenado} morre na End Phase, mas eu a revivo sem gastar o uso");
+                return (true, condenado, $"bane {condenado} antes da End Phase — ela seria destruida pela propria carta que a trouxe");
+            }
+
+            // B. O outro lado acabou de ativar destruição de monstro.
+            //
+            //    Com a Umi em campo, alguns dos meus são IMUNES A MAGIA — e banir
+            //    um deles para escapar de uma magia é queimar o uso do Templo
+            //    contra uma ameaça que não existe. Por isso a ameaça é filtrada
+            //    contra cada candidato, e não julgada uma vez só.
+            if (gatilhoKind == "activation" && gatilhoPlayer == 1 - me
+                && gatilhoCode != 0 && Perfil(gatilhoCode).DestroiMonstro)
+            {
+                bool ameacaEhMagia = (_cards.Stats(gatilhoCode).Type & TYPE_SPELL) != 0;
+                var expostos = elegiveis.Where(c => !(ameacaEhMagia && ImuneAMagia(c))).ToList();
+                if (expostos.Count == 0)
+                    return (false, 0, $"guarda o Templo: {gatilhoCode} e' magia e os meus estao imunes com a Umi em campo");
+
+                uint salvar = expostos.OrderByDescending(c => _cards.Stats(c).AtkValue).First();
+                return (true, salvar, $"bane {salvar} para escapar de {gatilhoCode}");
+            }
+
+            return (false, 0, null);
+        }
 
         /// <summary>
         /// A carta da MÃO que a jogada em curso vai pôr em campo — decidida pela
@@ -2531,8 +3136,31 @@ namespace DuelServer
             // chega SEMPRE na mesma cadeia da carta que abriu a janela, e a regra
             // de baixo o matava toda vez. Foi o que se viu em duelo: 2100 de ATK
             // parados na mão a partida inteira.
+            // O TEMPLO DO MAKO, antes da regra do corpo de graça — que é
+            // justamente quem o disparava errado. Ver `MotivoDoTemplo`.
+            var templo = q.choices.FirstOrDefault(c => c.code == FORGOTTEN_TEMPLE);
+            if (templo.code == FORGOTTEN_TEMPLE)
+            {
+                var (ativar, alvo, porque) = MotivoDoTemplo(me, q.chainTriggerKind, q.chainTriggerCode, q.chainTriggerPlayer);
+                if (ativar)
+                {
+                    _proximoAlvoDoTemplo = alvo;
+                    _jaEncadeou = true;
+                    PorqueDaCadeia = $"Templo: {porque}";
+                    _log($"chain: {PorqueDaCadeia}");
+                    return templo.index;
+                }
+                _log($"chain: guarda o Templo — {porque ?? "nenhum monstro meu esta' em risco"}");
+            }
+
+            // CORPO DE GRAÇA. A carta que tem regra própria fica de fora: o
+            // Templo é marcado como INVOCAÇÃO ESPECIAL pelo banco (0x100000) por
+            // causa do retorno na End Phase, e sem esta trava ele caía aqui como
+            // "põe corpo em campo" — quando ativar TIRA um corpo do campo. Era o
+            // que fazia o Mako banir o próprio monstro em toda janela de corrente.
             var corpoDeGraca = q.choices.FirstOrDefault(
-                c => !CONTRA.ContainsKey(c.code) && Perfil(c.code).InvocaEspecial);
+                c => !CONTRA.ContainsKey(c.code) && !COM_REGRA_PROPRIA.Contains(c.code)
+                     && Perfil(c.code).InvocaEspecial);
             if (corpoDeGraca.code != 0 && QtdMonstros(me) <= QtdMonstros(foe))
             {
                 _jaEncadeou = true;
@@ -2553,6 +3181,13 @@ namespace DuelServer
                 // significa que a negação NÃO compensava (custo alto demais ou
                 // gatilho fraco). Ativar pela regra genérica desfaria a decisão.
                 if (CONTRA.ContainsKey(c.code)) continue;
+
+                // Mesmo argumento para quem tem REGRA PRÓPRIA: ela já olhou e
+                // disse não. A regra genérica abaixo parte de "o motor só abre a
+                // janela no momento certo", e isso é falso para efeito de
+                // `EVENT_FREE_CHAIN` — o Templo do Mako é oferecido em TODA
+                // janela de corrente, e sem esta linha ele era ativado em todas.
+                if (COM_REGRA_PROPRIA.Contains(c.code)) continue;
 
                 if (!REMOCAO_ST.Contains(c.code))
                 {

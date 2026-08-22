@@ -34,6 +34,28 @@ function Ok($texto) { Write-Host "  OK   $texto" -ForegroundColor Green }
 function Aviso($texto) { Write-Host "  !    $texto" -ForegroundColor Yellow }
 function Falhar($texto) { Write-Host "  ERRO $texto" -ForegroundColor Red; exit 1 }
 
+# Impressao digital dos fontes da CASCA (duel-server\host). O `publicar.exe`
+# calcula a mesma coisa em C# e compara — entao as duas contas tem de bater byte
+# a byte. Formato: uma linha "caminho/relativo|sha256" por arquivo, ordenadas
+# por ORDINAL (nao pela cultura, que muda de maquina), unidas por \n, e o sha256
+# disso tudo em hex minusculo.
+function DigitalDaCasca($raiz) {
+  $host_ = Join-Path $raiz 'duel-server\host'
+  if (-not (Test-Path $host_)) { return '' }
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $linhas = [System.Collections.Generic.List[string]]::new()
+  foreach ($f in Get-ChildItem $host_ -Recurse -File -Filter *.cs) {
+    $rel = $f.FullName.Substring($host_.Length).TrimStart('\', '/').Replace('\', '/')
+    $h = [System.BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($f.FullName)))
+    $linhas.Add("$rel|$($h.Replace('-', '').ToLowerInvariant())")
+  }
+  $linhas.Sort([StringComparer]::Ordinal)
+
+  $tudo = [System.Text.Encoding]::UTF8.GetBytes(($linhas -join "`n"))
+  return [System.BitConverter]::ToString($sha.ComputeHash($tudo)).Replace('-', '').ToLowerInvariant()
+}
+
 Write-Host "`n  ####  CLASSIC DUELS - EMPACOTAR  ####" -ForegroundColor Yellow
 
 # --------------------------------------------------------- 0. conferir o release
@@ -234,6 +256,21 @@ if ($sobras) {
   Write-Host "       copie-os junto do ClassicDuels.exe ao compartilhar." -ForegroundColor Yellow
   $sobras | ForEach-Object { Copy-Item $_.FullName (Join-Path $dist $_.Name) -Force }
 }
+
+# A DIGITAL DA CASCA. O `publicar.exe` compara os fontes de `duel-server\host`
+# com isto para saber se o exe em dist\ ficou para tras — a casca e' a unica
+# parte que ainda viaja dentro do executavel, e um Release com ela velha
+# entregaria uma casca antiga carregando um motor novo, em silencio.
+#
+# Por CONTEUDO, e nunca por data de modificacao: copiar a pasta do projeto entre
+# maquinas reescreve a data de todo arquivo de uma vez, e um mtime assim
+# acusaria mudanca em fonte que ninguem tocou. (A digital do cards.zip usa
+# tamanho+data de proposito - la' sao 21 mil arquivos e ler 41 MB custaria mais
+# que o ganho; aqui sao seis.)
+$cache = Join-Path $dist '.cache'
+if (-not (Test-Path $cache)) { New-Item -ItemType Directory -Path $cache -Force | Out-Null }
+Set-Content -Path (Join-Path $cache 'casca.digital') `
+            -Value (DigitalDaCasca $root) -Encoding ascii -NoNewline
 
 Remove-Item $stage -Recurse -Force
 $tamanho = [math]::Round((Get-Item $exeFinal).Length / 1MB, 1)

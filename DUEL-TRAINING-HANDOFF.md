@@ -680,7 +680,23 @@ responde-se com o formato normal de seleção → o combate resolve.
 Traz ATK/DEF dos dois e quem morreu — o motor já resolveu tudo, isto é só relato.
 Dano, destruição e ida ao cemitério vêm de graça (MSG_DAMAGE + MSG_MOVE).
 
-**SELECT_CHAIN (16):** resposta `int32 -1` (não encadear).
+**SELECT_CHAIN (16):** `type(1) player(1) speCount(1) forced(1) hintTiming(4)
+hintOutro(4) count(4)` + entrada de **23 bytes**:
+`code(4) ctrl(1) loc(1) seq(4) pos(4) description(8) flag(1)`.
+Resposta `int32 -1` (não encadear).
+⚠️ A `description` (offset **+14** da entrada) é a única coisa que diz **QUAL
+efeito** da carta seria encadeado. Uma carta com dois efeitos é oferecida DUAS
+vezes, com o mesmo `code` e a mesma arte: o Forgotten Temple of the Deep aparece
+igual para "banir 1 peixe" (`str1`) e para "Invocar Especialmente o banido"
+(`str2`), e sem ela o jogador ativa um achando que ativou o outro. Ela vem `0`
+quando o efeito não tem texto próprio — o caso da ATIVAÇÃO de uma armadilha
+comum (a Mirror Force sai com 8 bytes zerados, medido no `--probe-chain`), e aí
+a tela não diz nada em vez de inventar. Quem traduz o número em frase é o
+servidor (`DatabaseManager.TextoDoEfeito`, tabela `texts` do `cards.cdb`), e não
+o navegador: o `cards.json` do `ygo-data` guarda `strings` **compactado**
+(descarta as colunas vazias), e em 373 cartas do banco há buraco no meio — ali o
+índice do motor apontaria para a descrição ERRADA, que é o defeito que este
+campo existe para corrigir. Guarda de regressão: `--test-efeitos`.
 ⚠️ A janela lista **só as suas cartas ativáveis** — ela NÃO diz a que elas
 responderiam. Quem sabe disso são as mensagens que vêm ANTES, no mesmo buffer:
 **MSG_SUMMONING (60)** / **MSG_SPSUMMONING (62)** (invocação em andamento) e
@@ -697,6 +713,9 @@ O MSG_CHAINING também vira **evento de tela** (`{type:"chaining", code, control
 O `move` não serve de substituto — uma armadilha já baixada não troca de lugar ao
 ser ativada, e um efeito de monstro em campo não move nada. Coberto por
 `--test-chain` (a Mirror Force ativada tem de aparecer no evento, com `controller = 0`).
+**SELECT_EFFECTYN (12):** `player(1) code(4) ctrl(1) loc(1) seq(4) pos(4)
+description(8)` = 24 bytes com o `type`. A `description` (offset **+16**) é a
+mesma do SELECT_CHAIN: qual efeito da carta está sendo oferecido.
 **SELECT_POSITION (19):** resposta `int32 posição` (POS_FACEUP_ATTACK=0x1).
 **MSG_MOVE (50):** `code(4)` + prev`{ctrl(1)loc(1)seq(4)pos(4)}` + curr`{...}` + reason(4)`.
 **MSG_POS_CHANGE (53):** `code(4) ctrl(1) loc(1) seq(1) posAnterior(1) posAtual(1)`.

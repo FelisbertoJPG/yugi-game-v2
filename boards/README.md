@@ -42,16 +42,31 @@ boards/
 - `zones` é um mapa `id → retângulo`. O `id` segue a mesma convenção que o
   `duel.html` já usa internamente para as zonas do campo: `p{jogador}:{zona}`,
   onde `{zona}` é `m0`–`m4` (monstro), `s0`–`s4` (magia/armadilha), `f`
-  (campo), `deck`, `extra`, `gy` (cemitério) ou `hand` (mão) — mais um item
-  só, sem prefixo de jogador: `mid` (LP e indicador de fase). `mid` não é uma
-  zona do motor (LP não tem localização pro `ocgcore`), mas é editável do
-  mesmo jeito; sem ele no board, o `duel.html` recentraliza sozinho.
+  (campo), `deck`, `extra`, `gy` (cemitério), `banido` (as cartas fora do
+  jogo) ou `hand` (mão).
+- `gy` e `banido` não são "cinco zonas" como as de monstro: são **pilhas**, e
+  o tabuleiro só diz onde elas ficam. Na tela cada uma mostra a carta do topo
+  (a última a cair) com o total num selo, e abre a lista inteira ao clique. A
+  pilha de banidas pode ter carta com a **face para baixo** — aí vem o verso,
+  porque o código dela nem chega do servidor.
+- Mais três itens **sem prefixo de jogador**, que não são zona do motor
+  (nenhuma carta "mora" ali) e existem só para poder ser posicionados:
+  `mid` (o indicador de fase), `acts` (os botões de fase) e `correntes` (o
+  modo das correntes). Sem eles no board, o `duel.html` recentraliza sozinho.
+  Os **LP não estão aqui**: eles moram no placar do topo da tela, fora da
+  arena, e por isso não são posicionáveis.
 - A maioria das zonas é um "slot" de carta com proporção fixa (a mesma que o
   `duel.html` já usa, 59:86) — por isso só têm `size` (a largura; a altura
-  segue sozinha). `hand` e `mid` são áreas livres, com `w`/`h` de verdade.
+  segue sozinha). `hand`, `mid`, `acts` e `correntes` são áreas livres, com
+  `w`/`h` de verdade.
 - Não existe zona "inventada" além dessas: todo `id` tem que corresponder a
-  uma zona que o `ocgcore` realmente entende (ou `mid`, a única exceção de
-  UI). O editor não deixa criar `id` fora dessa lista.
+  uma localização que o `ocgcore` realmente entende (ou a um dos três itens de
+  UI acima). O editor não deixa criar `id` fora dessa lista.
+- **Board salvo antes de uma zona existir não perde nada**: ao abrir, o editor
+  (`backfillMissingZones`) e o duelo (`loadActiveBoard`) completam o que
+  faltar com a posição do layout padrão. É por isso que `defaultLayout()` tem
+  de conhecer TODA zona do schema — o par é guardado por
+  `node web/js/boards.test.mjs`.
 
 ## Como grava
 

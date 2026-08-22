@@ -24,11 +24,12 @@ import {
   listCampaignNames, npcLevel,
 } from '/web/js/npcs.js';
 import {
-  getDP, hydrateWallet, npcsVencidos, decksVencidos, ownsCard, ownedCount,
+  getDP, hydrateWallet, npcsVencidos, decksVencidos,
 } from '/web/js/wallet.js';
 import {
-  carregarDrops, dropsDoDeck, chancesDe, RARIDADES, totalDoPool,
+  carregarDrops, dropsDoDeck, chancesDe, totalDoPool,
 } from '/web/js/drops.js';
+import { renderGavetas, fraseDaColecao } from '/web/js/gavetas.js';
 import { pullFile } from '/web/js/projectstore.js';
 import { ordenarCampanha, liberados } from '/web/js/trilhaordem.js';
 import { decksLiberados } from '/web/js/decksnpc.js';
@@ -206,40 +207,26 @@ function listaDeDecks(npc, lista, atual) {
  */
 function abrirDrops(npc, cfg, nomeDoDeck) {
   if (!cfg) return;
-  const pct = chancesDe(cfg.pool);
   // O pool e' do DECK, entao o titulo diz de qual — dois decks do mesmo
   // adversario largam coisas diferentes, e so' "Drops — Para & Dox" mentiria
   // sobre qual lista esta' na tela.
   $('drops-titulo').textContent = nomeDoDeck
     ? `Drops — ${npc.name} · ${nomeDoDeck}` : `Drops — ${npc.name}`;
+
+  // As gavetas sao as MESMAS da Loja (`gavetas.js`): a pergunta do jogador e'
+  // a mesma nos dois lugares, e duas copias da caixa divergiriam calado.
+  const resumo = renderGavetas($('drops-corpo'), cfg.pool, {
+    nomeDe: nameOf,
+    arte: ART_P,
+    chances: chancesDe(cfg.pool),
+  });
+
   $('drops-sub').innerHTML =
     `${cfg.quantidade} carta(s) por vitória, sorteadas de um pool de ${totalDoPool(cfg.pool)}. `
     + 'A raridade é sorteada primeiro (pelas chances abaixo), a carta depois. '
-    + '<b style="color:var(--green,#3fd68a)">✔</b> = já está na sua Coleção.';
+    + '<b style="color:var(--green,#3fd68a)">✔</b> = já está na sua Coleção — '
+    + fraseDaColecao(resumo);
 
-  const corpo = $('drops-corpo');
-  corpo.replaceChildren();
-  for (const r of RARIDADES) {
-    const ids = cfg.pool[r] ?? [];
-    if (!ids.length) continue;
-    const g = document.createElement('div');
-    g.className = `gaveta ${r}`;
-    g.innerHTML = `<h3>${r} <span class="pct">${pct[r]}% de chance · ${ids.length} carta(s)</span></h3>`;
-    const cartas = document.createElement('div');
-    cartas.className = 'cartas';
-    for (const id of ids) {
-      const tem = ownsCard(id);
-      const c = document.createElement('div');
-      c.className = `carta${tem ? ' tenho' : ''}`;
-      c.title = nameOf(id) + (tem ? ` — você tem ${ownedCount(id)}` : ' — ainda não caiu');
-      c.innerHTML = `<img src="${ART_P(id)}" alt="" loading="lazy">`
-        + (tem ? '<span class="marca">✔</span>' : '')
-        + `<div class="nm">${nameOf(id)}</div>`;
-      cartas.append(c);
-    }
-    g.append(cartas);
-    corpo.append(g);
-  }
   $('drops-back').classList.add('show');
 }
 

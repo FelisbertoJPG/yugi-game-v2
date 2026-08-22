@@ -1,0 +1,53 @@
+/*
+ * **As gavetas por raridade** — a lista de cartas de um conteúdo.
+ *
+ * Nasceu na lista de drops da Trilha de Duelos e hoje serve também a Loja ("ver
+ * as cartas" de um booster e de um Deck Estrutural). Está num arquivo à parte
+ * pelo mesmo motivo do `gavetas.js`: eram duas telas prometendo a mesma coisa
+ * ao jogador, e duas cópias de um visual divergem sem ninguém perceber — uma
+ * ganha o selo de "você tem" e a outra não.
+ *
+ * Quem usa precisa de: um `<div class="gav-back">` (o fundo escuro, que ganha
+ * `.show` para aparecer) com um `.gav-box` dentro.
+ */
+
+.gav-back {
+  position: fixed; inset: 0; background: #000c; z-index: 60; display: none;
+  align-items: center; justify-content: center; padding: 20px;
+}
+.gav-back.show { display: flex; }
+
+.gav-box {
+  background: var(--panel); border: 2px solid var(--gold); padding: 18px;
+  max-width: min(680px, 96vw); max-height: 86vh; overflow: auto;
+}
+.gav-box h2 { margin: 0 0 4px; color: var(--gold); font-size: 17px; }
+.gav-box .sub { font-size: 11px; color: var(--dim); margin-bottom: 14px; }
+
+.gaveta { margin-bottom: 14px; }
+.gaveta h3 {
+  margin: 0 0 6px; font-size: 12px; letter-spacing: 1px;
+  display: flex; align-items: center; gap: 8px;
+}
+.gaveta h3 .pct { color: var(--dim); font-weight: normal; letter-spacing: 0; }
+.gaveta.UR h3 { color: #e8c46a; } .gaveta.SR h3 { color: #cbb7ff; }
+.gaveta.R h3 { color: #7fd0ff; }  .gaveta.N h3 { color: #cfd6de; }
+
+.cartas { display: flex; gap: 8px; flex-wrap: wrap; }
+.carta { width: 68px; position: relative; }
+.carta img { width: 100%; display: block; border: 1px solid var(--line); }
+.carta.tenho img { border-color: var(--green, #3fd68a); }
+.carta .marca {
+  position: absolute; top: 2px; right: 2px; font-size: 11px;
+  background: #04121fdd; border-radius: 2px; padding: 0 3px;
+}
+/* Quantas cópias o conteúdo traz (um Deck Estrutural leva 3 da mesma carta).
+   Fica no canto oposto ao ✔ para os dois nunca se cobrirem. */
+.carta .qtd {
+  position: absolute; top: 2px; left: 2px; font-size: 10px; font-weight: bold;
+  color: var(--gold); background: #04121fdd; border-radius: 2px; padding: 0 3px;
+}
+.carta .nm { font-size: 9px; color: var(--dim); margin-top: 2px; line-height: 1.2; }
+
+/* Sem nenhuma carta: dizer isso é melhor que uma caixa vazia. */
+.gav-box .nada { font-size: 12px; color: var(--dim); font-style: italic; padding: 10px 0; }

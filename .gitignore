@@ -94,6 +94,12 @@ duel-academy.pdb
 duel-academy-stop.exe
 duel-academy-stop.pdb
 
+# Publicador na raiz: artefato de build, refeito com `npm run publicar:build`.
+publicar.exe
+publicar.pdb
+publicar/bin/
+publicar/obj/
+
 # Distribuicao (`npm run pack`): 61 MB de artefato regeneravel. O payload.zip e'
 # intermediario e o proprio script o apaga; fica listado caso um pack quebre no
 # meio e deixe o arquivo para tras.
@@ -160,3 +166,4 @@ supabase/.temp/
 # arena — as .dll do Windows continuam versionadas porque nao temos como
 # recompila-las aqui. Ver "oq-faltou" / INSTALADOR.md.
 duel-server/native/libocgcore.so
+bancada.html

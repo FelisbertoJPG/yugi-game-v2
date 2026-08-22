@@ -6,6 +6,7 @@
 <title>Trilha de Duelos — Classic Duels</title>
 <link rel="icon" href="/web/img/icone.png">
 <link rel="stylesheet" href="/web/css/ui.css">
+<link rel="stylesheet" href="/web/css/gavetas.css">
 <style>
   body { display: flex; flex-direction: column; }
 
@@ -124,35 +125,8 @@
   }
   .no .cadeado { font-size: 26px; opacity: .8; }
 
-  /* ---------- a lista de drops ---------- */
-  #drops-back {
-    position: fixed; inset: 0; background: #000c; z-index: 60; display: none;
-    align-items: center; justify-content: center; padding: 20px;
-  }
-  #drops-back.show { display: flex; }
-  .drops-box {
-    background: var(--panel); border: 2px solid var(--gold); padding: 18px;
-    max-width: min(680px, 96vw); max-height: 86vh; overflow: auto;
-  }
-  .drops-box h2 { margin: 0 0 4px; color: var(--gold); font-size: 17px; }
-  .drops-box .sub { font-size: 11px; color: var(--dim); margin-bottom: 14px; }
-  .gaveta { margin-bottom: 14px; }
-  .gaveta h3 {
-    margin: 0 0 6px; font-size: 12px; letter-spacing: 1px;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .gaveta h3 .pct { color: var(--dim); font-weight: normal; letter-spacing: 0; }
-  .gaveta.UR h3 { color: #e8c46a; } .gaveta.SR h3 { color: #cbb7ff; }
-  .gaveta.R h3 { color: #7fd0ff; }  .gaveta.N h3 { color: #cfd6de; }
-  .cartas { display: flex; gap: 8px; flex-wrap: wrap; }
-  .carta { width: 68px; position: relative; }
-  .carta img { width: 100%; display: block; border: 1px solid var(--line); }
-  .carta.tenho img { border-color: var(--green, #3fd68a); }
-  .carta .marca {
-    position: absolute; top: 2px; right: 2px; font-size: 11px;
-    background: #04121fdd; border-radius: 2px; padding: 0 3px;
-  }
-  .carta .nm { font-size: 9px; color: var(--dim); margin-top: 2px; line-height: 1.2; }
+  /* A lista de drops usa as GAVETAS de `web/css/gavetas.css`, as mesmas da
+     Loja — o jogador vê a mesma caixa nos dois lugares porque é a mesma. */
   .hint { font-size: 11px; color: var(--dim); padding: 8px 14px; background: var(--bg2); }
 </style>
 </head>
@@ -188,8 +162,8 @@
   <div class="trilha" id="trilha"></div>
 </div>
 
-<div id="drops-back">
-  <div class="drops-box">
+<div id="drops-back" class="gav-back">
+  <div class="gav-box">
     <h2 id="drops-titulo">Lista de drops</h2>
     <div class="sub" id="drops-sub"></div>
     <div id="drops-corpo"></div>

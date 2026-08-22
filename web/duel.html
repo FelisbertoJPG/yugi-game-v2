@@ -13,6 +13,72 @@
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--red); margin-right:5px; }
   .dot.on { background: var(--green); }
 
+  /* ---------- HUD do topo: LP · turno · LP (o placar do Tag Force) ----------
+     Fica FORA da `.arena` de propósito: ela tem `zoom: 1.25` e um layout que
+     pode vir do editor de campo, e o placar não é zona de carta — nenhuma
+     carta "mora" ali. É também por isso que a `mid` do tabuleiro ficou só com
+     a FASE: LP em dois lugares seriam duas verdades para manter em sincronia.
+
+     Ele é montado uma vez no HTML e só ATUALIZADO por `atualizarHud()` — se
+     fosse reconstruído a cada `render()` a barra de LP nunca animaria, porque
+     a transição de CSS precisa do mesmo elemento nos dois estados. */
+  .hud { display: flex; align-items: stretch; flex: none;
+         background: var(--panel); border-bottom: 2px solid var(--line); }
+  .hud-side {
+    flex: 1 1 0; min-width: 0; position: relative;
+    display: flex; align-items: center; gap: 10px; padding: 5px 14px;
+    background: linear-gradient(180deg, #16203aee, #0e1626ee);
+    border-bottom: 3px solid transparent; transition: border-color .2s, background .2s;
+  }
+  .hud-side.opp { flex-direction: row-reverse; text-align: right; }
+  /* De quem é a vez: o lado ativo acende. É o mesmo dado que o rótulo "turno"
+     da barra do topo dava por escrito, agora no lugar em que se está olhando. */
+  .hud-side.on { border-bottom-color: var(--gold);
+                 background: linear-gradient(180deg, #23334fee, #131e33ee); }
+  .hud-num { flex: none; font: 700 21px/1 ui-monospace, monospace;
+             color: var(--gold); text-shadow: 0 2px 4px #000; }
+  .hud-side.opp .hud-num { color: #f0a0a8; }
+  .hud-lp { flex: 1 1 auto; min-width: 0; }
+  .hud-nome { font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+              color: var(--dim); white-space: nowrap; overflow: hidden;
+              text-overflow: ellipsis; margin-bottom: 3px; }
+  .hud-side.on .hud-nome { color: var(--ink); }
+  .hud-bar { height: 7px; background: #060a11; border: 1px solid var(--line); overflow: hidden; }
+  .hud-bar i { display: block; height: 100%; width: 100%;
+               background: linear-gradient(90deg, #2f6fa8, #7fc4ff);
+               transition: width .45s cubic-bezier(.3,.8,.4,1); }
+  .hud-side.opp .hud-bar i { background: linear-gradient(270deg, #a83a46, #ff8d99); }
+  /* O golpe: a faixa pisca e o número do dano sobe e some. Feedback do que
+     acabou de acontecer — o log já dizia, mas ninguém lê log no meio da jogada. */
+  .hud-side.dano { animation: hud-golpe .45s ease-in-out; }
+  @keyframes hud-golpe {
+    0%, 100% { transform: translateX(0); background: linear-gradient(180deg, #4a1620ee, #2a0e14ee); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+  }
+  .hud-delta {
+    position: absolute; left: 14px; top: 2px; z-index: 3; pointer-events: none;
+    font: 700 16px/1 ui-monospace, monospace; text-shadow: 0 2px 5px #000;
+    animation: hud-sobe 1.1s ease-out forwards;
+  }
+  .hud-side.opp .hud-delta { left: auto; right: 14px; }
+  .hud-delta.dano { color: #ff6b6b; }
+  .hud-delta.cura { color: var(--green); }
+  @keyframes hud-sobe {
+    0%   { opacity: 0; transform: translateY(6px) scale(.8); }
+    18%  { opacity: 1; transform: translateY(0) scale(1.15); }
+    30%  { transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-22px) scale(1); }
+  }
+  .hud-turn {
+    flex: none; width: 88px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 1px;
+    background: linear-gradient(180deg, #2b3554, #131a2b);
+    border-left: 1px solid var(--line2); border-right: 1px solid var(--line2);
+  }
+  .hud-turn b { font: normal 9px/1 ui-monospace, monospace; letter-spacing: 2px; color: var(--dim); }
+  .hud-turn span { font: 700 19px/1 ui-monospace, monospace; color: var(--gold); text-shadow: 0 2px 4px #000; }
+
   /* zoom escala o cenário inteiro (cartas, zonas, mãos, midbar) de uma vez —
      inclusive os widths que o JS seta inline — mantendo tudo alinhado. +25%. */
   .arena { flex: 1; zoom: 1.25; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; overflow: auto; }
@@ -63,14 +129,9 @@
     background: #0c141d url('/web/assets/back_card.png') center / cover no-repeat;
     border: 1px solid #2a1c08;
   }
-  .actbar { display:flex; gap:6px; align-items:center; }
-  .actbar b { color: var(--gold); }
-  .actbar button { font-size: 11px; padding: 3px 10px; }
-
-  /* LP fica FORA do grupo elástico do meio, senão ele encolhe o LP do canto
-     direito antes de encolher a si mesmo. */
+  /* A barra do meio ficou só com a FASE: os LP subiram para o placar do topo
+     (`.hud`), fora da arena — ver o comentário lá em cima. */
   .midbar { display: flex; align-items: center; gap: 10px; padding: 4px; background: var(--panel); border: 1px solid var(--line); }
-  .midbar .lp { flex: none; }
   .mid-phases { display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-width: 0; }
   /* Só a fase ATUAL, como no Tag Force. Antes ficavam aqui as 6 pastilhas
      (DP/SP/M1/BP/M2/EP) mais os dois botões de fase; as 5 pastilhas apagadas
@@ -83,7 +144,6 @@
   }
   /* No turno do oponente o rótulo continua ali, mas apagado: a fase é dele. */
   .phase-now.opp { color: var(--dim); border-color: var(--line); }
-  .lp { font-size: 12px; color: var(--ink); }
 
   /* Botões de fase, ao lado do Deck. Empilhados porque a caixa é estreita e
      os rótulos são longos ("▶ Main Phase 2"); lado a lado quebrariam linha. */
@@ -111,6 +171,7 @@
   .zone.attacking { opacity: .45; }
 
   /* ---------- camada de animação (cartas em movimento) ---------- */
+  /* [bancada:fx] --- inicio --- */
   #fx { position: fixed; inset: 0; pointer-events: none; z-index: 55; overflow: hidden; }
   #fx .ghost {
     position: fixed; border-radius: 2px; overflow: hidden;
@@ -118,6 +179,23 @@
     transition: transform var(--fxdur, .28s) cubic-bezier(.4,.1,.2,1), opacity .2s;
   }
   #fx .ghost img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* [bancada:fx] --- fim --- */
+  /* [bancada:lp] --- inicio --- */
+  /* ---------- o número do dano/cura ----------
+     Nasce grande no meio da tela e voa até os LP de quem sofreu — e só quando
+     ele CHEGA o número muda. O `hud-delta` pequeno que já subia no HUD
+     continua: ele é a chegada, e é o que acompanha a troca do valor.
+     Vermelho tira, verde põe — a cor diz o sinal antes de o olho ler o "−". */
+  #fx .lp-voa {
+    position: fixed; pointer-events: none; white-space: nowrap;
+    font: 800 46px/1 ui-monospace, monospace;
+    text-shadow: 0 3px 12px #000, 0 0 22px #000a;
+    will-change: transform, opacity;
+    transition: transform var(--fxdur, .45s) cubic-bezier(.3,.75,.35,1), opacity .22s;
+  }
+  #fx .lp-voa.dano { color: #ff5f6b; }
+  #fx .lp-voa.cura { color: var(--green); }
+  /* [bancada:lp] --- fim --- */
   /* o verso do fantasma é o mesmo `.back` de cima — antes esta regra repetia
      o degradê inteiro, e as duas cópias podiam divergir sem ninguém notar */
   /* tremor do alvo quando é atingido por um ataque */
@@ -129,9 +207,72 @@
     80% { transform: translate(2px,-1px) rotate(1deg); }
   }
   .fx-hit { animation: fx-shake .28s ease-in-out; }
-  /* brilho rápido quando uma carta ativa seu efeito */
-  @keyframes fx-flash { 0%,100% { box-shadow: 0 0 0 0 #e8c46a00; } 50% { box-shadow: 0 0 10px 3px #e8c46acc; } }
-  .fx-activate { animation: fx-flash .5s ease-in-out; }
+
+  /* [bancada:seta] --- inicio ---
+     As sentinelas `[bancada:...]` delimitam o que `tools/bancada-visual.mjs`
+     FATIA daqui para montar a bancada visual. Marcador estavel de proposito:
+     recortar por um trecho de codigo qualquer quebra no primeiro ajuste de
+     CSS, e ja' quebrou duas vezes. */
+  /* ---------- a SETA da declaração de ataque ----------
+     "quem ataca quem", desenhado na mesa. Existe porque a janela de resposta
+     abria junto com a jogada do oponente: dava para ler no log que houve um
+     ataque, mas não QUAL monstro atacava QUAL — e é isso que decide se vale
+     gastar a armadilha.
+
+     z-index ACIMA da janela de resposta, de propósito: ela é o contexto da
+     pergunta, e ficar debaixo do véu seria escondê-la justamente na hora de
+     decidir. */
+  #atk-seta {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 82; overflow: visible;
+  }
+  #atk-seta[hidden] { display: none; }
+  #atk-seta .corpo {
+    fill: none; stroke: var(--red); stroke-width: 4; stroke-linecap: round;
+  }
+  #atk-seta .ponta { fill: var(--red); opacity: 0; animation: seta-ponta .2s ease-out .3s forwards; }
+  #atk-seta .halo {
+    fill: none; stroke: #000; stroke-width: 8; stroke-linecap: round; opacity: .55;
+  }
+  /* O traço nasce no atacante e CRESCE até a vítima, que é a direção da
+     leitura. O `--len` é o comprimento real da curva, medido no JS.
+     O padrão 9999 não é enfeite: sem ele, `var(--len)` sem valor deixa a
+     declaração inválida e o traço aparece inteiro de uma vez — e a animação
+     só é ligada (classe `cresce`) DEPOIS de o comprimento estar no elemento,
+     porque medir força o navegador a calcular estilo ali mesmo. */
+  #atk-seta .corpo, #atk-seta .halo {
+    stroke-dasharray: var(--len, 9999); stroke-dashoffset: var(--len, 9999);
+  }
+  #atk-seta .cresce { animation: seta-cresce .34s ease-out forwards; }
+  /* A mancha que marca o ALVO. Um RETÂNGULO borrado, com o formato da carta:
+     um anel sobra nos cantos e corta as bordas de cima e de baixo de uma carta
+     em pé. Ela nasce fora da arte (a folga do `haloDoAlvo`) e o `blur` come a
+     linha, então o que se vê é um brilho em volta — não uma borda desenhada. */
+  #atk-seta .alvo {
+    fill: none; stroke: var(--red); stroke-width: 7; opacity: 0;
+    filter: blur(7px);
+    animation: seta-alvo .55s ease-out .28s forwards;
+  }
+  @keyframes seta-cresce { to { stroke-dashoffset: 0; } }
+  @keyframes seta-ponta { to { opacity: 1; } }
+  @keyframes seta-alvo {
+    0%   { opacity: 0; transform: scale(1.35); }
+    65%  { opacity: .95; transform: scale(.98); }
+    100% { opacity: .75; transform: scale(1); }
+  }
+  /* [bancada:seta] --- fim --- */
+  /* [bancada:brilho] --- inicio --- */
+  /* Brilho de quem ACABOU de aparecer com a face para cima: a magia ativada, o
+     monstro invocado, a carta que virou para cima. Era discreto demais
+     (`0 0 10px 3px`) — num campo escuro e cheio, meio segundo de um halo fino
+     passa despercebido, que é o mesmo que não existir. Agora o halo é maior e
+     a carta clareia junto, o que o olho pega mesmo sem estar olhando para ela. */
+  @keyframes fx-flash {
+    0%, 100% { box-shadow: 0 0 0 0 #e8c46a00; filter: brightness(1); }
+    45%      { box-shadow: 0 0 22px 7px #e8c46a; filter: brightness(1.45); }
+  }
+  .fx-activate { animation: fx-flash .55s ease-in-out; z-index: 4; }
+  /* [bancada:brilho] --- fim --- */
 
   /* soltar SOBRE um monstro = tributá-lo */
   .zone.drop-tribute { outline: 2px dashed #c98b2e; outline-offset: -2px; }
@@ -186,9 +327,15 @@
      em vez de invadir o tabuleiro. A tipografia sobe junto — quadro grande com
      letra miúda não se lê melhor que quadro pequeno. */
   #inspetor {
-    position: fixed; left: 12px; top: 76px; z-index: 56;
+    /* O topo desceu 46px quando o placar (`.hud`) entrou entre a barra de
+       cima e a mesa — sem isso o inspetor abria por cima do LP. */
+    /* Acima das janelas de pergunta (corrente/sim-não, z 80): ele nasceu
+       atrás delas, e o efeito era que passar o mouse na carta oferecida numa
+       janela de corrente não mostrava nada — o painel abria escondido debaixo
+       do escurecido. Continua abaixo do fim de duelo (z 90). */
+    position: fixed; left: 12px; top: 122px; z-index: 85;
     width: clamp(230px, 19vw, 300px);
-    max-height: calc(100vh - 96px); overflow: hidden;
+    max-height: calc(100vh - 142px); overflow: hidden;
     background: #0c1118f2; border: 1px solid var(--line); border-radius: 5px;
     padding: 10px; pointer-events: none; display: none;
     box-shadow: 0 6px 20px #0009;
@@ -269,6 +416,20 @@
   .pilezone.has { cursor: pointer; border-style: solid; border-color: #555; color: var(--ink); }
   .pilezone.has:hover { border-color: var(--gold); }
   .pilezone .n { font-size: 15px; color: var(--gold); }
+
+  /* Cemitério com a ÚLTIMA carta enviada por cima — na mesa a pilha fica com a
+     face para cima, e quem está no topo é quem caiu por último. O contador vira
+     um selo no canto: o número continua ali, mas quem informa agora é a arte. */
+  .pilezone.comarte { padding: 0; overflow: hidden; border-style: solid; border-color: #6b4a1e; }
+  .pilezone.comarte img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pilezone.comarte .n {
+    position: absolute; right: 0; bottom: 0; z-index: 2; font-size: 11px;
+    background: #04121fe0; color: var(--gold); padding: 0 4px; border-top-left-radius: 3px;
+  }
+  .pilezone.comarte .rot {
+    position: absolute; left: 0; top: 0; z-index: 2; font-size: 8px;
+    background: #04121fcc; color: var(--dim); padding: 0 3px; letter-spacing: 1px;
+  }
 
   .gv-back { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; background: #000b; padding: 20px; }
   .gv-back.show { display: flex; }
@@ -357,11 +518,68 @@
   .pos-acts { display: flex; flex-direction: column; gap: 7px; }
   .pos-acts button { padding: 9px 14px; font-size: 13px; text-align: left; }
 
+  /* ---------- menu da carta (a "janelinha" do Tag Force) ----------
+     Clicou na carta, o quadro abre COLADO nela com o que dá para fazer. Ele
+     substituiu o modal central (`#pos-overlay`) para a mão e para o campo: o
+     modal escondia a mesa justamente na hora de decidir, e obrigava a olhar
+     para o meio da tela em vez de para a carta.
+
+     O `#pos-overlay` continua existindo para a pergunta de POSIÇÃO do motor
+     (SELECT_POSITION), que é modal de verdade — recusar trava o duelo.
+
+     Fica em `fixed`, fora da `.arena`: as coordenadas vêm de
+     `getBoundingClientRect()` (já com o zoom da arena embutido) e o menu não
+     pode herdar esse zoom, senão sairia 25% maior que o resto da tela. */
+  #cardmenu-fundo { position: fixed; inset: 0; z-index: 71; display: none; }
+  #cardmenu-fundo.show { display: block; }
+  #cardmenu {
+    position: fixed; z-index: 72; display: none; min-width: 178px; padding: 4px;
+    background: linear-gradient(180deg, #212a44f7, #131a2bf7);
+    border: 2px solid var(--gold); border-radius: 6px; box-shadow: 0 10px 26px #000c;
+  }
+  #cardmenu.show { display: block; }
+  #cardmenu .mtitulo {
+    padding: 3px 8px 5px; font-size: 10px; color: var(--dim); letter-spacing: .5px;
+    border-bottom: 1px solid var(--line); margin-bottom: 3px;
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #cardmenu .mi {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    padding: 7px 14px 7px 8px; border: 0; border-radius: 4px; background: none;
+    color: var(--ink); font-size: 13px; text-align: left; white-space: nowrap;
+  }
+  #cardmenu .mi .ic { flex: none; width: 18px; text-align: center; font-size: 13px; }
+  #cardmenu .mi .col { display: flex; flex-direction: column; }
+  #cardmenu .mi .sub {
+    font-size: 10.5px; color: var(--dim); white-space: normal;
+    max-width: 220px; line-height: 1.3; margin-top: 2px;
+  }
+  #cardmenu .mi:hover .sub, #cardmenu .mi:focus .sub { color: #4a3c12; }
+  #cardmenu .mi.prim { color: var(--gold); font-weight: bold; }
+  #cardmenu .mi:hover, #cardmenu .mi:focus {
+    background: var(--gold); color: #1a1408; outline: none;
+  }
+  /* A setinha que gruda o quadro na carta. `--seta` é a posição horizontal
+     dela, calculada pelo JS: o menu pode ser empurrado pela borda da tela e a
+     seta tem de continuar apontando para a carta, não para o meio do quadro. */
+  #cardmenu::after {
+    content: ""; position: absolute; left: var(--seta, 24px); bottom: -8px;
+    border: 7px solid transparent; border-bottom: 0; border-top-color: var(--gold);
+  }
+  #cardmenu.abaixo::after { bottom: auto; top: -8px; border-top: 0; border-bottom-color: var(--gold); }
+
   /* ---------- popup de corrente (ativar armadilha em resposta) ---------- */
   #chain-overlay {
     position: fixed; inset: 0; background: #000c; z-index: 80;
     display: flex; align-items: center; justify-content: center;
   }
+  /* Respondendo a um ATAQUE: a seta está na mesa e o quadro não pode tapá-la.
+     Ele encosta embaixo e o véu clareia — a pergunta é "responder a ISTO", e
+     "isto" está no campo, atrás. As duas linhas de monstro (a do oponente e a
+     sua) ficam no meio vertical da tela, que é exatamente onde um quadro
+     centralizado cai. */
+  #chain-overlay.com-seta { align-items: flex-end; background: #0007; }
+  #chain-overlay.com-seta .chain-box { margin-bottom: 12px; }
   #chain-overlay[hidden], #yn-overlay[hidden] { display: none; }
   #yn-overlay {
     position: fixed; inset: 0; background: #000c; z-index: 80;
@@ -373,16 +591,41 @@
   }
   .chain-box h3 { margin: 0 0 2px; color: var(--gold); font-size: 15px; }
   .chain-box .sub { font-size: 11px; color: var(--dim); margin-bottom: 12px; }
+  /* Uma LINHA por efeito oferecido, e não uma grade de miniaturas: a mesma
+     carta pode ser oferecida duas vezes (dois efeitos), e aí duas artes iguais
+     lado a lado não dizem qual é qual — quem separa é o texto do efeito. */
   .chain-cards {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-    gap: 8px; margin-bottom: 12px;
+    display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;
+    /* Cada linha e' bem mais alta que a miniatura de antes: com muitas
+       ofertas a caixa passaria da tela e o botao "nao ativar" sairia junto. */
+    max-height: 46vh; overflow-y: auto;
   }
-  .chain-card {
-    border: 2px solid var(--line); cursor: pointer; aspect-ratio: 59/86;
-    overflow: hidden; background: var(--panel2); position: relative;
+  .chain-opt {
+    /* `flex-start`, e nao `center`: com o texto impresso da carta a linha ficou
+       mais alta que a miniatura, e centrar deixava a arte flutuando no meio. */
+    display: flex; gap: 10px; align-items: flex-start; text-align: left;
+    border: 2px solid var(--line); background: var(--panel2);
+    padding: 6px; cursor: pointer; position: relative;
   }
-  .chain-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .chain-card:hover { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; }
+  .chain-opt img {
+    width: 52px; aspect-ratio: 59/86; object-fit: cover; display: block;
+    flex: none; background: var(--panel);
+  }
+  .chain-opt .txt { min-width: 0; }
+  .chain-opt .nome { color: var(--ink); font-size: 12px; line-height: 1.25; }
+  .chain-opt .efeito { color: var(--gold); font-size: 11px; line-height: 1.35; margin-top: 3px; }
+  /* O texto impresso da carta. Terceira linha, apagada de proposito: quem
+     manda e' a frase do EFEITO oferecido (acima); esta e' o contexto de quem
+     nao lembra o que a carta faz — e ate' aqui a janela nao dizia nada. */
+  .chain-opt .carta {
+    color: var(--dim); font-size: 10px; line-height: 1.3; margin-top: 3px;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .chain-opt:hover { border-color: var(--gold); }
+  .chain-box .dica { font-size: 10px; color: var(--dim); margin-bottom: 10px; }
+  .chain-box .efeito-frase { color: var(--gold); font-size: 11px; margin-top: 5px; line-height: 1.35; }
+  .chain-box .carta-frase { color: var(--dim); font-size: 10px; margin-top: 5px; line-height: 1.3; }
   .chain-acts { display: flex; gap: 8px; justify-content: flex-end; }
 
   /* ---------- popup de fim de duelo (vitória/derrota) ---------- */
@@ -527,9 +770,33 @@
   <h1>▚ TREINO</h1>
   <span class="status-line"><span class="dot" id="dot"></span><span id="conn">—</span></span>
   <span class="spacer"></span>
-  <span class="status-line">turno: <b id="turn">—</b></span>
   <button id="btn-desistir" class="btn-danger"
           title="encerra o duelo — no multiplayer, seu adversário vence">desistir</button>
+</div>
+
+<!--
+  O placar: LP de quem joga · o número do turno · LP do adversário. É a leitura
+  do Tag Force — os dois totais nas pontas e o turno no meio —, e por isso mora
+  aqui em cima, fora da mesa: durante a jogada o olho vai para a carta, e o
+  placar precisa estar sempre no mesmo lugar, sem depender de onde o editor de
+  campo pôs a barra do meio.
+-->
+<div class="hud">
+  <div class="hud-side you" id="hud-p0">
+    <div class="hud-num" id="hud-lp0">8000</div>
+    <div class="hud-lp">
+      <div class="hud-nome" id="hud-nome0">você</div>
+      <div class="hud-bar"><i id="hud-bar0"></i></div>
+    </div>
+  </div>
+  <div class="hud-turn"><b>TURNO</b><span id="hud-turno">—</span></div>
+  <div class="hud-side opp" id="hud-p1">
+    <div class="hud-num" id="hud-lp1">8000</div>
+    <div class="hud-lp">
+      <div class="hud-nome" id="hud-nome1">oponente</div>
+      <div class="hud-bar"><i id="hud-bar1"></i></div>
+    </div>
+  </div>
 </div>
 
 <div class="hint" id="prompt-bar"><span class="prompt" id="prompt">—</span></div>
@@ -562,6 +829,7 @@
   <div class="chain-box">
     <h3 id="chain-title">Ativar em resposta?</h3>
     <div class="sub" id="chain-sub"></div>
+    <div class="dica">segure a carta (ou clique com o botão direito) para ler o texto inteiro.</div>
     <div class="chain-cards" id="chain-cards"></div>
     <div class="chain-acts">
       <button id="chain-pass">não ativar</button>
@@ -615,6 +883,11 @@
 <div id="inspetor"></div>
 
 <div id="fx"></div>
+<svg id="atk-seta" hidden aria-hidden="true"></svg>
+
+<!-- O menu da carta e o fundo que o fecha ao primeiro clique fora. -->
+<div id="cardmenu-fundo"></div>
+<div id="cardmenu"></div>
 
 <div class="arena">
   <div class="handrow opp" id="hand-opp"></div>
@@ -651,6 +924,17 @@ import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
 import { decidirCorrente, normalizarModo, MODOS, MODO_PADRAO } from '/web/js/correntes.js';
 import { criarFilaDeVisoes } from '/web/js/filavisoes.js';
 import { acharServidor } from '/web/js/servidor.js';
+// O rótulo de "mudar posição" é REGRA (o motor tem um comando só e decide o
+// resultado sozinho), então mora fora do HTML e é provado em Node:
+// `node web/js/posicao.test.mjs`. Um rótulo errado não quebra nada — só
+// promete ao jogador uma jogada diferente da que vai acontecer.
+import { rotuloReposicao, estaVirada } from '/web/js/posicao.js';
+// A pilha de cartas BANIDAS. Também é regra (a carta virada que entra sem
+// código e volta com ele), então mora fora do HTML e se prova em Node:
+// `node web/js/banimento.test.mjs`.
+import { banir, desbanir, topoBanido, contarAbertas, LOCATION_BANIDO } from '/web/js/banimento.js';
+import { ofertasPorMao, linhasDeAtivacao, textoDoEfeito } from '/web/js/ofertas.js';
+import { geometriaDaSeta, centroDe, haloDoAlvo, mostrarCamada, esconderCamada } from '/web/js/setaataque.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -700,6 +984,17 @@ const PHASE_NOME = {
 let db = null;
 try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch {}
 const nameOf = (id) => db?.brief(id)?.name ?? String(id);
+/**
+ * O texto IMPRESSO da carta — o que ela faz, escrito nela.
+ *
+ * Mora no `cards.json` inteiro, que carrega em segundo plano (`dbFull`); antes
+ * de ele chegar isto devolve vazio e a tela simplesmente nao mostra a linha,
+ * em vez de mostrar "carregando" numa janela que exige uma decisao agora.
+ */
+function textoDaCarta(id) {
+  const t = dbFull?.get(id)?.desc;
+  return typeof t === 'string' ? t.trim() : '';
+}
 
 // Mesma janela de detalhes do navegador de cartas e do Deck Builder.
 injectHoldStyles(HOLD_MS);
@@ -724,6 +1019,11 @@ YgoDB.load('/ygo-data/data', { full: true }).then((completo) => {
   dbFull = completo;
   configureCardDetail({ db, full: completo });
   if (inspecionada) inspecionar(inspecionada);   // repinta com o efeito
+  // A janela de corrente pode estar ABERTA agora, esperando uma decisao — e ela
+  // nao se repinta sozinha. Sob `try` porque este `.then` roda enquanto o
+  // modulo ainda pode estar suspenso num `await` de topo: ali `question` esta'
+  // na zona morta do `let` e so' tocar nela seria ReferenceError.
+  try { renderChain(); } catch { /* boot ainda em curso: nao ha' janela aberta */ }
 }).catch(() => { /* sem o texto o inspetor continua útil */ });
 
 // estado do duelo no cliente
@@ -741,7 +1041,9 @@ let extraCards = { 0: [], 1: [] };
 let extraPicker = null;                       // { acts } quando a pilha do Extra foi clicada
 let selectedHand = null;                      // índice da carta da mão selecionada
 let deckName = '';                            // deck em uso
-function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: null, g: [] }; }
+// `g` é o cemitério (lista de códigos) e `b` a pilha de banidas (lista de
+// `{ code, virada }` — banir com a face para baixo existe, e aí não há código).
+function fresh() { return { m: Array(5).fill(null), s: Array(5).fill(null), f: null, g: [], b: [] }; }
 
 // ---------- tabuleiro customizado (editor de campo, web/campo.html) ----------
 // Sem tabuleiro ativo (o caso comum), nenhuma destas variáveis é usada e o
@@ -1140,7 +1442,9 @@ function chosenDeck() {
 async function start() {
   if (ehMultiplayer()) return startMultiplayer();
 
-  busy = false; $('fx').replaceChildren();   // aborta qualquer animação em curso
+  // Aborta qualquer animação em curso — a seta de ataque inclusive: duelo
+  // novo com a seta do anterior pendurada apontaria para zonas vazias.
+  busy = false; $('fx').replaceChildren(); ataquePendente = null; limparSeta();
   const deck = chosenDeck();
   const ids = deck ? deck.main : [];
   const extraIds = deck?.extra ?? [];
@@ -1151,6 +1455,7 @@ async function start() {
   ended = false; turnNo = 0; selectedHand = null;
   rewardGiven = false;
   dragging = null; pendingZone = null; fecharPopupPosicao(); fecharFimDuelo();
+  nomearHud(); atualizarHud();
   $('log').replaceChildren();
   // No modo Adversário o NPC joga com o PRÓPRIO deck; no Treino, os dois usam o seu.
   const npcIds = (advNpc && advDeck && advDeck.length) ? advDeck : ids;
@@ -1211,7 +1516,7 @@ async function start() {
  *    ponte não paga DP (é o que `partidas.modo = 'ponte'` registra).
  */
 async function startMultiplayer() {
-  busy = false; $('fx').replaceChildren();
+  busy = false; $('fx').replaceChildren(); ataquePendente = null; limparSeta();
 
   const meu = idsDoYdk(sala.meuYdk);
   const dele = idsDoYdk(sala.ydkAdversario);
@@ -1227,6 +1532,7 @@ async function startMultiplayer() {
   rewardGiven = true;          // trava o prêmio de vez neste modo
   dueloId = null;
   dragging = null; pendingZone = null; fecharPopupPosicao(); fecharFimDuelo();
+  nomearHud(); atualizarHud();
   $('log').replaceChildren();
 
   deckName = 'multiplayer';
@@ -1489,26 +1795,96 @@ function motivoDaCorrente(q) {
   return turn === 0 ? `Você está indo para a ${fase}` : `Seu oponente está indo para a ${fase}`;
 }
 
+/**
+ * **O que o efeito oferecido vai fazer**, na frase do próprio motor.
+ *
+ * Toda pergunta que envolve UM efeito carrega a descrição dele (o
+ * `aux.Stringid` do script, resolvido no servidor contra a tabela `texts` do
+ * cards.cdb — ver `DatabaseManager.TextoDoEfeito`). Sem ela, uma carta com dois
+ * efeitos é oferecida duas vezes com o mesmo nome e a mesma arte: o Forgotten
+ * Temple of the Deep pergunta igual para "banir 1 peixe" e para "Invocar
+ * Especialmente o banido", e quem clica acha que ativou um e resolve o outro.
+ *
+ * Vazio quando o motor não mandou descrição (efeito sem texto próprio, ou um
+ * texto de sistema que não mora no banco de cartas) — aí a tela não diz nada,
+ * em vez de dizer algo inventado.
+ */
+// `textoDoEfeito` mora em `/web/js/ofertas.js` — e' regra, e o teste a usa.
+
 function renderChain() {
   const q = (question && question.kind === 'chain' && question.player === 0
              && question.choices && question.choices.length) ? question : null;
   const box = $('chain-overlay');
   // Em auto/desligado a janela nem chega a piscar: quem responde é o `apply`.
-  if (!q || correnteAutomatica()) { box.hidden = true; return; }
+  if (!q || correnteAutomatica()) { box.hidden = true; box.classList.remove('com-seta'); return; }
   box.hidden = false;
+  // Respondendo a um ataque: o quadro sai do meio da mesa e a seta é repintada
+  // — o `render()` que acabou de rodar reconstruiu as zonas, e as coordenadas
+  // de antes apontam para elementos que já saíram do documento.
+  box.classList.toggle('com-seta', !!ataquePendente);
+  if (ataquePendente) desenharSeta();
 
   $('chain-sub').textContent = q.chainForced
     ? `${motivoDaCorrente(q)} — você precisa ativar uma destas cartas.`
     : `${motivoDaCorrente(q)} — deseja ativar uma carta?`;
 
   const frag = document.createDocumentFragment();
+  // Quantas vezes cada carta aparece: com duas linhas da MESMA carta, o texto
+  // do efeito deixa de ser enfeite e vira a única coisa que as separa.
+  const vezes = new Map();
+  for (const c of q.choices) vezes.set(c.code, (vezes.get(c.code) || 0) + 1);
+  const jaVistas = new Map();
+
   for (const c of q.choices) {
+    const n = (jaVistas.get(c.code) || 0) + 1;
+    jaVistas.set(c.code, n);
+
     const el = document.createElement('div');
-    el.className = 'chain-card';
-    el.innerHTML = `<img src="${ART(c.code)}" alt="">`;
-    el.title = `ativar ${nameOf(c.code)}`;
+    el.className = 'chain-opt';
+    const img = document.createElement('img');
+    img.src = ART(c.code); img.alt = '';
+    const txt = document.createElement('div');
+    txt.className = 'txt';
+    const nome = document.createElement('div');
+    nome.className = 'nome';
+    nome.textContent = nameOf(c.code);
+    txt.append(nome);
+
+    // O motor manda a DESCRIÇÃO do efeito que seria encadeado (`descText`).
+    // Sem ela, a única coisa honesta a dizer é que são efeitos diferentes da
+    // mesma carta — numerar na ordem em que o motor ofereceu, sem inventar o
+    // que cada um faz.
+    const oQueFaz = textoDoEfeito(c) || (vezes.get(c.code) > 1 ? `efeito ${n} desta carta` : '');
+    if (oQueFaz) {
+      const ef = document.createElement('div');
+      ef.className = 'efeito';
+      ef.textContent = oQueFaz;
+      txt.append(ef);
+    }
+    // E, abaixo, o texto impresso da carta. Sem ele a janela mostrava so' a
+    // arte e o nome: quem nao lembra de cor o que a carta faz decidia no
+    // escuro, e a unica saida era desistir da janela para poder ler.
+    const impresso = textoDaCarta(c.code);
+    if (impresso) {
+      const tc = document.createElement('div');
+      tc.className = 'carta';
+      tc.textContent = impresso;   // textContent: texto de carta e' dado, nao marcacao
+      txt.append(tc);
+    }
+    el.append(img, txt);
+    el.title = `ativar ${nameOf(c.code)}${oQueFaz ? ` — ${oQueFaz}` : ''}` + '\nsegurar: ver detalhes';
     espiar(el, c.code);
-    el.onclick = () => { box.hidden = true; act('chain', c.index, `ativar ${nameOf(c.code)}`); };
+
+    // Ler a carta antes de decidir: o mesmo gesto da mão e do campo. O
+    // `segurou()` é consultado no clique porque soltar o botão dispararia a
+    // ativação logo depois de abrir os detalhes.
+    const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(c.code));
+    el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(c.code); };
+    el.onclick = () => {
+      if (segurou()) return;
+      box.hidden = true;
+      act('chain', c.index, `ativar ${nameOf(c.code)}${oQueFaz ? ` (${oQueFaz})` : ''}`);
+    };
     frag.append(el);
   }
   $('chain-cards').replaceChildren(frag);
@@ -1525,9 +1901,28 @@ function renderYesno() {
   const frag = document.createDocumentFragment();
   if (q.kind === 'yesno') {
     $('yn-title').textContent = 'Efeito opcional';
-    $('yn-sub').innerHTML = q.askCode
+    // O QUE o efeito faz vem do motor (`askText`). "Ativar o efeito de X?"
+    // sozinho não distingue os dois efeitos de uma carta que tem dois.
+    const oQueFaz = textoDoEfeito({ descText: q.askText });
+    const alvo = q.askCode
       ? `Ativar o efeito de <b>${nameOf(q.askCode)}</b>?`
       : 'O efeito permite uma ação opcional. Aceitar?';
+    $('yn-sub').innerHTML = alvo;
+    if (oQueFaz) {
+      const ef = document.createElement('div');
+      ef.className = 'efeito-frase';
+      ef.textContent = oQueFaz;   // textContent: o texto da carta é dado, não marcação
+      $('yn-sub').append(ef);
+    }
+    // O texto impresso da carta, como na janela de corrente: "Ativar o efeito
+    // de X?" nao diz o que X faz para quem nao lembra de cor.
+    const impresso = q.askCode ? textoDaCarta(q.askCode) : '';
+    if (impresso) {
+      const tc = document.createElement('div');
+      tc.className = 'carta-frase';
+      tc.textContent = impresso;
+      $('yn-sub').append(tc);
+    }
     for (const [label, value, primary] of [['não', 0, false], ['sim', 1, true]]) {
       const b = document.createElement('button');
       b.textContent = label; if (primary) b.className = 'btn-primary';
@@ -1542,7 +1937,12 @@ function renderYesno() {
       : 'Escolha uma das opções oferecidas pelo efeito.';
     for (const [index, value] of (q.options || []).entries()) {
       const b = document.createElement('button');
-      b.textContent = value === 60 ? '👑 Cara' : value === 61 ? '🪙 Coroa' : `Opção ${index + 1}`;
+      // O texto da opção vem do motor (`optionTexts`), na mesma ordem. Onde ele
+      // falta (texto de sistema), sobra o número — que é o que a tela sempre
+      // mostrou e não diz nada sobre a escolha.
+      const rotulo = textoDoEfeito({ descText: (q.optionTexts || [])[index] });
+      b.textContent = value === 60 ? '👑 Cara' : value === 61 ? '🪙 Coroa'
+                    : rotulo || `Opção ${index + 1}`;
       if (index === 0) b.className = 'btn-primary';
       b.onclick = () => { box.hidden = true; act('option', index, `opção ${index + 1}`); };
       frag.append(b);
@@ -1560,9 +1960,14 @@ const prefersReduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
+/** O elemento de uma âncora (`0:hand:3`, `0:4:2`, `1:gy`…), ou null.
+ *  Buscado no documento, e não guardado: todo `render()` reconstrói a mesa,
+ *  então uma referência velha aponta para um nó já solto. */
+function elDaAncora(anchor) {
+  return anchor ? document.querySelector(`[data-anchor="${anchor}"]`) : null;
+}
 function anchorRect(anchor) {
-  if (!anchor) return null;
-  const el = document.querySelector(`[data-anchor="${anchor}"]`);
+  const el = elDaAncora(anchor);
   if (!el) return null;
   const r = el.getBoundingClientRect();
   return r.width && r.height ? r : null;
@@ -1578,6 +1983,7 @@ function locAnchor(ctrl, loc, seq) {
   if (loc === 8) return `${ctrl}:8:${seq}`;
   if (loc === 0x100) return `${ctrl}:8:5`;   // zona de campo
   if (loc === 0x10) return `${ctrl}:gy`;
+  if (loc === LOCATION_BANIDO) return `${ctrl}:banido`;
   if (loc === 1) return `${ctrl}:deck`;
   return null;
 }
@@ -1603,6 +2009,159 @@ async function flyGhost(from, to, code, face, dur = 280, endScale = 1) {
   await sleep(dur);
   g.remove();
 }
+// ---------------- a seta do ataque ----------------
+// O ataque tem DOIS momentos, e a tela juntava os dois: a DECLARAÇÃO (que abre
+// a janela de resposta) e a RESOLUÇÃO (o dano). A investida do atacante rodava
+// já na declaração, então quem ia responder via o golpe acontecer e só depois
+// era perguntado se queria impedi-lo — de trás para a frente.
+//
+// Agora a declaração desenha uma SETA de quem ataca até quem apanha, e ela FICA
+// na tela enquanto a janela de resposta está aberta. A investida virou a
+// resolução: sai quando o motor manda a batalha (ou o dano, no ataque direto).
+let ataquePendente = null;   // { atkCtrl, atkSeq, defCtrl, defSeq, direct }
+
+/** Onde o ataque começa e onde termina, em pixels de tela. */
+function pontosDoAtaque(a) {
+  const from = centroDe(anchorRect(`${a.atkCtrl}:4:${a.atkSeq}`));
+  const alvo = a.direct
+    ? containerRect(a.atkCtrl === 0 ? 'hand-opp' : 'hand-you')
+    : anchorRect(`${a.defCtrl}:4:${a.defSeq}`);
+  return {
+    from, to: centroDe(alvo), rect: alvo,
+    // O quanto a ponta recua: metade da carta, para não terminar debaixo da arte.
+    raio: alvo ? Math.max(alvo.width, alvo.height) * 0.62 : 0,
+  };
+}
+
+// Mostrar/esconder a camada mora em `setaataque.js`, com teste: `svg.hidden =
+// false` não faz nada num SVG, e foi assim que a seta foi publicada invisível.
+function limparSeta() {
+  const svg = $('atk-seta');
+  svg.replaceChildren();
+  esconderCamada(svg);
+}
+
+/**
+ * Desenha a seta. Redesenhável: `render()` reconstrói a mesa inteira e as
+ * coordenadas mudam (uma carta destruída no meio da corrente encolhe a fileira),
+ * então quem tem a seta na tela a repinta em vez de guardar posição velha.
+ */
+function desenharSeta(a = ataquePendente) {
+  if (!a || prefersReduced) return;
+  const { from, to, raio, rect } = pontosDoAtaque(a);
+  const svg = $('atk-seta');
+  // A conta mora em `/web/js/setaataque.js` — ela erra calado (um `NaN` no
+  // caminho não desenha nada e não avisa), então é testada de verdade.
+  const g = geometriaDaSeta(from, to, raio);
+  if (!g) { limparSeta(); return; }
+
+  svg.replaceChildren();
+  // Visível ANTES de medir: com `display:none` o `getTotalLength()` abaixo pode
+  // devolver 0, e aí o traço nasceria já inteiro (sem o "cresce") ou invisível.
+  // O viewBox sai do tamanho real do elemento, não de `innerWidth`: com barra
+  // de rolagem os dois não batem e a seta erraria o alvo por alguns pixels.
+  mostrarCamada(svg);
+  const larg = svg.clientWidth || window.innerWidth;
+  const alt = svg.clientHeight || window.innerHeight;
+  svg.setAttribute('viewBox', `0 0 ${larg} ${alt}`);
+  const el = (tag, attrs) => {
+    const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+  const halo = el('path', { d: g.d, class: 'halo' });
+  const corpo = el('path', { d: g.d, class: 'corpo' });
+  svg.append(halo, corpo, el('polygon', { points: g.abas, class: 'ponta' }));
+  // `mancha`, e não `halo`: `halo` ali em cima já é o contorno preto da seta.
+  const mancha = !a.direct && rect ? haloDoAlvo(rect) : null;
+  if (mancha)
+    svg.append(el('rect', {
+      ...mancha, class: 'alvo',
+      // O "cresce" da mancha parte do centro da carta, não do canto da tela.
+      style: `transform-origin: ${to.x}px ${to.y}px`,
+    }));
+  // Medir e SÓ ENTÃO ligar a animação: `getTotalLength()` obriga o navegador a
+  // calcular o estilo na hora, e se a animação já estivesse ligada ela
+  // começaria com o comprimento ainda por definir.
+  for (const linha of [halo, corpo]) {
+    linha.style.setProperty('--len', linha.getTotalLength());
+    linha.classList.add('cresce');
+  }
+}
+
+// Redimensionar a janela move as zonas e a seta ficaria apontando para onde
+// elas estavam. Repintar é barato e não tem estado: as coordenadas saem do
+// documento de agora.
+window.addEventListener('resize', () => { if (ataquePendente) desenharSeta(); });
+
+/**
+ * A investida — o golpe de verdade. Só sai quando o motor resolve a batalha,
+ * que é depois da janela de resposta: a armadilha que impede o ataque impede
+ * também a animação dele.
+ */
+async function resolverInvestida() {
+  const a = ataquePendente;
+  ataquePendente = null;
+  limparSeta();
+  if (!a || prefersReduced) return;
+  const from = anchorRect(`${a.atkCtrl}:4:${a.atkSeq}`);
+  const alvo = a.direct
+    ? containerRect(a.atkCtrl === 0 ? 'hand-opp' : 'hand-you')
+    : anchorRect(`${a.defCtrl}:4:${a.defSeq}`);
+  if (!from || !alvo) return;
+  const code = field[a.atkCtrl]?.m?.[a.atkSeq]?.code || 0;
+  const g = spawnGhost(from, code, 'art');
+  const dx = (alvo.left + alvo.width / 2) - (from.left + from.width / 2);
+  const dy = (alvo.top + alvo.height / 2) - (from.top + from.height / 2);
+  g.style.setProperty('--fxdur', '170ms');
+  await nextFrame(); g.style.transform = `translate(${dx}px, ${dy}px)`;
+  await sleep(170);
+  if (!a.direct) flashZone(`${a.defCtrl}:4:${a.defSeq}`, 'fx-hit', 280);
+  await sleep(140);
+  g.style.transform = 'translate(0,0)';
+  await sleep(170); g.remove();
+}
+
+/**
+ * O número do dano (ou da cura) saindo do meio da tela até os LP de quem
+ * sofreu. Roda ANTES do `handle`, que é quem troca o valor — a ordem é o
+ * ponto: o número chega, e só então o total muda. Ver `pulsarLp`, o pulso
+ * pequeno no HUD que fecha o movimento.
+ */
+async function voarNumeroLp(player, delta) {
+  if (prefersReduced || !delta) return;
+  const alvo = document.getElementById(`hud-p${player}`);
+  if (!alvo) return;
+  const r = alvo.getBoundingClientRect();
+  const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+
+  const el = document.createElement('div');
+  el.className = 'lp-voa ' + (delta < 0 ? 'dano' : 'cura');
+  el.textContent = (delta < 0 ? '−' : '+') + Math.abs(delta);
+  el.style.left = cx + 'px'; el.style.top = cy + 'px';
+  el.style.opacity = '0';
+  el.style.transform = 'translate(-50%,-50%) scale(.5)';
+  $('fx').append(el);
+
+  // 1. aparece no meio, com um solavanco
+  await nextFrame();
+  el.style.setProperty('--fxdur', '190ms');
+  el.style.opacity = '1';
+  el.style.transform = 'translate(-50%,-50%) scale(1.12)';
+  await sleep(210);
+  el.style.transform = 'translate(-50%,-50%) scale(1)';
+  await sleep(260);
+
+  // 2. voa até os LP e encolhe na chegada
+  const dx = (r.left + r.width / 2) - cx, dy = (r.top + r.height / 2) - cy;
+  el.style.setProperty('--fxdur', '420ms');
+  el.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.42)`;
+  await sleep(330);
+  el.style.opacity = '0';       // some ao encostar, e o HUD assume
+  await sleep(120);
+  el.remove();
+}
+
 function flashZone(anchor, cls = 'fx-activate', ms = 500) {
   const el = anchor && document.querySelector(`[data-anchor="${anchor}"]`);
   if (!el) return;
@@ -1681,23 +2240,26 @@ async function animateEvent(ev) {
       await flyGhost(from, to, ev.code, face, 300, endScale);
       return;
     }
+    // DECLARAÇÃO: só a seta, e ela fica. O golpe é na resolução, abaixo.
     if (ev.type === 'attack') {
-      const from = anchorRect(`${ev.atkCtrl}:4:${ev.atkSeq}`);
-      const to = ev.direct
-        ? containerRect(ev.atkCtrl === 0 ? 'hand-opp' : 'hand-you')
-        : anchorRect(`${ev.defCtrl}:4:${ev.defSeq}`);
-      const code = field[ev.atkCtrl]?.m?.[ev.atkSeq]?.code || 0;
-      if (prefersReduced || !from || !to) return;
-      const g = spawnGhost(from, code, 'art');
-      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
-      const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
-      g.style.setProperty('--fxdur', '170ms');
-      await nextFrame(); g.style.transform = `translate(${dx}px, ${dy}px)`;
-      await sleep(170);
-      if (!ev.direct) flashZone(`${ev.defCtrl}:4:${ev.defSeq}`, 'fx-hit', 280);
-      await sleep(140);
-      g.style.transform = 'translate(0,0)';
-      await sleep(170); g.remove();
+      ataquePendente = {
+        atkCtrl: ev.atkCtrl, atkSeq: ev.atkSeq,
+        defCtrl: ev.defCtrl, defSeq: ev.defSeq, direct: !!ev.direct,
+      };
+      desenharSeta();
+      // O tempo de LER a seta antes de a janela de resposta cobrir a mesa. Sem
+      // esta pausa a seta e o quadro chegam no mesmo quadro de vídeo, que é o
+      // problema que ela existe para resolver.
+      await sleep(prefersReduced ? 0 : 620);
+      return;
+    }
+    // RESOLUÇÃO: a batalha (com alvo) e o dano (ataque direto) são os dois
+    // jeitos de o motor dizer que o ataque passou.
+    if (ev.type === 'battle') { await resolverInvestida(); return; }
+    if (ev.type === 'lp') {
+      // Ataque direto: o golpe vem antes do número — é ele que causa o dano.
+      if (ataquePendente?.direct && ev.delta < 0) await resolverInvestida();
+      await voarNumeroLp(ev.player, ev.delta);
       return;
     }
   } catch { /* animação nunca derruba o duelo */ }
@@ -1708,20 +2270,29 @@ async function apply(j) {
   try {
     $('warn').hidden = true;
     for (const ev of j.events || []) {
+      // A posição de ANTES, medida antes de `handle` sobrescrevê-la: é a única
+      // forma de saber que um `pos` foi um FLIP (virada → para cima) e não uma
+      // troca de ataque para defesa, que não devia acender nada.
+      const viradaAntes = ev.type === 'pos' && ev.loc === 4
+        && estaVirada(field[ev.controller]?.m?.[ev.seq]?.pos ?? 0);
       await animateEvent(ev);   // move o fantasma (origem ainda visível)
       await handle(ev);         // muta o estado (o premio de vitoria vai ao servidor)
       render();                 // a carta "assenta" no lugar
-      // magia/armadilha ATIVADA (face-up na zona S/campo): brilho + meio segundo
-      // até resolver — é o que dá o fluxo "vivo" (Pote fica no campo, depois compra).
-      if (ev.type === 'move' && (ev.loc === 8 || ev.loc === 0x100) && ev.code && !(ev.pos & 0xa)) {
-        flashZone(locAnchor(ev.controller, ev.loc, ev.seq));
-        await sleep(500);
-      }
+      const brilho = brilhoDaEntrada(ev, viradaAntes);
+      if (brilho) { flashZone(brilho.anchor); await sleep(brilho.ms); }
     }
     question = j.question || null;
     ended = !!j.ended;
+    // A seta só existe enquanto a pergunta for "responder a este ataque". O
+    // ataque negado no meio da corrente nunca chega a `battle`, e sem esta
+    // linha a seta ficaria pendurada na tela apontando para uma carta que já
+    // foi para o cemitério.
+    if (ataquePendente && !(question && question.kind === 'chain' && question.player === 0)) {
+      ataquePendente = null;
+      limparSeta();
+    }
     picked.clear();
-    selectedField = null;   // a pergunta mudou: a seleção de campo não vale mais
+    fecharMenuCarta();      // a pergunta mudou: o menu aberto é de outro momento
     extraPicker = null;     // idem para a escolha pendente no Extra Deck
     render();
     renderSelection();
@@ -1776,6 +2347,33 @@ async function apply(j) {
   }
 }
 
+/**
+ * A carta que ACABOU de aparecer com a face para cima brilha — o mesmo brilho
+ * de quem ativa um efeito (`fx-activate`).
+ *
+ * Três casos, e os três são "a carta apareceu":
+ *   • magia/armadilha ativada na zona S ou de campo — é o mais antigo, e o meio
+ *     segundo dele é de propósito: dá o fluxo "vivo" de o Pote ficar no campo e
+ *     só depois comprar;
+ *   • monstro entrando com a face para cima (invocação normal ou especial);
+ *   • monstro VIRANDO para cima (o flip) — e por isso a posição anterior
+ *     importa: deitar em defesa também emite `pos`, e ali não apareceu carta
+ *     nenhuma.
+ *
+ * A carta que entra virada não acende: não há o que mostrar, e o brilho
+ * entregaria que alguma coisa chegou ali.
+ */
+function brilhoDaEntrada(ev, viradaAntes) {
+  const paraCima = !(ev.pos & 0xa);
+  if (ev.type === 'move' && (ev.loc === 8 || ev.loc === 0x100) && ev.code && paraCima)
+    return { anchor: locAnchor(ev.controller, ev.loc, ev.seq), ms: 500 };
+  if (ev.type === 'move' && ev.loc === 4 && ev.code && paraCima)
+    return { anchor: locAnchor(ev.controller, 4, ev.seq), ms: 300 };
+  if (ev.type === 'pos' && ev.loc === 4 && viradaAntes && paraCima)
+    return { anchor: locAnchor(ev.controller, 4, ev.seq), ms: 300 };
+  return null;
+}
+
 async function handle(ev) {
   switch (ev.type) {
     // O NPC anuncia a jogada e o motivo — é como dá para conferir se ele está
@@ -1783,6 +2381,10 @@ async function handle(ev) {
     case 'npc':
       if (ev.action === 'chain' && ev.code)
         log(`🤖 NPC ativou ${nameOf(ev.code)} em resposta!`, true);
+      // A escolha de carta vem com os codigos a parte justamente para virar
+      // nome aqui: "NPC: select — escolhe 89091579" nao diz nada a quem joga.
+      else if (ev.action === 'select' && ev.codes && ev.codes.length)
+        log(`🤖 NPC escolheu ${ev.codes.map(c => c ? nameOf(c) : 'uma carta virada').join(', ')}`, true);
       else
         log(`🤖 NPC: ${ev.action} — ${ev.why}`, true);
       return;
@@ -1846,7 +2448,17 @@ async function handle(ev) {
       // Force abre logo depois desta mensagem, e é a única dos quatro momentos
       // que não vem identificada na própria pergunta.
       ataqueDeclarado = true;
-      log(ev.direct ? '⚔ ataque direto!' : '⚔ ataque declarado');
+      {
+        // Quem ataca quem, por extenso: o log é o que sobra depois que a seta
+        // some, e "ataque declarado" não diz qual monstro nem contra o quê.
+        const nomeEm = (ctrl, seq) => {
+          const c = field[ctrl]?.m?.[seq];
+          return c ? (c.code ? nameOf(c.code) : 'carta virada') : 'monstro';
+        };
+        const quem = nomeEm(ev.atkCtrl, ev.atkSeq);
+        log(ev.direct ? `⚔ ${quem} ataca diretamente!`
+                      : `⚔ ${quem} ataca ${nomeEm(ev.defCtrl, ev.defSeq)}`);
+      }
       break;
     case 'battle': {
       // O motor já resolveu; aqui é só contar o que houve.
@@ -1907,6 +2519,11 @@ async function handle(ev) {
           const i = src.g.indexOf(ev.code);
           if (i >= 0) src.g.splice(i, 1);
         }
+        // Carta banida VOLTANDO ao jogo. Ela volta com o código real, mesmo a
+        // que foi banida virada e entrou na pilha como 0 — `desbanir` resolve
+        // esse par (ver banimento.js). Sem este ramo o contador da pilha só
+        // subiria, e mentiria pelo resto do duelo.
+        else if (ev.fromLoc === LOCATION_BANIDO) desbanir(src.b, ev.code);
       }
       // coloca no destino
       const f = field[ev.controller] || (field[ev.controller] = fresh());
@@ -1915,6 +2532,11 @@ async function handle(ev) {
       else if (ev.loc === 8) { if (ev.seq === 5) f.f = card; else f.s[ev.seq] = card; } // seq 5 = zona de campo
       else if (ev.loc === 0x100) f.f = card;
       else if (ev.loc === 0x10) f.g.push(ev.code); // 0x10 = LOCATION_GRAVE
+      // 0x20 = LOCATION_REMOVED. A carta BANIDA, que até aqui sumia da tela e
+      // não ia para lugar nenhum: nem contador, nem pilha, nem como conferir o
+      // que já saiu do jogo. A do adversário banida com a face para baixo chega
+      // com `code: 0` (`Projetar`), e a pilha guarda a entrada assim mesmo.
+      else if (ev.loc === LOCATION_BANIDO) banir(f.b, ev);
       // 0x2 = LOCATION_HAND. Carta que VAI PARA A MÃO sem ser compra: busca no
       // deck (Fusion Sage), volta do campo, devolução do cemitério. O MSG_DRAW
       // cobre só a compra, então sem este ramo a carta buscada sumia — saía do
@@ -1952,6 +2574,7 @@ async function handle(ev) {
     }
     case 'lp': {
       lp[ev.player] = ev.lp;
+      pulsarLp(ev.player, ev.delta);
       const who = ev.player === 0 ? 'você' : 'oponente';
       log(`${ev.delta < 0 ? '−' : '+'}${Math.abs(ev.delta)} LP ${who} → ${ev.lp}`);
       break;
@@ -1993,6 +2616,9 @@ let SELECIONAVEIS = new Map();   // recalculado a cada render
 function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
+  // Consome o gesto de "segurar": sem isso, soltar o dedo depois de abrir os
+  // detalhes dispararia o clique logo atrás e abriria o menu por cima deles.
+  let segurouZona = () => false;
   if (selKey) z.dataset.anchor = selKey;   // p/ animações localizarem a zona
   z.innerHTML = `<span class="zl">${label}</span>`;
   // A arte vem primeiro: as ramificações abaixo podem sair da função cedo
@@ -2030,7 +2656,7 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
     }
     // Carta virada não revela nada: ver o detalhe dela seria trapaça.
     if (!facedown) {
-      wireLongPress(z, HOLD_MS, () => showCardDetail(cell.code));
+      segurouZona = wireLongPress(z, HOLD_MS, () => showCardDetail(cell.code));
       z.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(cell.code); };
     }
   }
@@ -2120,21 +2746,43 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
     const chave = `${campoOpts.loc}:${campoOpts.seq}`;
     const opts = [];
     const iRepos = campoOpts.acoes.repos.get(chave);
-    const iAtiva = campoOpts.acoes.ativa.get(chave);
-    if (iAtiva !== undefined) opts.push({ action: 'activate', arg: iAtiva, label: 'Ativar' });
-    if (iRepos !== undefined) opts.push({ action: 'reposition', arg: iRepos, label: 'Mudar posição' });
+    const ativaveis = campoOpts.acoes.ativa.get(chave) || [];
+    ativaveis.forEach((a, i) => {
+      const oQueFaz = textoDoEfeito(a);
+      opts.push({
+        action: 'activate', arg: a.index, icone: '✨', primaria: i === 0,
+        // Com mais de um efeito o rótulo tem de separá-los: o texto do motor
+        // quando ele veio, e a ordem em que ele ofereceu quando não veio.
+        texto: ativaveis.length > 1 && !oQueFaz ? `Ativar (efeito ${i + 1})` : 'Ativar',
+        sub: oQueFaz,
+      });
+    });
+    if (iRepos !== undefined) {
+      opts.push({ action: 'reposition', arg: iRepos, ...rotuloReposicao(cell.pos) });
+    }
 
-    if (opts.length) {
-      z.classList.add('actionable');
-      const sel = selectedField;
-      const marcada = sel && sel.loc === campoOpts.loc && sel.seq === campoOpts.seq;
-      if (marcada) z.style.outlineColor = 'var(--gold)';
+    // Toda carta SUA em campo abre o menu, mesmo sem jogada disponível: aí ele
+    // tem só "Detalhes", que é a leitura que o toque longo já dava — e que
+    // ninguém descobre sem alguém contar.
+    const virada = estaVirada(cell.pos);
+    const podeVer = !!cell.code;   // a virada do OPONENTE chega com code 0
+    if (opts.length) z.classList.add('actionable');
+    // NUNCA por cima do clique de ATACAR. Na Battle Phase `acoesDeCampo` volta
+    // vazio (ela só olha `idle`), então `opts` está vazio e só o "Detalhes"
+    // chegaria aqui — e roubaria a declaração de ataque do monstro, que é a
+    // única coisa que se faz com ele naquele momento. Ler a carta ali continua
+    // sendo o toque longo.
+    if ((opts.length || podeVer) && !z.classList.contains('attacker')) {
       z.onclick = () => {
-        // Uma opção só: executa direto. Duas: mostra a barra para escolher.
-        if (opts.length === 1) { act(opts[0].action, opts[0].arg, `${opts[0].label} ${nameOf(cell.code)}`); return; }
-        selectedField = marcada ? null : { ...campoOpts, code: cell.code, opts };
+        if (segurouZona()) return;
         selectedHand = null;
-        render();
+        const itens = opts.map((o) => ({
+          texto: o.texto, icone: o.icone, primaria: o.primaria, sub: o.sub,
+          acao: () => act(o.action, o.arg,
+                          `${o.texto} ${nameOf(cell.code)}${o.sub ? ` (${o.sub})` : ''}`),
+        }));
+        if (podeVer) itens.push({ texto: 'Detalhes', icone: '🔍', acao: () => showCardDetail(cell.code) });
+        abrirMenuCarta(z, virada ? `${nameOf(cell.code)} (virada)` : nameOf(cell.code), itens);
       };
     }
   }
@@ -2188,13 +2836,19 @@ function acoesDeCampo(player) {
     }
     for (const a of question.activatable || []) {
       // location 2 = mão; aqui só interessam as que já estão no campo
-      if (a.controller === player && a.location !== 2) ativa.set(`${a.location}:${a.sequence}`, a.index);
+      if (a.controller !== player || a.location === 2) continue;
+      // Uma LISTA por zona, e não um índice: uma carta com dois efeitos
+      // ativáveis é oferecida DUAS vezes pelo motor, na mesma zona. Guardando
+      // só um, o segundo sobrescrevia o primeiro e um dos dois efeitos ficava
+      // impossível de ativar — em silêncio, com o menu prometendo "Ativar".
+      const chave = `${a.location}:${a.sequence}`;
+      if (!ativa.has(chave)) ativa.set(chave, []);
+      ativa.get(chave).push(a);
     }
   }
   return { repos, ativa };
 }
 
-let selectedField = null;   // { loc, seq, code } da carta de campo selecionada
 let atacando = null;        // atacante arrastado/selecionado: { index, seq, code, direct }
 let pendingTarget = null;   // alvo escolhido no arrasto, aplicado no SELECT_CARD
 
@@ -2257,6 +2911,10 @@ function fieldRows(player, isYou) {
     mrow.append(zoneEl(f.m[i], 'mz', 'M'+i,
       freeM.has(i) ? () => act('place', i, `colocar na zona M${i}`) : null,
       isYou ? { type: 'm', index: i } : null, co(4, i), ai(i), sk(4, i)));
+  // Banidas à esquerda, cemitério à direita — as duas pilhas que não são zona
+  // do motor ladeando a fileira de monstro. (Com tabuleiro ativo quem manda é
+  // a posição salva; esta ordem vale para o flexbox de bootstrap.)
+  mrow.prepend(banidoEl(player, f.b));
   mrow.append(pileEl(player, 'GY', f.g));   // cemitério à direita dos monstros
   const spacer = document.createElement('div'); spacer.style.width = '58px'; srow.append(spacer);
   for (let i = 0; i < 5; i++)
@@ -2305,7 +2963,9 @@ function actionsFor(h) {
   if (!question || question.kind !== 'idle' || question.player !== 0) return [];
   const out = [];
   if (MAPS.summon[h] >= 0)     out.push({ action: 'summon',     arg: MAPS.summon[h],     label: 'Invocar' });
-  if (MAPS.activate[h] >= 0)   out.push({ action: 'activate',   arg: MAPS.activate[h],   label: 'Utilizar' });
+  // Uma linha por EFEITO oferecido, e não uma só por carta (`ofertas.js`).
+  for (const l of linhasDeAtivacao(MAPS.activate[h]))
+    out.push({ action: 'activate', arg: l.index, label: 'Utilizar', texto: l.texto, sub: l.sub });
   if (MAPS.setmonster[h] >= 0) out.push({ action: 'setmonster', arg: MAPS.setmonster[h], label: 'Setar' });
   if (MAPS.setspell[h] >= 0)   out.push({ action: 'setspell',   arg: MAPS.setspell[h],   label: 'Setar' });
   return out;
@@ -2317,7 +2977,7 @@ function rebuildMaps() {
     summon: mapList(question && question.summonable),
     setmonster: mapList(question && question.settable),
     setspell: mapList(question && question.settableST),
-    activate: mapList(question && question.activatable),
+    activate: ofertasPorMao(hand[0], question && question.activatable),
   };
 }
 
@@ -2333,6 +2993,8 @@ function toggleSelect(h) {
   if (!acts.length) return;
   selectedHand = h;
   render();
+  // A âncora do menu é buscada DEPOIS do render: ele reconstrói a mão inteira,
+  // e o elemento que recebeu o clique já não está no documento.
   abrirPopupPosicao(h, acts);
 }
 
@@ -2419,61 +3081,77 @@ function dropOn(type, index, tributoSeq = null) {
   const acts = actionsFor(h);
   dragging = null;
   selectedHand = null;
-  abrirPopupPosicao(h, acts, type, index);
+  // Arrastou até a zona: o menu abre NA ZONA, que é onde o olho está — e é ela
+  // que o título nomeia. (A zona de campo é a sequência 5 do grupo de magia.)
+  const ancora = elDaAncora(type === 'f' ? '0:8:5'
+    : type === 'm' ? `0:4:${index}` : `0:8:${index}`);
+  abrirPopupPosicao(h, acts, type, index, ancora);
 }
 
 /**
- * Popup de posição/ação. Para monstro são [Posição de Ataque] e [Setar]; para
- * magia/armadilha, [Utilizar] e [Setar] — a mesma escolha, outro vocabulário.
+ * O menu da carta da MÃO — as três linhas da janelinha do Tag Force:
+ * Invocar / Posicionar / Detalhes (ou Ativar / Posicionar / Detalhes, para
+ * magia e armadilha). Quem decide quais existem é o motor: `acts` sai de
+ * `actionsFor()`, que só devolve o que ele ofereceu nesta janela.
+ *
+ * "Detalhes" está sempre lá, e é o que faltava: até aqui a única forma de ler
+ * uma carta era o toque longo, um gesto que ninguém descobre sozinho.
  *
  * `type`/`index` são a zona de destino — vêm preenchidos quando a carta foi
  * ARRASTADA até lá (`dropOn`), e ficam `null` quando a carta só foi CLICADA
  * (`toggleSelect`): aí ainda não existe zona nenhuma escolhida, e uma ação que
- * precise de uma (Invocar/Setar) vai gerar a pergunta SELECT_PLACE do motor
- * normalmente depois — as zonas válidas acendem na tela do mesmo jeito que já
- * acendiam antes deste popup existir. "Utilizar" nunca precisou de zona pra
- * ignição de efeito (Thunder Dragon, Rei do Pântano etc.), então esses casos
- * já resolvem direto.
+ * precise de uma (Invocar/Posicionar) vai gerar a pergunta SELECT_PLACE do
+ * motor normalmente depois — as zonas válidas acendem na tela do mesmo jeito.
+ * "Ativar" nunca precisou de zona pra ignição de efeito (Thunder Dragon, Rei
+ * do Pântano etc.), então esses casos já resolvem direto.
  */
-function abrirPopupPosicao(h, acts, type = null, index = null) {
+function abrirPopupPosicao(h, acts, type = null, index = null, ancora = null) {
   const code = hand[0][h];
-  const LABEL = {
-    summon: 'Posição de Ataque',
-    setmonster: 'Setar (defesa, virada)',
-    activate: 'Utilizar',
-    setspell: 'Setar (virada)',
+  // O vocabulário é o do jogo, não o do protocolo: "Posicionar" é o Set (a
+  // carta baixa virada), e vale igual para monstro e para magia/armadilha.
+  const ITEM = {
+    summon:     { texto: 'Invocar',    icone: '⚔️', primaria: true },
+    activate:   { texto: 'Ativar',     icone: '✨', primaria: true },
+    setmonster: { texto: 'Posicionar', icone: '▤' },
+    setspell:   { texto: 'Posicionar', icone: '▤' },
   };
   const zonaTxt = type === 'f' ? 'Zona de Campo'
     : type === 'm' ? `Zona de Monstro ${index + 1}`
     : type === 's' ? `Zona de Magia/Armadilha ${index + 1}`
     : null;
 
-  $('pos-art').src = ART(code);
-  $('pos-name').textContent = nameOf(code);
-  $('pos-where').textContent = zonaTxt ? `→ ${zonaTxt}` : 'escolha o que fazer';
+  const desfazer = () => { selectedHand = null; pendingZone = null; pendingTribute = null; render(); };
 
-  const frag = document.createDocumentFragment();
-  for (const a of acts) {
-    const b = document.createElement('button');
-    b.className = a.action === 'summon' || a.action === 'activate' ? 'btn-primary' : '';
-    b.textContent = LABEL[a.action] ?? a.label;
-    b.onclick = () => {
+  // Duas ofertas de "Ativar" viram DUAS linhas, e so' a primeira e' a primaria:
+  // duas linhas em destaque nao separam nada, que e' o problema que a segunda
+  // linha (`sub`, o texto do motor) existe para resolver.
+  let usouPrimaria = false;
+  const itens = acts.map((a) => {
+    const it = ITEM[a.action] ?? { texto: a.label, icone: '•' };
+    const texto = a.texto || it.texto;
+    const primaria = !!it.primaria && !usouPrimaria;
+    if (primaria) usouPrimaria = true;
+    return { ...it, texto, primaria, sub: a.sub, acao: () => {
       selectedHand = null;
-      fecharPopupPosicao();
-      act(a.action, a.arg, `${LABEL[a.action] ?? a.label} ${nameOf(code)}` + (zonaTxt ? ` em ${zonaTxt}` : ''));
-    };
-    frag.append(b);
-  }
-  const x = document.createElement('button');
-  x.textContent = 'cancelar';
-  x.onclick = () => { selectedHand = null; pendingZone = null; fecharPopupPosicao(); render(); };
-  frag.append(x);
+      act(a.action, a.arg, `${texto} ${nameOf(code)}` + (a.sub ? ` (${a.sub})` : '')
+                           + (zonaTxt ? ` em ${zonaTxt}` : ''));
+    } };
+  });
+  // Ver a carta é desistir da jogada: a zona escolhida no arrasto some junto,
+  // senão a próxima ação herdaria um destino que ninguém mais está vendo.
+  itens.push({ texto: 'Detalhes', icone: '🔍', acao: () => { desfazer(); showCardDetail(code); } });
 
-  $('pos-acts').replaceChildren(frag);
-  $('pos-overlay').hidden = false;
+  abrirMenuCarta(
+    ancora ?? elDaAncora(`0:hand:${h}`),
+    nameOf(code) + (zonaTxt ? ` → ${zonaTxt}` : ''),
+    itens,
+    desfazer,
+  );
 }
 
-function fecharPopupPosicao() { $('pos-overlay').hidden = true; }
+/** Fecha as DUAS janelas de escolha: o menu colado na carta e o modal da
+ *  pergunta de posição do motor. Chamado no começo de todo duelo. */
+function fecharPopupPosicao() { $('pos-overlay').hidden = true; fecharMenuCarta(); }
 
 /**
  * Pergunta de POSIÇÃO (SELECT_POSITION): Invocação-Ritual e demais Invocações
@@ -2511,28 +3189,175 @@ function abrirPopupPosicaoEspecial(q) {
   $('pos-overlay').hidden = false;
 }
 
+// ---------- menu da carta (a "janelinha" do Tag Force) ----------
+
+/**
+ * LP com que todo duelo começa. É o divisor da barra do HUD: 8000 = 100%.
+ * Vem daqui e não de `lp[p]` no boot porque a barra precisa de um teto fixo —
+ * senão curar acima do inicial encolheria a própria barra.
+ */
+const LP_INICIAL = 8000;
+
+/**
+ * Abre o menu COLADO num elemento (a carta clicada).
+ *
+ * `itens` é uma lista de `{ texto, icone, primaria?, acao }`. O menu se fecha
+ * sozinho antes de rodar a `acao`: quase toda ação dispara `act()`, que
+ * redesenha a mesa — deixar o quadro aberto por cima do resultado confundiria.
+ *
+ * `aoCancelar` roda quando o menu é fechado SEM escolher nada (clique fora ou
+ * Esc): é onde a mão selecionada e a zona pendente do arrasto são desfeitas.
+ */
+let menuCancelar = null;
+function abrirMenuCarta(ancora, titulo, itens, aoCancelar = null) {
+  const m = $('cardmenu');
+  menuCancelar = aoCancelar;
+
+  const frag = document.createDocumentFragment();
+  if (titulo) {
+    const h = document.createElement('div');
+    h.className = 'mtitulo';
+    h.textContent = titulo;
+    frag.append(h);
+  }
+  for (const it of itens) {
+    const b = document.createElement('button');
+    b.className = 'mi' + (it.primaria ? ' prim' : '');
+    const ic = document.createElement('span');
+    ic.className = 'ic';
+    ic.textContent = it.icone ?? '•';
+    const tx = document.createElement('span');
+    tx.textContent = it.texto;
+    // Segunda linha: o que o efeito faz, na frase do motor. Fica no item e não
+    // num balão à parte porque é justamente ela que separa dois itens "Ativar".
+    if (it.sub) {
+      tx.className = 'col';
+      const sub = document.createElement('small');
+      sub.className = 'sub';
+      sub.textContent = it.sub;
+      tx.append(sub);
+    }
+    b.append(ic, tx);
+    b.onclick = () => { menuCancelar = null; fecharMenuCarta(); it.acao(); };
+    frag.append(b);
+  }
+  m.replaceChildren(frag);
+
+  m.classList.add('show');
+  $('cardmenu-fundo').classList.add('show');
+  posicionarMenu(m, ancora);
+  m.querySelector('.mi')?.focus();
+}
+
+/** Fecha o menu. Sem `escolheu`, roda o `aoCancelar` de quem o abriu. */
+function fecharMenuCarta() {
+  $('cardmenu').classList.remove('show');
+  $('cardmenu-fundo').classList.remove('show');
+  const cancelar = menuCancelar;
+  menuCancelar = null;
+  if (cancelar) cancelar();
+}
+
+/**
+ * Põe o quadro acima da carta (como no Tag Force) e a seta apontando pro meio
+ * dela. Sem espaço em cima, vai pra baixo. Sem âncora nenhuma, cai no centro
+ * da tela e a seta some — é o caso de quem não tem carta na tela pra apontar.
+ */
+function posicionarMenu(m, ancora) {
+  const MARGEM = 8;
+  const r = ancora?.getBoundingClientRect?.();
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  if (!r || !r.width) {
+    m.style.left = Math.max(MARGEM, (innerWidth - mw) / 2) + 'px';
+    m.style.top = Math.max(MARGEM, (innerHeight - mh) / 2) + 'px';
+    m.style.setProperty('--seta', '-999px');
+    m.classList.remove('abaixo');
+    return;
+  }
+  let abaixo = false;
+  let top = r.top - mh - 10;
+  if (top < MARGEM) { top = r.bottom + 10; abaixo = true; }
+  top = Math.max(MARGEM, Math.min(top, innerHeight - mh - MARGEM));
+
+  const meio = r.left + r.width / 2;
+  let left = meio - 30;                       // a seta fica perto da borda esquerda
+  left = Math.max(MARGEM, Math.min(left, innerWidth - mw - MARGEM));
+
+  m.style.left = left + 'px';
+  m.style.top = top + 'px';
+  m.classList.toggle('abaixo', abaixo);
+  m.style.setProperty('--seta', Math.max(10, Math.min(mw - 24, meio - left - 7)) + 'px');
+}
+
+$('cardmenu-fundo').onclick = () => fecharMenuCarta();
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('cardmenu').classList.contains('show')) fecharMenuCarta();
+});
+
+// ---------- placar do topo ----------
+
+/**
+ * Os nomes do placar. Só mudam quando o duelo começa (o adversário é conhecido
+ * depois do NPC/sala carregar), então não entram no `render()`.
+ */
+function nomearHud() {
+  $('hud-nome0').textContent = username || 'você';
+  $('hud-nome1').textContent = advNpc?.name || (ehMultiplayer() ? 'adversário' : 'treino');
+}
+
+/** LP, barra, número do turno e de quem é a vez. */
+function atualizarHud() {
+  for (const p of [0, 1]) {
+    const v = Math.max(0, lp[p]);
+    $(`hud-lp${p}`).textContent = v;
+    $(`hud-bar${p}`).style.width = Math.min(100, (v / LP_INICIAL) * 100) + '%';
+    $(`hud-p${p}`).classList.toggle('on', turn === p && !ended);
+  }
+  $('hud-turno').textContent = turnNo || '—';
+}
+
+/**
+ * O golpe na tela: a faixa do lado atingido treme e o número sobe e some.
+ *
+ * Chamado do evento `lp` (e não do `render()`) de propósito: quem sabe QUANTO
+ * mudou é o evento; o render só conhece o total depois. Sem isso, um ataque de
+ * 1800 e um de 200 ficavam visualmente iguais.
+ */
+function pulsarLp(player, delta) {
+  const box = $(`hud-p${player}`);
+  if (!box || !delta) return;
+  const cls = delta < 0 ? 'dano' : 'cura';
+  box.classList.remove('dano');
+  void box.offsetWidth;                       // reinicia a animação
+  if (cls === 'dano') box.classList.add('dano');
+  setTimeout(() => box.classList.remove('dano'), 500);
+
+  const d = document.createElement('span');
+  d.className = 'hud-delta ' + cls;
+  d.textContent = (delta < 0 ? '−' : '+') + Math.abs(delta);
+  box.append(d);
+  setTimeout(() => d.remove(), 1150);
+}
+
 function render() {
   SELECIONAVEIS = selecionaveisNoCampo();
   if (question && question.kind === 'position' && question.player === 0) {
     abrirPopupPosicaoEspecial(question);
   }
-  $('turn').textContent = turn === 0 ? 'VOCÊ' : 'oponente';
+  atualizarHud();
   $('opp-field').replaceChildren(fieldRows(1, false));
   $('you-field').replaceChildren(fieldRows(0, true));
 
-  // LP + fases na barra central
-  const lpEl = (p) => {
-    const s = document.createElement('span'); s.className = 'lp';
-    s.innerHTML = `<b style="color:${p === 0 ? 'var(--blue)' : 'var(--red)'}">${p === 0 ? 'VOCÊ' : 'OPP'}</b> ${lp[p]}`;
-    return s;
-  };
+  // A barra central ficou só com a FASE: os LP subiram para o placar do topo,
+  // que é onde o Tag Force os põe e onde eles não dependem de para onde o
+  // editor de campo arrastou esta caixa.
   const midPhases = document.createElement('div');
   midPhases.className = 'mid-phases';
   const agora = document.createElement('span');
   agora.className = 'phase-now' + (turn === 0 ? '' : ' opp');
   agora.textContent = PHASE_NOME[phase] ?? `Fase ${phase}`;
   midPhases.append(agora);
-  $('mid').replaceChildren(lpEl(1), midPhases, lpEl(0));
+  $('mid').replaceChildren(midPhases);
 
   // mão do oponente (verso)
   const oh = document.createElement('div'); oh.style.display='contents';
@@ -2575,36 +3400,19 @@ function render() {
   const yourIdle = question && question.kind === 'idle' && question.player === 0;
   const yourPlace = question && question.kind === 'place' && question.player === 0;
 
-  // barra de ação (quando há carta selecionada) ou prompt normal
-  const bar = $('prompt-bar');
-  if (selectedField) {
-    const div = document.createElement('div'); div.className = 'actbar';
-    div.append(Object.assign(document.createElement('b'), { textContent: nameOf(selectedField.code) + ':' }));
-    for (const a of selectedField.opts) {
-      const b = document.createElement('button');
-      b.textContent = a.label;
-      b.onclick = () => { const s = selectedField; selectedField = null; act(a.action, a.arg, `${a.label} ${nameOf(s.code)}`); };
-      div.append(b);
-    }
-    const x = document.createElement('button'); x.textContent = 'cancelar';
-    x.onclick = () => { selectedField = null; render(); };
-    div.append(x);
-    bar.replaceChildren(div);
-  } else {
-    // selectedHand != null cai aqui também: o popup de ação (abrirPopupPosicao)
-    // já cobre a tela pra esse caso, então não tem barra própria pra ele.
-    const unsupported = question && question.kind === 'unsupported';
-    if (unsupported) warn(`O motor pediu uma ação que o treino ainda não suporta (msg ${question.rawType}). Dê "novo duelo".`);
-    bar.replaceChildren(Object.assign(document.createElement('span'), {
-      className: 'prompt',
-      textContent: ended ? 'duelo encerrado.'
-        : unsupported ? `⚠ ação não suportada ainda (msg ${question.rawType}) — comece um novo duelo.`
-        : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
-        : dragging ? 'Solte a carta numa zona verde.'
-        : yourIdle ? 'Sua vez: clique numa carta pra escolher o que fazer, ou arraste até a zona.'
-        : 'aguarde…'
-    }));
-  }
+  // O que fazer com a carta escolhida agora sai no menu colado nela
+  // (`abrirMenuCarta`), não numa barra no rodapé — a barra virou só o aviso.
+  const unsupported = question && question.kind === 'unsupported';
+  if (unsupported) warn(`O motor pediu uma ação que o treino ainda não suporta (msg ${question.rawType}). Dê "novo duelo".`);
+  $('prompt-bar').replaceChildren(Object.assign(document.createElement('span'), {
+    className: 'prompt',
+    textContent: ended ? 'duelo encerrado.'
+      : unsupported ? `⚠ ação não suportada ainda (msg ${question.rawType}) — comece um novo duelo.`
+      : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
+      : dragging ? 'Solte a carta numa zona verde.'
+      : yourIdle ? 'Sua vez: clique numa carta pra escolher o que fazer, ou arraste até a zona.'
+      : 'aguarde…'
+  }));
 }
 
 /**
@@ -2699,14 +3507,73 @@ function botoesDeFase() {
   return [b1, b2];
 }
 
-function pileEl(player, label, cards) {
+/**
+ * Cemitério: a ÚLTIMA carta enviada fica visível no topo da pilha, como na mesa.
+ *
+ * O array `f.g` cresce por `push` (ver o evento `move`), então o topo é o
+ * último elemento — não o primeiro. Clicar continua abrindo a pilha inteira.
+ */
+/**
+ * Uma PILHA da mesa (cemitério, banidas): a carta do topo à vista, o total num
+ * selo no canto, clique para abrir a pilha inteira.
+ *
+ * `topo` é `{ code, virada }`: virada desenha o verso em vez da arte. O
+ * cemitério nunca tem carta virada (ele é público pelas regras); a pilha de
+ * banidas tem, e é a razão de este parâmetro existir.
+ */
+function pilhaEl({ player, zona, rotulo, total, topo, vazio, aoAbrir }) {
   const d = document.createElement('div');
-  d.className = 'pilezone' + (cards.length ? ' has' : '');
-  d.dataset.anchor = player + ':gy';
-  d.innerHTML = `<span class="n">${cards.length}</span>${label}`;
-  if (cards.length) d.onclick = () => openGrave(player);
-  applyZonePosition(d, `p${player}:gy`);
+  const temArte = !!topo;
+  d.className = 'pilezone' + (total ? ' has' : '') + (temArte ? ' comarte' : '');
+  d.dataset.anchor = `${player}:${zona}`;
+  if (temArte) {
+    const face = topo.virada
+      ? '<div class="back"></div>'
+      : `<img src="${ART(topo.code)}" alt="">`;
+    d.innerHTML = `${face}<span class="rot">${rotulo}</span><span class="n">${total}</span>`;
+    d.title = (topo.virada ? 'carta virada' : nameOf(topo.code))
+      + ` — no topo (${total} carta(s))\nclique: ver a pilha`;
+    // Passar o mouse já lê a carta do topo. Virada não revela nada: o código
+    // dela nem chega do servidor quando é do adversário.
+    if (!topo.virada) espiar(d, topo.code);
+  } else {
+    d.innerHTML = `<span class="n">0</span>${rotulo}`;
+    d.title = `${rotulo}: vazio`;
+  }
+  if (total) d.onclick = aoAbrir;
+  applyZonePosition(d, `p${player}:${zona}`);
   return d;
+}
+
+/** Cemitério: a última carta enviada fica visível no topo, como na mesa. O
+ *  array `f.g` cresce por `push` (evento `move`), então o topo é o ÚLTIMO
+ *  elemento — não o primeiro. */
+function pileEl(player, label, cards) {
+  return pilhaEl({
+    player, zona: 'gy', rotulo: label, total: cards.length,
+    topo: cards.length ? { code: cards[cards.length - 1], virada: false } : null,
+    aoAbrir: () => openGrave(player),
+  });
+}
+
+/**
+ * Pilha das BANIDAS (`LOCATION_REMOVED`).
+ *
+ * Ela existe porque carta banida sumia da tela: não havia contador, não havia
+ * como conferir o que já tinha saído do jogo, e um efeito que traz carta
+ * banida de volta parecia trazer coisa do nada.
+ *
+ * A pilha do ADVERSÁRIO fica igualmente visível — banimento é informação
+ * pública pelas regras, com uma exceção que o próprio dado já carrega: a
+ * carta banida com a face para baixo chega sem código e é desenhada como
+ * verso, aqui e na janela.
+ */
+function banidoEl(player, cards) {
+  return pilhaEl({
+    player, zona: 'banido', rotulo: 'BAN', total: cards.length,
+    topo: topoBanido(cards),
+    aoAbrir: () => openBanidos(player),
+  });
 }
 
 /** Pilha do deck: quantas cartas ainda restam para comprar. */
@@ -2775,6 +3642,14 @@ function extraEl(player, isYou) {
 function thumbEl(code) {
   const t = document.createElement('div');
   t.className = 'thumb';
+  // Sem código = carta banida com a face para baixo. Ela ocupa lugar na
+  // janela — saber que TEM uma carta ali é metade da informação, e é a metade
+  // que dá para mostrar sem trapacear.
+  if (!code) {
+    t.title = 'carta banida com a face para baixo';
+    t.innerHTML = '<div class="back"></div>';
+    return t;
+  }
   t.title = nameOf(code) + '\nsegurar: ver detalhes';
   t.innerHTML = `<img src="${ART(code)}" alt="">`;
   wireLongPress(t, HOLD_MS, () => showCardDetail(code));
@@ -2785,7 +3660,27 @@ function thumbEl(code) {
 function openGrave(player) {
   const cards = field[player].g;
   $('gv-title').textContent = `Cemitério — ${player === 0 ? 'você' : 'oponente'} (${cards.length} cartas)`;
-  $('gv-grid').replaceChildren(...cards.map(thumbEl));
+  // Da mais NOVA para a mais velha: é a ordem em que a pilha está na mesa, a
+  // mesma que a miniatura do topo já anuncia.
+  $('gv-grid').replaceChildren(...[...cards].reverse().map(thumbEl));
+  $('gv-back').classList.add('show');
+}
+
+/**
+ * A pilha de BANIDAS, aberta para consulta — dos dois lados.
+ *
+ * Banimento é público pelas regras, então não há nada a esconder aqui; a carta
+ * banida com a face para baixo aparece como verso porque o código dela nunca
+ * chegou (`Projetar`), não porque a tela esteja escondendo.
+ */
+function openBanidos(player) {
+  const cards = field[player].b ?? [];
+  const viradas = cards.length - contarAbertas(cards);
+  $('gv-title').textContent = `Banidas — ${player === 0 ? 'você' : 'oponente'} `
+    + `(${cards.length} carta${cards.length === 1 ? '' : 's'}`
+    + (viradas ? `, ${viradas} virada${viradas === 1 ? '' : 's'}` : '') + ')';
+  // Da mais nova para a mais velha, a mesma ordem do cemitério.
+  $('gv-grid').replaceChildren(...[...cards].reverse().map((c) => thumbEl(c.virada ? 0 : c.code)));
   $('gv-back').classList.add('show');
 }
 

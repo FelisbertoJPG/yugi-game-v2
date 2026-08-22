@@ -159,7 +159,7 @@ instância (senão viram órfãos de si mesmos na próxima varredura).
   "payloads": [                             // PLURAL — é a nossa mudança sobre o original
     {
       "id":      "game",
-      "version": "game-<sha256[:12]>",
+      "version": "game-<digital[:12]>",
       "asset":   "game.zip",
       "sha256":  "…",
       "size":    3000000,
@@ -167,7 +167,7 @@ instância (senão viram órfãos de si mesmos na próxima varredura).
     },
     {
       "id":      "cards",
-      "version": "cards-<sha256[:12]>",
+      "version": "cards-<digital[:12]>",
       "asset":   "cards.zip",
       "sha256":  "…",
       "size":    47000000,
@@ -255,14 +255,33 @@ o `SelfUpdater` só age depois de o processo atual pedir para encerrar.
 `tools/publish-release.ps1` (feito), reusando os passos 1–2 do `pack.ps1`:
 
 1. monta as três árvores (`game`, `cards`, e os `files[]` avulsos);
-2. zipa `game.zip` e `cards.zip`; calcula `sha256` de cada um → `version = "<id>-" + sha256[:12]`
-   — a identidade vem do **conteúdo**, então não dá para esquecer de incrementar;
+2. zipa `game.zip` e `cards.zip`; o `version` é `"<id>-" + digitalDoConteudo[:12]` — a
+   identidade vem do **conteúdo**, então não dá para esquecer de incrementar;
+
+   > **A digital é do que está DENTRO do zip, não dos bytes do zip** (`DigitalDoConteudo`,
+   > desde 19/08/2026): uma linha `entrada|sha256` por arquivo, ordenadas por *ordinal*, e o
+   > `sha256` disso. Até então o marcador era o `sha256` do próprio `.zip`, e dois zips com
+   > exatamente os mesmos arquivos dentro **não têm os mesmos bytes fora** — a saída do
+   > *deflate* muda com a versão do runtime que comprimiu. Empacotar noutra máquina gerava
+   > marcador novo para conteúdo idêntico, e o cliente compara MARCADOR. Foi medido: o
+   > `game.zip` (92 entradas) e o `cards.zip` (20.951) publicados e regerados batiam entrada
+   > por entrada, com **zero** diferenças, e mesmo assim ganhavam marcador novo — 28 MB de
+   > download para cada jogador receber o que já tinha.
+   >
+   > O campo `sha256` do manifesto continua sendo o do **arquivo**: são perguntas diferentes —
+   > "preciso baixar?" (marcador) e "o que baixei chegou inteiro?" (sha do zip). O cliente não
+   > mudou: para ele o marcador sempre foi uma string opaca.
 3. calcula `sha256`+`size` dos `files[]`;
 4. sanitiza o campo `asset` (`[^A-Za-z0-9._-]` → `.`) mantendo o `path` real — o GitHub
    renomeia assets e isso quebra o match manifesto→asset (§7 do original);
 5. escreve `manifest.json` **sem BOM**;
 6. **dry-run por padrão**; com `-Publish`, cria o Release via `gh` CLI e sobe os assets.
-   Com `-ComExe`, inclui o `ClassicDuels.exe` e lê a `InstallerVersion` do `BuildConfig.cs`.
+   Inclui o `ClassicDuels.exe` e lê a `InstallerVersion` do `BuildConfig.cs` **sempre** que
+   houver um exe empacotado em `dist/` (desde 22/08/2026 — com `installer: null` o cliente
+   de versão antiga nunca fica sabendo que existe um exe novo, e desde que o motor mora em
+   `.staged/` isso o congela para sempre; ver INSTALADOR-PENDENCIAS §0.1). `-ComExe` sobrou
+   como "exija o exe": falha em vez de avisar quando ele não está lá. Recusa também um exe
+   empacotado antes da última mexida na casca (`dist/.cache/casca.digital`).
 
 ```bash
 npm run release:build      # dry-run: gera dist/release/ e lista os tamanhos

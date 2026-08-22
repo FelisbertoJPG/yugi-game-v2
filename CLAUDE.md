@@ -34,6 +34,78 @@ node web/js/decksnpc.test.mjs # 27 testes da trilha de DECKS dentro de um advers
                              # adversário injogável)
 node web/js/npcativo.test.mjs # 8 testes do deck ATIVO de cada NPC (conteúdo publicado,
                              # resolvido pelo nome — não pelo índice)
+node web/js/boards.test.mjs  # 20 testes do CONTRATO do schema de tabuleiros: toda
+                             # zona de `zoneIds()` precisa de posição em
+                             # `defaultLayout()`, senão o backfill (editor e duelo)
+                             # não tem o que copiar e o elemento cai por cima do campo
+                             # — sem erro nenhum. Cobre também a zona de BANIDAS
+node web/js/banimento.test.mjs # 17 testes da pilha de cartas BANIDAS: banir com a
+                             # face para baixo (chega sem código) e o retorno dela,
+                             # que vem COM o código real — sem o par, a carta virada
+                             # ficava encalhada na pilha e o contador mentia
+node web/js/posicao.test.mjs # 11 testes do rótulo de "mudar posição" no menu da
+                             # carta: o motor tem UM comando (reposition) e as regras decidem
+                             # o resultado, então o menu promete — virada vira pra cima em
+                             # ATAQUE, ataque deita em DEFESA, defesa levanta em ATAQUE.
+                             # Um rótulo errado não quebra duelo nenhum, só mente pro jogador
+node web/js/ofertas.test.mjs  # 16 testes de QUAL EFEITO esta' sendo oferecido: o
+                             # motor nao oferece cartas, oferece EFEITOS — uma
+                             # carta com dois aparece DUAS vezes, mesmo codigo e
+                             # mesma arte. `mapList` guardava um indice por
+                             # posicao da mao, entao o segundo efeito era
+                             # impossivel de ativar (em silencio, com o menu
+                             # prometendo "Ativar"); e uma copia em CAMPO com o
+                             # mesmo codigo roubava a posicao da que estava na
+                             # mao. Cobre tambem o rotulo, que erra igualmente
+                             # calado: duas linhas escritas igual nao separam
+                             # nada — texto do motor quando ele veio, a ordem
+                             # quando nao veio, nunca uma frase inventada
+node web/js/setaataque.test.mjs # 16 testes da SETA do ataque (quem ataca quem,
+                             # desenhado na mesa). O ataque tem DOIS momentos e
+                             # a tela juntava os dois: a investida do atacante
+                             # rodava ja' na DECLARACAO, entao quem ia responder
+                             # via o golpe acontecer e so' depois era perguntado
+                             # se queria impedi-lo. Hoje a declaracao desenha a
+                             # seta (e ela FICA enquanto a janela de resposta
+                             # esta' aberta) e a investida saiu para a
+                             # RESOLUCAO — `battle`, ou o dano no ataque direto.
+                             # A geometria e' testada porque erra CALADO: um
+                             # NaN no `d` do caminho nao desenha nada e nao
+                             # avisa. Cobre a divisao por zero (atacante e alvo
+                             # no mesmo ponto), as oito direcoes, e o recuo que
+                             # nao pode comer o caminho todo entre zonas
+                             # vizinhas. E cobre a armadilha que fez a seta ser
+                             # PUBLICADA invisivel: `svg.hidden = false` nao faz
+                             # nada — `hidden` e' propriedade do HTMLElement e um
+                             # <svg> e' SVGElement, entao aquilo virava um campo
+                             # solto no objeto e o atributo (com o display:none)
+                             # continuava. Sem erro, sem console: a camada
+                             # inteira ficava escondida. Hoje e'
+                             # `mostrarCamada`/`esconderCamada`, por atributo
+node web/js/pacote.test.mjs  # 19 testes da CHANCE que a Loja promete em cada
+                             # gaveta de um booster. Quem sorteia e' o banco
+                             # (`abrir_pacote()`), e ele NAO renormaliza os
+                             # pesos entre as raridades presentes: rola os
+                             # 706/252/38/4 fixos e, quando a gaveta sorteada
+                             # esta' vazia, DESCE pela cascata ate' achar uma
+                             # com carta. Um booster sem UR nao "dilui" os 0,4%
+                             # dela no resto — eles viram SR. Copiar a formula
+                             # do drop do NPC (que renormaliza de verdade)
+                             # daria 3,8% onde o sorteio da' 4,2%: a tela
+                             # prometeria o que o servidor nao cumpre, e nada
+                             # acusaria
+node web/js/ydk.test.mjs     # 19 testes do formato .ydk e das gavetas de um
+                             # DECK (o "ver as cartas" de um Deck Estrutural na
+                             # Loja). Ler o .ydk errado nao da' erro nenhum:
+                             # devolve um deck com cartas a menos, ou com o
+                             # Extra misturado no main, e a tela mostra a lista
+                             # incompleta com a maior naturalidade. Cobre
+                             # tambem a ORDEM em que a raridade e' procurada, a
+                             # mesma do servidor (`raridade_da_carta`, 0019):
+                             # o BOOSTER vence, o mapa do proprio estrutural
+                             # entra depois, o resto e' N — inverte-la faria a
+                             # carta aparecer UR na Loja e ser vendida como N
+                             # no Inventario, cada tela certa pela sua conta
 node web/js/pendencias.test.mjs # 23 testes da fila do que ainda não subiu para a
                              # nuvem (uma pendência por chave, sempre a mais nova;
                              # sai quando o BANCO aceita — o disco não conta)
@@ -48,6 +120,17 @@ npm run data:build           # regenera ygo-data/data a partir do cards.cdb (pre
 npm run duel:build           # para o servidor e compila o duel-server
 npm run duel:test            # para, compila e roda --test-npc + --test-summons
 npm run stop                 # encerra front e duel-server de forma limpa
+
+node tools/bancada-visual.mjs # gera bancada.html na raiz: as animacoes da mesa
+                             # (seta de ataque, numero de dano/cura, brilho de
+                             # entrada em campo) rodando num quadro de mentira,
+                             # sem servidor e sem login — dois cliques no
+                             # arquivo. As funcoes sao FATIADAS do duel.html por
+                             # marcadores, nunca copiadas: uma copia passaria a
+                             # valer por si e deixaria de provar o que esta' no
+                             # jogo. Existe porque mudanca VISUAL nao se prova em
+                             # teste de logica — a seta foi publicada invisivel
+                             # com 13 testes de geometria passando
 
 node tools/gerar-icone.mjs   # redesenha assets/icone.ico + web/img/icone.png
                              # (o ícone é CÓDIGO, não um binário sem fonte)
@@ -74,9 +157,33 @@ npm run release:test         # instala esses artefatos numa raiz descartável e 
 npm run release:publish      # sobe o Release para o repo privado de distribuição
                              # -- -PodarReleases 5 apaga as tags antigas (opt-in)
                              # --test-remote (na mão) baixa o Release publicado e instala
-npm run release:publish -- -ComExe   # o MESMO, subindo o exe junto (auto-update do
-                             # próprio executável). Precisa de `npm run pack` antes
-                             # e do bump da InstallerVersion em BuildConfig.cs
+npm run publicar:build       # gera publicar.exe na raiz (o publicador)
+.\publicar.exe               # DOIS CLIQUES = publicar. Faz, nesta ordem: confere
+                             # ambiente (dotnet, gh, permissao de ESCRITA no repo
+                             # de distribuicao), confere se a casca mudou desde o
+                             # ultimo `pack`, para o servidor, compila, roda as 5
+                             # suites do instalador, gera dist/release/ em dry-run,
+                             # mostra QUAIS marcadores mudaram e SOBE o Release.
+                             # NAO pergunta nada (20/08/2026): dois cliques
+                             # publicam mesmo. A trava nunca esteve na pergunta e
+                             # sim nos passos antes dela — ambiente, servidor
+                             # parado, suites e o diff na tela.
+                             # --so-build para no dry-run; --com-exe sobe o exe
+                             # junto; --perguntar devolve a palavra PUBLICAR;
+                             # --sim e' aceito e ignorado; --ajuda lista tudo.
+                             # Ele NAO reimplementa nada: chama o mesmo
+                             # publish-release.ps1 e as mesmas suites, so' que na
+                             # ordem certa e recusando sair do lugar quando algo
+                             # esta' fora. Dois caminhos que publicam divergiriam.
+
+npm run release:publish -- -ComExe   # EXIGE o exe: falha se dist/ClassicDuels.exe nao
+                             # existir. Desde 22/08/2026 o exe ja vai em TODA
+                             # publicacao que tenha um empacotado (o campo
+                             # `installer` do manifesto e a unica forma de um
+                             # cliente saber que existe um exe novo — com ele nulo,
+                             # quem esta numa versao antiga fica preso PARA SEMPRE:
+                             # recebe o front todo dia e o motor nunca). A flag
+                             # sobrou como recusa de publicar sem ele.
 
 cd duel-server && dotnet run -- --app --lan   # o mesmo --app, mas alcançável de outro
                                                 # aparelho na rede (app mobile) — ver mobile/README.md
@@ -196,12 +303,67 @@ sai quando so' o outro lado ganharia. Foi este deck que trouxe a regra 5.355
 id ou buscado do deck, e o NPC carregava Gust Fan/Cyber Shield/Sword of Dark
 Destruction a partida inteira sem equipar — nenhum teste acusava, porque cada
 deck novo so' provava as cartas com regra propria),
+`--test-mako` (o deck de ÁGUA do Mako, que gira em torno de uma palavra: **"Umi"**.
+O **Templo Esquecido das Profundezas** bane um Fish/Sea Serpent/Aqua Nv≤4 do
+PRÓPRIO dono e o devolve na End Phase de um turno dele — e o NPC banía o próprio
+monstro em TODA janela de corrente, de graça. A causa: o banco marca o Templo com
+o bit `0x100000` (INVOCAÇÃO ESPECIAL) por causa do RETORNO, e o cérebro lia isso
+como "põe corpo em campo" quando ativar TIRA um corpo do campo; como o efeito é
+`EVENT_FREE_CHAIN`, a janela abre sempre e a regra genérica do "corpo de graça"
+mordia a isca em todas. Hoje ele mede: bane a Fusão que o Instant/Ready Fusion
+condenou à End Phase (ela escapa e volta — o corpo fica de vez), bane para fugir
+de uma remoção, e GUARDA o uso quando já tem Torrential Reborn baixado ou
+Premature Burial na mão, porque deixar morrer e reviver rende mais. Cada linha
+tem par CONTROLE: sem o motivo, "não baniu" não provaria nada. Prova também que a
+imunidade a magia que a Umi dá (Torpedo Fish, Deepsea Warrior, Cannonball Spear
+Shellfish, Legendary Fisherman) impede o NPC de gastar o Templo contra uma magia
+que não alcança o alvo — e que ela **não** cobre armadilha. E prova que ele
+**ativa a Umi**: a tabela `CAMPOS` conhecia UMA carta, a Mountain do deck da Mai,
+então o NPC nunca punha em campo a magia em torno da qual o deck do Mako inteiro
+foi montado — 3 Umi mais 3 Terraforming para achá-la, e a carta chegava à mão e
+ficava lá a partida toda. A regra agora conta duas coisas, não uma: quem ganha
+ATK (por raça **ou** por atributo — A Legendary Ocean reforça todo WATER, e é
+assim que ela alcança o Fisherman, que é Warrior e fica de fora da Umi) e quem
+ganha PROTEÇÃO. Sem a segunda metade, o NPC guardava a Umi justamente com o
+Fisherman em campo, que é quando ela mais vale: ele não ganha um ponto de ATK
+dela, só a intocabilidade),
+`--test-efeitos` (**qual efeito** da carta o motor está oferecendo: toda pergunta
+que envolve um efeito carrega a `description` dele — o `aux.Stringid(code, i)` do
+script —, e é ela que separa duas ofertas idênticas na tela. O Forgotten Temple
+of the Deep aparece com o mesmo nome e a mesma arte para "banir 1 peixe" e para
+"Invocar Especialmente o banido", e sem a frase o jogador ativa um achando que
+ativou o outro. Prova as duas metades, que erram as duas em silêncio: a
+decodificação — índice 0 é a `str1`, deslocamento de 20 bits, e `null` onde não
+dá para saber, nunca uma frase inventada — e, num duelo real, que a frase chega
+INTEIRA na pergunta, o que fixa os offsets da descrição dentro das entradas de 19
+(idle) e 23 (corrente) bytes. Ler os 8 bytes do lugar errado devolve lixo, que
+vira "sem texto" na tela: o silêncio de sempre, sem erro no servidor),
 `--test-atk-vivo` (o NPC decide pelo ATK/DEF **de agora** — equipamento, magia
 de campo, efeito contínuo —, e não pelo statline impresso no `cards.cdb`, que
 era o que ele lia: o jogador punha +700 num monstro e o NPC atacava assim mesmo,
 entregando o corpo numa batalha que a conta dele dizia ganhar. O par CONTROLE é
 o teste: no MESMO duelo sem o equipamento ele TEM de atacar, senão "não atacou"
-não provaria nada).
+não provaria nada),
+`--test-alvos` (**de QUEM é a carta que o NPC escolheu**. O `DecideSelect`
+genérico ordenava os alvos por ATK sem perguntar de quem eram, e três coisas
+saíam do mesmo buraco: o Inseto Devorador de Homens (Man-Eater Bug) virava e
+destruía o monstro do PRÓPRIO Wevil — que era o maior ATK da mesa justamente
+porque ele acabara de equipá-lo —; o Insect Armor with Laser Cannon ia parar no
+inseto do JOGADOR (o Lua da carta aceita alvo dos dois lados, e num duelo de
+teste o NPC levou o Petit Moth do jogador de 300 a 3800 de ATK, com o log
+dizendo "+700 no melhor atacante" as quatro vezes); e o equipamento era gasto
+num monstro DEITADO, onde o bônus de ATK não vale nada — pior, o ciclo por
+atributo (+400 ATK / −200 DEF) TIRA 200 do único número que aquela batalha usa.
+Junto vai a posição de entrada, que agora conta o equipamento que está na mão:
+ela é decidida ANTES da regra do equipamento, e a regra do equipamento só
+reforça quem está de pé, então o corpo entrava deitado e o reforço reservado
+para ele nunca chegava. Cobre também o custo da Insect Imitation, que chega como
+`MSG_SELECT_CARD` e não como `MSG_SELECT_TRIBUTE` — caía na regra de "o mais
+forte" e tributava o MAIOR corpo do campo, o contrário do que o comentário da
+própria regra dizia. Cada caso tem par CONTROLE, e os dois duelos reais no fim
+provam que a lista chega ao cérebro com os dois lados dentro e com o
+`controller` certo),
+`--test-armory` (Armory Call: qual equipamento vem do deck e em quem ele entra).
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
@@ -225,9 +387,32 @@ mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
 >
 > **O `.exe` só precisa ser republicado quando a CASCA muda** (`duel-server/host/`
 > — ~400 linhas que resolvem a instalação, aplicam o motor em estágio e o
-> carregam). Aí sim: `npm run pack` + bump da `InstallerVersion` +
-> `npm run release:publish -- -ComExe`. Quanto menos a casca fizer, mais raro isso
-> é — e é de propósito.
+> carregam). Aí sim: `npm run pack` + bump da `InstallerVersion`. Quanto menos a
+> casca fizer, mais raro isso é — e é de propósito.
+>
+> **Mas o exe VIAJA em toda publicação, desde 22/08/2026** — mesmo sem `-ComExe`,
+> mesmo sem bump. Não é redundância: o campo `installer` do manifesto é a ÚNICA
+> forma de um cliente descobrir que existe um executável novo
+> (`UpdateEngine.Montar`), e com ele nulo o jogador de exe antigo não é avisado de
+> nada. Como o motor agora cai em `.staged/` e **quem aplica o estágio é a casca
+> ≥ 0.15.0**, um exe 0.14.x baixa o `engine.zip` todo dia e nada o carrega: front
+> novo, motor congelado **para sempre**, sem um erro sequer.
+>
+> Aconteceu de verdade. Só os dois Releases de 19/08/2026 saíram com o exe; todos
+> os seguintes com `installer: null`. Quem não abriu o jogo naquela janela de 25
+> minutos ficou preso — o sintoma, do lado de quem joga, foi a magia de campo do
+> tabuleiro entrando do lado do JOGADOR em vez do NPC (`fieldSpellController`,
+> motor 0.3.0) e o ATK/DEF sem aparecer impresso na carta (o evento `stats` da
+> `VarrerStats`, motor 0.6.0 — `duel.html` só desenha o rótulo quando o valor
+> chega). Os dois estavam corrigidos no repositório havia dias.
+>
+> O custo é de quem PUBLICA (~66 MB de upload), nunca de quem joga: o cliente
+> compara `installer.version` com a compilada dentro dele e não baixa nada quando
+> são iguais. `-ComExe` sobrou como "exija o exe" — falha em vez de avisar quando
+> `dist/ClassicDuels.exe` não existe. E o `publish-release.ps1` agora **recusa**
+> publicar um exe empacotado antes da última mexida na casca (compara
+> `dist/.cache/casca.digital`), que entregaria uma casca velha carregando um motor
+> novo, em silêncio.
 
 > **Compile sempre com o servidor parado.** O `.exe` fica travado enquanto roda,
 > o `dotnet build` falha *e o teste seguinte roda o binário antigo* — parece que a
@@ -406,6 +591,30 @@ entrega evento de ponteiro a um controle desligado (o "segurar" não começaria)
 e o `button:disabled { opacity: .4 }` de `web/css/ui.css` apagava justamente o
 prêmio recém-ganho — a carta ficava quase invisível.
 
+**"Ver as cartas" de um conteúdo da Loja** (`web/js/gavetas.js` +
+`web/css/gavetas.css`). Todo booster e todo Deck Estrutural da vitrine tem um
+botão que abre a MESMA caixa da lista de drops da Trilha de Duelos: as cartas
+separadas por raridade, com a chance de cada gaveta e o ✔ nas que já estão na
+Coleção, mais o "faltam N". A pergunta do jogador é a mesma nos dois lugares —
+*o que vem aqui dentro, e o que disso ainda me falta?* —, então é literalmente
+a mesma caixa; duas cópias divergiriam caladas, uma ganhando o selo de "você
+tem" e a outra não. O botão nunca desliga por falta de DP: quem está sem saldo
+é justamente quem precisa escolher onde gastar o próximo.
+
+> **A chance de cada gaveta não é uma fórmula só.** O booster e o drop do NPC
+> sorteiam DIFERENTE, e cada um tem de bater com o seu servidor: `chancesDe`
+> (`drops.js`) renormaliza entre as gavetas que têm carta, como `premiar_vitoria`
+> faz; `chancesDoPacote` (`pacote.js`) reproduz a CASCATA de `abrir_pacote()`,
+> que não renormaliza — ele rola os pesos fixos e desce até achar gaveta com
+> carta. Reaproveitar uma no lugar da outra mostra uma porcentagem que o
+> sorteio não cumpre, e nada acusa. Por isso as duas contas são testadas em
+> Node, e o `openPack` do front — que renormaliza e não é chamado por ninguém
+> desde que a economia foi para o banco — está marcado como não sendo o sorteio
+> do jogo.
+>
+> No Deck Estrutural não há chance nenhuma: vem tudo, e vem repetido (o `×3`
+> no canto da miniatura). A lista sai do `.ydk` (`ydk.js`).
+
 `web/js/customcards.js` importa cartas de um "card maker" externo (nome, tipo,
 ATK/DEF, arte) para o Deck Builder. Isso só monta o **esqueleto** da carta —
 o `ocgcore` roda Lua e o card maker não gera Lua, então toda carta importada
@@ -416,7 +625,7 @@ o banco do `ygo-data`.
 **`web/campo.html`** é o editor de campo (estilo *scene* do Unity): desenha
 layouts de tabuleiro arrastando/redimensionando as zonas que o `ocgcore`
 realmente entende (monstro, magia/armadilha, campo, deck, extra, cemitério,
-mão — por jogador), com snapping de tamanho/espaçamento. Salva em
+**banidas** e mão — por jogador), com snapping de tamanho/espaçamento. Salva em
 `boards/*.json` (mesmo padrão de `decks/`, ver `boards/README.md`). Qual
 tabuleiro está *ativo* é preferência local (`localStorage: ygo:activeBoard`,
 não conteúdo do jogo) — o `duel.html` lê essa chave no boot e, se apontar
@@ -424,6 +633,16 @@ para um tabuleiro salvo, sobrepõe posição/tamanho customizados no layout
 flexbox de sempre; sem tabuleiro ativo, nada muda. O motor de arrastar/snap
 mora em `web/js/campoeditor.js`; o schema das zonas e o gerador do layout
 padrão, em `web/js/boards.js`.
+
+> **Zona nova custa DOIS lugares**: `zoneIds()` (aparece no editor) e
+> `defaultLayout()` (ganha posição). Esquecer o segundo não dá erro nenhum:
+> todo `boards/*.json` já salvo foi gravado antes dela existir, e o backfill
+> (`backfillMissingZones` no editor, `loadActiveBoard` no duelo) copia do
+> layout padrão — sem a posição lá, a zona fica solta em fluxo numa fileira
+> toda absoluta e aterrissa por cima do campo. `node web/js/boards.test.mjs`
+> guarda esse par. A pilha de **banidas** (`p{n}:banido`,
+> `LOCATION_REMOVED`) foi a última a entrar assim: sem ela, carta banida sumia
+> da tela e não ia para lugar nenhum.
 
 Os `boards/*.json` **viajam dentro do `game.zip`** (pacote `game`, ver
 `tools/publish-release.ps1`). Isso não é detalhe: até 11/08/2026 eles não

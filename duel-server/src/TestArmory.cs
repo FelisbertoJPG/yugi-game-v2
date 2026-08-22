@@ -192,11 +192,14 @@ namespace DuelServer
                     string s = System.Text.Json.JsonSerializer.Serialize(ev);
                     if (s.Contains("seta armadilha") && s.Contains(ARMORY_CALL.ToString())) setou = true;
                     if (s.Contains("Armory Call: busca equipamento")) ativou = true;
-                    if (s.Contains("Armory Call: escolhe"))
+                    // QUAL equipamento ele buscou sai do evento de SELEÇÃO do
+                    // NPC. Antes esta linha procurava o texto do `_log`, que
+                    // nunca foi evento — a checagem passava por cima de tudo e o
+                    // teste ficava verde sem nunca ter olhado a busca.
+                    if (s.Contains("\"action\":\"select\""))
                     {
-                        equipou = true;
-                        if (s.Contains(MYSTICAL_MOON.ToString())) buscada = MYSTICAL_MOON;
-                        else if (s.Contains(DRAGON_TREASURE.ToString())) buscada = DRAGON_TREASURE;
+                        if (s.Contains(MYSTICAL_MOON.ToString())) { equipou = true; buscada = MYSTICAL_MOON; }
+                        else if (s.Contains(DRAGON_TREASURE.ToString())) { equipou = true; buscada = DRAGON_TREASURE; }
                     }
                 }
                 if (equipou)

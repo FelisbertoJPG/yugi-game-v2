@@ -169,12 +169,21 @@ namespace DuelServer
             public uint chainTriggerCode;         // a carta invocada/ativada
             public int chainTriggerPlayer = -1;   // de quem é (−1 = não sei)
             public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
+            // yesno (EFFECTYN): QUAL efeito da carta esta' sendo oferecido.
+            public ulong askDesc; public string askText;
             public byte posMask;                 // position: posições que o motor aceita
             // selectoption: ids de texto do motor. 64 bits porque a descrição de
             // uma carta é `code << 20 | indice` (ver ParseSelectOption) — em 32
             // ela não cabe. Os ids de sistema (60/61, a moeda) continuam
             // pequenos, então a tela compara com eles do mesmo jeito.
             public List<ulong> options = new();
+            /// <summary>
+            /// O texto de cada opção, na MESMA ordem de <see cref="options"/> —
+            /// null onde o motor usa um texto de sistema, que não mora no
+            /// cards.cdb. Sem ele a tela só sabia numerar ("Opção 1", "Opção 2"),
+            /// que é justamente o que não se pode escolher às cegas.
+            /// </summary>
+            public List<string> optionTexts = new();
             public List<Sel> choices = new();    // cartas oferecidas na seleção
             public int rawType;                  // tipo bruto da mensagem (p/ "unsupported")
         }
@@ -188,6 +197,10 @@ namespace DuelServer
             public uint code; public int index;
             public byte controller, location; public int sequence;
             public bool canDirect;   // battlecmd: pode atacar direto (campo vazio)
+            // QUAL efeito desta carta esta' sendo oferecido (ver DescricaoDoEfeito).
+            // Uma carta com dois efeitos ativaveis aparece DUAS vezes na lista,
+            // com o mesmo codigo e a mesma arte — so' o `desc` as separa.
+            public ulong desc; public string descText;
         }
 
         /// <summary>Carta oferecida num SELECT_CARD / SELECT_TRIBUTE.</summary>
@@ -198,6 +211,8 @@ namespace DuelServer
             public byte release;   // quantos tributos esta carta vale
             public int param;      // select_sum: quanto esta carta soma (nível)
             public bool hidden;    // carta virada do oponente: código omitido (code=0)
+            // Corrente: QUAL efeito da carta seria encadeado (ver DescricaoDoEfeito).
+            public ulong desc; public string descText;
         }
 
         public sealed class Result
@@ -712,6 +727,28 @@ namespace DuelServer
                     if (!idx.Contains(c.index)) idx.Add(c.index);
                 }
             }
+            // A escolha do NPC vira EVENTO, como já viravam a jogada, o ataque
+            // e a corrente. Sem isto, decidir QUAL carta ele pega era a única
+            // decisão do cérebro que só existia no `Log.Info` — invisível para o
+            // registro do duelo na tela e, pior, impossível de conferir num
+            // teste de duelo real, que é onde as escolhas dirigidas erram.
+            //
+            // Os códigos saem de `q.choices`, que o host já projetou: a carta
+            // virada do outro lado chega ali com o código zerado, então nada
+            // escondido vaza por este caminho.
+            _events?.Add(new
+            {
+                type = "npc",
+                action = "select",
+                why = "escolhe " + string.Join(", ", idx.Select(i =>
+                {
+                    var c = q.choices.FirstOrDefault(x => x.index == i);
+                    return c.code != 0 ? c.code.ToString() : "(virada)";
+                })),
+                // Os códigos à parte, para a tela mostrar o NOME da carta em vez
+                // do número. `0` é a carta virada, que o host já mascarou.
+                codes = idx.Select(i => q.choices.FirstOrDefault(x => x.index == i).code).ToArray(),
+            });
             return EncodeSelect(idx);
         }
 
@@ -1136,7 +1173,24 @@ namespace DuelServer
                 // sim/não. Ex.: Dust Tornado, após destruir, oferece "setar 1 magia/
                 // armadilha da mão?". Resposta = int32 (1=sim, 0=não). O 12 traz o
                 // código da carta cujo efeito é oferecido; o 13 é um sim/não puro.
-                case 12: _pending = new Question { kind = "yesno", player = d[o + 1], askCode = BitConverter.ToUInt32(d, o + 2) & 0x7FFFFFFF }; break;
+                // O 12 tem `player(1) code(4) ctrl(1) loc(1) seq(4) pos(4) desc(8)`:
+                // a description no fim diz QUAL efeito da carta está sendo
+                // oferecido — sem ela a pergunta é só "ativar o efeito de X?",
+                // que não distingue os dois efeitos de uma carta que tem dois.
+                // Lida sob guarda de tamanho: mensagem menor é layout diferente.
+                case 12:
+                {
+                    ulong descYn = mlen >= 24 ? BitConverter.ToUInt64(d, o + 16) : 0;
+                    _pending = new Question
+                    {
+                        kind = "yesno",
+                        player = d[o + 1],
+                        askCode = BitConverter.ToUInt32(d, o + 2) & 0x7FFFFFFF,
+                        askDesc = descYn,
+                        askText = DescricaoDoEfeito(descYn),
+                    };
+                    break;
+                }
                 case 13: _pending = new Question { kind = "yesno", player = d[o + 1] }; break;
                 // MSG_SELECT_OPTION: player(1), quantidade(1), ids de texto uint32.
                 // A resposta é int32 com o índice (0-based). O Time Wizard chega
@@ -1186,7 +1240,11 @@ namespace DuelServer
             if (p + count * 8 > o + mlen)
                 throw new InvalidOperationException($"SELECT_OPTION truncado: {count} opcoes em {mlen} bytes");
             for (int i = 0; i < count; i++, p += 8)
-                q.options.Add(BitConverter.ToUInt64(d, p));
+            {
+                ulong opt = BitConverter.ToUInt64(d, p);
+                q.options.Add(opt);
+                q.optionTexts.Add(DescricaoDoEfeito(opt));
+            }
             Log.Info($"[select option] p={q.player} n={count} len={mlen} opcoes=[{string.Join(",", q.options)}]");
             return q;
         }
@@ -1470,13 +1528,14 @@ namespace DuelServer
         /// </summary>
         const int ACT_ENTRY = 19;
 
-        static List<Act> ReadActsDesc(byte[] d, ref int p, int limit)
+        List<Act> ReadActsDesc(byte[] d, ref int p, int limit)
         {
             var list = new List<Act>();
             if (p + 4 > limit) return list;
             int n = (int)BitConverter.ToUInt32(d, p); p += 4;
             for (int i = 0; i < n && p + ACT_ENTRY <= limit; i++)
             {
+                ulong desc = BitConverter.ToUInt64(d, p + 10);
                 list.Add(new Act
                 {
                     code = BitConverter.ToUInt32(d, p),
@@ -1484,10 +1543,30 @@ namespace DuelServer
                     controller = d[p + 4],
                     location = d[p + 5],
                     sequence = BitConverter.ToInt32(d, p + 6),
+                    desc = desc,
+                    descText = DescricaoDoEfeito(desc),
                 });
                 p += ACT_ENTRY;
             }
             return list;
+        }
+
+        /// <summary>
+        /// O texto da `description` que veio na pergunta — "Banish 1 Fish, Sea
+        /// Serpent, or Aqua you control", não o nome da carta.
+        ///
+        /// Existe porque uma carta com mais de um efeito é oferecida mais de uma
+        /// vez, com o MESMO código e a mesma arte: na janela de corrente o
+        /// Forgotten Temple of the Deep aparece igual para banir e para Invocar
+        /// Especialmente de volta, e sem esta frase o jogador escolhe no escuro.
+        /// Quem resolve é o `DatabaseManager` (a tabela `texts` do cards.cdb,
+        /// com o índice preservado); aqui só se protege de banco fechado.
+        /// </summary>
+        string DescricaoDoEfeito(ulong desc)
+        {
+            if (desc == 0) return null;
+            try { return _s?.Cards?.TextoDoEfeito(desc); }
+            catch { return null; }   // texto é enfeite: nunca derruba o duelo
         }
 
         /// <summary>
@@ -1553,6 +1632,10 @@ namespace DuelServer
         ///   type(1) player(1) speCount(1) forced(1) hintTiming(4) hintOutro(4) count(4)
         /// e uma entrada de 23 bytes por carta ativável:
         ///   code(4) ctrl(1) loc(1) seq(4) pos(4) desc(8) flag(1).
+        /// O `desc` diz QUAL efeito da carta seria encadeado — ver
+        /// <see cref="DescricaoDoEfeito"/>. Só é lido quando a entrada tem os 22
+        /// bytes que ele exige: entrada menor significa layout diferente, e ali
+        /// ler os 8 bytes seria inventar um número.
         /// Medido com --probe-chain (Mirror Force setada + ataque do NPC). count 0 =
         /// janela sem nada para encadear. Deduzo o tamanho da entrada pelo
         /// comprimento, como no SELECT_CARD, para não desalinhar em silêncio.
@@ -1581,6 +1664,8 @@ namespace DuelServer
                 {
                     int p = o + header + i * entry;
                     if (p + 10 > o + mlen) break;
+                    ulong desc = (entry >= 22 && p + 22 <= o + mlen)
+                               ? BitConverter.ToUInt64(d, p + 14) : 0;
                     q.choices.Add(new Sel
                     {
                         code = BitConverter.ToUInt32(d, p),
@@ -1588,8 +1673,17 @@ namespace DuelServer
                         location = d[p + 5],
                         sequence = BitConverter.ToInt32(d, p + 6),
                         index = i,
+                        desc = desc,
+                        descText = DescricaoDoEfeito(desc),
                     });
                 }
+                // Uma linha por janela que OFERECE alguma coisa (a janela vazia
+                // nem chega aqui). E' o unico lugar onde se ve qual EFEITO o
+                // motor esta' oferecendo — duas linhas com o mesmo codigo e
+                // descricoes diferentes sao os dois efeitos da mesma carta.
+                Log.Info("[chain] " + string.Join(" | ", q.choices.ConvertAll(
+                    c => $"{c.code}#{c.index} desc={c.desc}" +
+                         (c.descText != null ? $" \"{c.descText}\"" : ""))));
             }
             return q;
         }

@@ -10,6 +10,11 @@
  */
 
 import { pushFile, pushFileGuardado, pullFileEx } from '/web/js/projectstore.js';
+// A CONTA das chances mora fora daqui de propósito: sem `localStorage` e sem
+// `projectstore`, ela é importável no Node e tem teste (`pacote.test.mjs`).
+// Reexportada para quem já importava `PACK_ODDS` daqui continuar funcionando.
+import { PACK_ODDS, totalDoPacote } from './pacote.js';
+export { PACK_ODDS, chancesDoPacote, totalDoPacote, CASCATA } from './pacote.js';
 
 /** Raridades, da mais alta para a mais baixa (a ordem importa: define a "maior"). */
 export const RARITIES = ['UR', 'SR', 'R', 'N'];
@@ -75,23 +80,10 @@ export function salvarNoProjeto() {
   return { ok: true, quantos: list.length };
 }
 
-/**
- * Chances de cada raridade ao abrir um pacote (peso relativo, POR CARTA, soma 1000).
- *
- * UR continua "ultra rara": 0,4%/carta → ~2% por pacote de 5 → em média ~50
- * pacotes (~5000 DP) por UR.
- *
- * **SR foi reduzida de 56 para 38** (5,6% → 3,8% por carta). Motivo: com 56 e a
- * garantia a cada 10 pacotes, 50 pacotes rendiam ~18 SRs — mais do que o total
- * de SRs de um booster, então o jogador FECHAVA a lista de SR antes de tirar a
- * primeira UR, e a raridade perdia o sentido. Com 38 e a garantia a cada 20, o
- * mesmo investimento rende ~11. O que saiu de SR foi para R (240→252) e N
- * (700→706): o pacote não fica mais pobre, fica menos inflacionado no topo.
- *
- * Só entram as raridades presentes no booster, renormalizadas — um booster sem
- * UR simplesmente não dropa UR.
- */
-export const PACK_ODDS = { N: 706, R: 252, SR: 38, UR: 4 };
+// `PACK_ODDS` (o peso de cada raridade) e a CASCATA que o servidor segue quando
+// a gaveta sorteada está vazia moram em `pacote.js` e são reexportados no topo.
+// A UR continua "ultra rara": 0,4%/carta → ~2% por pacote de 5 → em média ~50
+// pacotes (~5000 DP) por UR.
 /** Quantas cartas saem por pacote. */
 export const PACK_SIZE = 5;
 /** Preço padrão de um pacote (o booster pode ter o seu). */
@@ -179,7 +171,7 @@ export function deleteBooster(index) {
 
 /** Total de cartas (todas as raridades) de um booster. */
 export function boosterSize(b) {
-  return RARITIES.reduce((n, r) => n + (b.cards?.[r]?.length ?? 0), 0);
+  return totalDoPacote(b?.cards);   // a mesma conta de `pacote.js`, num lugar so'
 }
 
 // ------------------------------------------------------- loja / pacotes
@@ -199,10 +191,17 @@ export function setInShop(index, on) {
 }
 
 /**
- * Abre um pacote: sorteia PACK_SIZE cartas do booster. A raridade é sorteada
- * pelos pesos de PACK_ODDS, mas só entre as raridades que o booster REALMENTE
- * tem (renormalizando), senão um booster só de N nunca daria carta. Cartas
- * podem repetir (é um sorteio com reposição, como pacote de verdade).
+ * Abre um pacote: sorteia PACK_SIZE cartas do booster.
+ *
+ * **NÃO é este o sorteio do jogo.** Quem abre pacote é o banco
+ * (`abrir_pacote()`, migration 0004/0023) desde que a economia saiu do cliente
+ * — enquanto o sorteio rodava aqui, quem chamasse a API na mão podia pular o
+ * `spendDP` e creditar as cartas do mesmo jeito. Esta função ficou sem chamador
+ * nenhum; ela vale como referência do formato do resultado.
+ *
+ * E ela nem sorteia igual: aqui as raridades presentes são RENORMALIZADAS, e o
+ * servidor em vez disso DESCE pela cascata (ver `pacote.js`). Quem quiser saber
+ * a chance que a tela deve mostrar usa `chancesDoPacote`, não esta função.
  */
 export function openPack(booster, n = PACK_SIZE, { guaranteeSR = false, guaranteeUR = false } = {}) {
   const buckets = RARITIES.filter((r) => booster.cards[r]?.length);

@@ -336,6 +336,13 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-paradox") >= 0)
                 return TestParadox.Run(streamingAssets);
 
+            // O deck de AGUA do Mako. Gira em torno de uma palavra — "Umi" —, que
+            // meia duzia de cartas ligam sem se chamarem assim. Prova o Templo
+            // banindo so' com motivo (ele banía o proprio monstro em toda janela
+            // de corrente), quem conta como Umi, e a protecao que ela da'.
+            if (Array.IndexOf(args, "--test-mako") >= 0)
+                return TestMako.Run(streamingAssets);
+
             // As cartas de COMPRA, reconhecidas pelo EFEITO (a `category` do
             // banco + o Lua da carta) e nao por uma lista de ids: compra limpa
             // vem antes de tudo, compra com descarte so' quando vale.
@@ -361,6 +368,18 @@ namespace DuelServer
 
             if (Array.IndexOf(args, "--test-armory") >= 0)
                 return TestArmory.Run(streamingAssets);
+
+            // De QUEM e' a carta que o NPC escolheu: remocao mirando o proprio
+            // campo, equipamento gasto em monstro deitado, e a posicao de
+            // entrada decidida sem contar o equipamento que esta' na mao.
+            if (Array.IndexOf(args, "--test-alvos") >= 0)
+                return TestAlvos.Run(streamingAssets);
+
+            // QUAL efeito da carta o motor esta' oferecendo (a `description` da
+            // pergunta). E' o que separa os dois efeitos do Forgotten Temple of
+            // the Deep na tela — sem isso as duas ofertas sao identicas.
+            if (Array.IndexOf(args, "--test-efeitos") >= 0)
+                return TestEfeitos.Run(streamingAssets);
 
             // Sonda do layout do SELECT_IDLECMD.
             if (Array.IndexOf(args, "--probe-idle") >= 0)

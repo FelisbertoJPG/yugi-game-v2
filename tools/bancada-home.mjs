@@ -39,16 +39,20 @@ const corpo = fatiar(fonte, '<div class="home">', '\n</div>\n\n<!-- O cartão', 
 // Os dados de mentira. Só texto: nada aqui muda uma regra de layout — se
 // mudasse, a bancada estaria provando outra tela.
 const AMIGOS = [
-  ['[22502] Felisberto', true],
-  ['[11337] Ciclano', true],
-  ['[448752] gabby', true],
-  ['[984381] Geiso', false],
-  ['[12034] cdreyer', false],
+  ['[22502] Felisberto', true, 'ouro.png'],
+  ['[11337] Ciclano', true, 'azul.png'],
+  ['[448752] gabby', true, 'verde.png'],
+  ['[984381] Geiso', false, 'roxo.png'],
+  ['[12034] cdreyer', false, null],
 ];
 
-const linhas = AMIGOS.map(([nome, on]) => `
+// O amigo sem ícone escolhido (o último da lista) cai no padrão do jogo — é o
+// estado de todo jogador novo, e por isso está aqui.
+const arte = (f) => (f ? `/web/img/icones/${f}` : '/web/img/icone.png');
+
+const linhas = AMIGOS.map(([nome, on, icone]) => `
       <button class="amigo${on ? ' on' : ''}"${on ? '' : ' disabled'}>
-        <span class="mini">🂠</span>
+        <span class="mini"><img alt="" src="${arte(icone)}"></span>
         <span class="nome">${nome}</span>
         <span class="estado">${on ? 'ONLINE' : 'OFFLINE'}</span>
         <span class="ponto${on ? ' on' : ''}"></span>
@@ -66,6 +70,7 @@ const html = `<!doctype html>
 <body>
 <div class="home">${corpo
   .replace('<span id="eu-nome">…</span>', '<span id="eu-nome">Felisberto</span>')
+  .replace('src="/web/img/icone.png"', 'src="/web/img/icones/ouro.png"')
   .replace('<span class="etiqueta" id="eu-etiqueta"></span>',
            '<span class="etiqueta" id="eu-etiqueta">[22502]</span>')
   .replace('<div class="dp" id="dp">— DP</div>', '<div class="dp" id="dp">5600 DP</div>')

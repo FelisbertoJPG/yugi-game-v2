@@ -26,7 +26,8 @@ export const logado = () => !!sessao();
 // ------------------------------------------------------------------ perfil
 
 /**
- * Seu nome e sua etiqueta — o `[22502]` que os outros usam para te achar.
+ * Seu nome, sua etiqueta (o `[22502]` que os outros usam para te achar) e o
+ * icone escolhido.
  *
  * **Filtra pelo SEU id, e isso não é redundância.** A policy de `perfis` é
  * `id = auth.uid() OR eh_admin()`: para uma conta comum o `select` já devolve
@@ -42,7 +43,7 @@ export const logado = () => !!sessao();
 export async function meuPerfil() {
   const conta = await contaAtual();
   if (!conta?.id) return null;
-  const r = await req(`perfis?select=usuario,etiqueta&id=eq.${encodeURIComponent(conta.id)}`);
+  const r = await req(`perfis?select=usuario,etiqueta,icone_id&id=eq.${encodeURIComponent(conta.id)}`);
   return r.ok && r.dados?.[0] ? r.dados[0] : null;
 }
 

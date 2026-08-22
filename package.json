@@ -9,6 +9,7 @@
     "data:build": "python ygo-data/tools/build.py",
     "data:check": "node ygo-data/examples/node-demo.mjs",
     "boosters:check": "node tools/conferir-boosters.mjs",
+    "icones:check": "node tools/conferir-icones.mjs",
     "conteudo:check": "node tools/conferir-conteudo.mjs",
     "launcher:build": "dotnet publish launcher -c Release -o . -v q --nologo && dotnet publish launcher/stop -c Release -o . -v q --nologo",
     "publicar:build": "dotnet publish publicar -c Release -o . -v q --nologo",

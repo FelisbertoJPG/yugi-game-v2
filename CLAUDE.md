@@ -120,6 +120,24 @@ node web/js/notificacoes.test.mjs # 21 testes das notificações da home e do
                              # contador mente); e um campo do Phoenix lido do
                              # lugar errado devolve `undefined`, o aviso não
                              # aparece e não há erro nem no console
+node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
+                             # escolha são decididas no SERVIDOR, então o que
+                             # se prova aqui é o que erra CALADO no cliente: um
+                             # nome de arquivo torto vira uma URL que o
+                             # navegador busca, não acha e desenha como
+                             # quadrado vazio; e a conta de "quais ícones do
+                             # catálogo estão sem imagem no repositório", que é
+                             # a mesma do icones:check
+node tools/icones.mjs        # desenha as artes-semente em web/img/icones/ (em
+                             # CÓDIGO, como o ícone do jogo) e regera o
+                             # index.json — o manifesto que o painel do admin
+                             # oferece e que o icones:check cruza com o banco.
+                             # Rode depois de pôr qualquer PNG novo na pasta
+npm run icones:check         # todo ícone do catálogo tem imagem publicada? A
+                             # imagem viaja no game.zip e o banco guarda só o
+                             # NOME: um ícone cadastrado sem a arte publicada é
+                             # um quadrado vazio na tela de quem joga, e nem o
+                             # banco nem o navegador sabem disso
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run conteudo:check       # o que o admin editou chegou ao BANCO? (conteudo,
                              # decks de NPC e tabuleiros, disco x Supabase).
@@ -870,6 +888,66 @@ outro lado e o desafiante continuaria parado olhando o menu.
 O **amigo offline não é clicável** — o convite expira em 10 minutos e chamar
 quem está com o jogo fechado é gastá-lo à toa —, mas continua **visível**:
 sumir com ele faria a lista dançar sozinha e esconderia quem você tem.
+
+### Ícones de perfil (22/08/2026)
+
+O avatar do jogador. Clicar no slot da lateral abre a escolha **entre os que
+você tem**; o admin cadastra o catálogo em `web/icones.html` (Área de Teste).
+
+Três coisas separadas no banco (migration 0035), e a separação é o ponto:
+
+| onde | o quê |
+|---|---|
+| `icones` | o **catálogo** — que ícones existem, quanto custam, qual é gratuito |
+| `icones_do_jogador` | a **posse** — quem tem cada um |
+| `perfis.icone_id` | a **escolha** — qual está em uso agora |
+
+> Juntar posse e escolha num campo só perderia a coleção no instante em que a
+> pessoa trocasse de ícone, e não haveria como oferecer "os que você tem".
+
+**A imagem mora no repositório** (`web/img/icones/<arquivo>`) e viaja no
+`game.zip`; o banco guarda só o **nome do arquivo**. Foi uma escolha
+deliberada, e ela tem um preço que precisa ser dito em voz alta: **arte nova
+exige publicar um Release** — o painel do admin cadastra id, preço e raridade,
+mas não cria imagem. E como o banco não lê o disco e o navegador não lista
+pastas, um ícone cadastrado cuja arte não foi publicada é um **quadrado vazio**
+na tela de quem joga, sem erro em lugar nenhum.
+
+Daí as duas peças que fecham o buraco:
+
+- **`web/img/icones/index.json`**, o manifesto da pasta, gerado por
+  `node tools/icones.mjs`. É um arquivo estático de propósito: uma rota de
+  listagem custaria implementação nos DOIS back-ends (`tools/serve.mjs` e
+  `StaticServer.cs`), e divergir ali faz a tela funcionar no `npm run dev` e
+  falhar no jogo instalado. O painel do admin **só oferece o que está nele**;
+- **`npm run icones:check`**, que cruza o catálogo publicado com o manifesto —
+  a mesma família do `boosters:check` (carta vendida e injogável) e do
+  `conteudo:check` (edição que ficou só em disco).
+
+As artes-semente são desenhadas **em código** (`tools/icones.mjs`), como o
+ícone do jogo e a pixel art do mundo andável: arte gerada tem fonte, um PNG
+solto no repositório não tem — ninguém sabe refazê-lo maior dois meses depois.
+
+**Quem decide o que você pode usar é o servidor**, e por dois caminhos, não um:
+
+> `escolher_icone()` recusa o que não é seu. Mas a policy de `perfis` é
+> `id = auth.uid() OR eh_admin()`, isto é, **o dono escreve na própria linha** —
+> um `PATCH /perfis?id=eq.<meu>` passaria por cima da função inteira. Ao provar
+> as travas da 0035 isso só não passou porque o ícone escolhido não existia no
+> catálogo (a chave estrangeira barrou); com um ícone real, teria passado. A
+> 0036 fecha com o gatilho `perfis_icone_valido`, cuja regra é do **dono da
+> linha** e não de quem escreve: "este perfil só pode usar um ícone que ESTE
+> perfil tem". Assim vale igual para o jogador, para o admin editando outra
+> pessoa e para qualquer função futura.
+
+A lista de amigos recebe o `icone_id` de cada um (`meus_amigos`), nunca o
+arquivo — a policy de `perfis` não deixaria. Quem cruza o id com a arte é o
+catálogo, que é de leitura aberta, carregado uma vez no boot da home.
+
+> **A Loja ainda não vende ícone.** O catálogo já tem `preco`, `na_loja` e
+> `raridade`, e `dar_icone()` (admin) é a porta de serviço enquanto a compra não
+> existe. A vitrine de cosméticos entra quando houver ícone cadastrado — uma
+> aba vazia não se prova.
 
 ### Mundo andável (mapa mundi + cenários) — **em standby**
 

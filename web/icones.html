@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classic Duels — Ícones</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  .wrap { width: min(1000px, 94vw); margin: 0 auto; padding: 18px 0 60px; }
+
+  .topo { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+          border-bottom: 2px solid var(--line); padding-bottom: 14px; margin-bottom: 18px; }
+  .topo h1 { margin: 0; font-size: 22px; letter-spacing: 4px; color: var(--gold); }
+  .topo .sub { font-size: 10px; color: var(--dim); line-height: 1.6; flex: 1; min-width: 240px; }
+
+  .grade { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 820px) { .grade { grid-template-columns: 1fr; } }
+
+  .painel { background: var(--panel); border: 2px solid var(--line); padding: 16px; }
+  .painel h2 { margin: 0 0 4px; font-size: 12px; letter-spacing: 2px; color: var(--gold); }
+  .painel .ajuda { font-size: 10px; color: var(--dim); margin: 0 0 12px; line-height: 1.6; }
+
+  .campo { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 11px; color: var(--dim); }
+  .campo label { width: 66px; flex: none; }
+  .campo input, .campo select { flex: 1; min-width: 0; }
+  .campo.check { justify-content: flex-start; }
+  .campo.check input { flex: none; width: auto; }
+
+  /* A prévia é o ponto do painel: o admin vê a arte no tamanho em que ela vai
+     aparecer, antes de publicar. O ícone é desenhado em dois tamanhos porque é
+     em dois que ele é usado — 44px no cartão do perfil e 26px na lista de
+     amigos, onde um desenho detalhado demais vira borrão. */
+  .previa { display: flex; align-items: center; gap: 12px; margin: 12px 0;
+            padding: 12px; background: var(--panel2); border: 1px solid var(--line); }
+  .previa .grande { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line2); }
+  .previa .pequeno { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line2); }
+  .previa .txt { font-size: 10px; color: var(--dim); line-height: 1.5; }
+
+  .botoes { display: flex; gap: 8px; margin-top: 12px; }
+  .botoes button { flex: 1; padding: 8px; }
+  .secundario { background: var(--panel2); color: var(--dim); }
+
+  .aviso { font-size: 11px; margin-top: 10px; min-height: 15px; line-height: 1.5; }
+  .aviso.erro { color: var(--red); }
+  .aviso.ok { color: var(--green); }
+
+  .lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+          background: var(--panel2); border: 1px solid var(--line); text-align: left; width: 100%; }
+  .item:hover { border-color: var(--gold); }
+  .item.selecionado { border-color: var(--gold); background: var(--panel); }
+  .item img { width: 34px; height: 34px; border-radius: 50%; flex: none; border: 1px solid var(--line2); }
+  .item .info { flex: 1; min-width: 0; }
+  .item .nome { font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .meta { font-size: 9px; color: var(--dim); margin-top: 2px; }
+  .item .meta .UR { color: var(--gold); }
+  .item .meta .SR { color: var(--blue); }
+  .item .meta .R  { color: var(--green); }
+  /* Ícone sem imagem publicada: o erro que este painel existe para não deixar
+     passar. Vermelho e escrito, porque a arte quebrada sozinha parece um
+     problema de rede. */
+  .item.quebrado { border-color: var(--red); }
+  .item.quebrado .meta { color: var(--red); }
+
+  .vazio { font-size: 11px; color: var(--dim); padding: 12px 2px; line-height: 1.6; }
+  .back { margin-top: 20px; background: var(--panel2); color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topo">
+    <h1>ÍCONES</h1>
+    <p class="sub">
+      O catálogo de ícones de perfil. A <b>imagem</b> mora em
+      <code>web/img/icones/</code> e viaja no <code>game.zip</code> — este painel
+      cadastra o resto (id, preço, raridade). Arte nova exige publicar um Release.
+    </p>
+  </div>
+
+  <div class="grade">
+
+    <div class="painel">
+      <h2>CADASTRAR</h2>
+      <p class="ajuda">
+        Escolha a <b>arte</b> entre as que já estão no repositório. Para acrescentar
+        uma: ponha o PNG em <code>web/img/icones/</code>, rode
+        <code>node tools/icones.mjs</code> e publique.
+      </p>
+
+      <div class="campo">
+        <label for="f-arquivo">arte</label>
+        <select id="f-arquivo"></select>
+      </div>
+
+      <div class="previa">
+        <img class="grande" id="previa-grande" alt="">
+        <img class="pequeno" id="previa-pequeno" alt="">
+        <span class="txt">44px no perfil<br>26px na lista de amigos</span>
+      </div>
+
+      <div class="campo">
+        <label for="f-nome">nome</label>
+        <input type="text" id="f-nome" placeholder="Enigma dourado" maxlength="60">
+      </div>
+      <div class="campo">
+        <label for="f-id">id</label>
+        <input type="text" id="f-id" placeholder="enigma-dourado" maxlength="32">
+      </div>
+      <div class="campo">
+        <label for="f-preco">preço</label>
+        <input type="number" id="f-preco" min="0" step="50" value="0">
+        <label for="f-raridade" style="width:auto">raridade</label>
+        <select id="f-raridade">
+          <option value="N">N</option>
+          <option value="R">R</option>
+          <option value="SR">SR</option>
+          <option value="UR">UR</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label for="f-ordem">ordem</label>
+        <input type="number" id="f-ordem" step="1" value="0">
+      </div>
+      <div class="campo check">
+        <input type="checkbox" id="f-gratuito">
+        <label for="f-gratuito" style="width:auto">todo mundo tem (gratuito)</label>
+      </div>
+      <div class="campo check">
+        <input type="checkbox" id="f-loja">
+        <label for="f-loja" style="width:auto">à venda na Loja</label>
+      </div>
+
+      <div class="botoes">
+        <button id="btn-salvar">salvar</button>
+        <button id="btn-limpar" class="secundario">limpar</button>
+      </div>
+      <div class="botoes">
+        <button id="btn-apagar" class="secundario" hidden>apagar este ícone</button>
+      </div>
+      <div class="aviso" id="aviso"></div>
+    </div>
+
+    <div class="painel">
+      <h2>NO CATÁLOGO <span id="conta" style="color:var(--dim);font-size:10px"></span></h2>
+      <p class="ajuda">Clique num ícone para editá-lo.</p>
+      <div class="lista" id="lista"></div>
+      <div class="aviso" id="aviso-lista"></div>
+    </div>
+
+  </div>
+
+  <button class="back" id="btn-voltar">← voltar para a Área de Teste</button>
+</div>
+
+<script type="module">
+import { requireLogin } from '/web/js/auth.js';
+import { perfilAtual } from '/web/js/supabase.js';
+import {
+  catalogo, salvarIcone, apagarIcone, arquivosDoRepo,
+  caminhoDoIcone, slug, semImagem, PADRAO,
+} from '/web/js/icones.js';
+
+const $ = (id) => document.getElementById(id);
+
+const username = await requireLogin();
+if (!username) throw new Error('redirecionando para login');
+
+// A recusa de verdade é da RLS (`eh_admin()`), como em toda a Área de Teste.
+// Isto aqui só evita oferecer o que seria negado — e dizer por quê, em vez de
+// deixar o admin descobrir com uma mensagem do Postgres depois de digitar tudo.
+const perfil = await perfilAtual().catch(() => null);
+if (!perfil?.admin) {
+  $('aviso').className = 'aviso erro';
+  $('aviso').textContent = 'só um admin cadastra ícones — você pode ver, não salvar.';
+  for (const id of ['btn-salvar', 'btn-apagar']) $(id).disabled = true;
+}
+
+let arquivos = [];
+let lista = [];
+let editando = null;   // id do ícone aberto no formulário, ou null
+
+// -------------------------------------------------------------- formulário
+function pintarPrevia() {
+  const caminho = caminhoDoIcone($('f-arquivo').value);
+  $('previa-grande').src = caminho;
+  $('previa-pequeno').src = caminho;
+}
+
+function limpar() {
+  editando = null;
+  $('f-nome').value = '';
+  $('f-id').value = '';
+  $('f-preco').value = '0';
+  $('f-ordem').value = '0';
+  $('f-raridade').value = 'N';
+  $('f-gratuito').checked = false;
+  $('f-loja').checked = false;
+  $('btn-apagar').hidden = true;
+  $('aviso').textContent = '';
+  pintarPrevia();
+  pintarLista();
+}
+
+function abrir(i) {
+  editando = i.id;
+  $('f-arquivo').value = i.arquivo;
+  $('f-nome').value = i.nome;
+  $('f-id').value = i.id;
+  $('f-preco').value = String(i.preco ?? 0);
+  $('f-ordem').value = String(i.ordem ?? 0);
+  $('f-raridade').value = i.raridade ?? 'N';
+  $('f-gratuito').checked = !!i.gratuito;
+  $('f-loja').checked = !!i.na_loja;
+  $('btn-apagar').hidden = !perfil?.admin;
+  $('aviso').textContent = '';
+  pintarPrevia();
+  pintarLista();
+}
+
+// O id é gerado do nome enquanto o campo não foi tocado à mão: digitar o slug
+// duas vezes é trabalho, e errá-lo custa uma mensagem de `check constraint` que
+// não diz o que fazer. Depois de editado, o campo é de quem o editou.
+let idNaMao = false;
+$('f-id').oninput = () => { idNaMao = true; };
+$('f-nome').oninput = () => {
+  if (!idNaMao && !editando) $('f-id').value = slug($('f-nome').value);
+};
+$('f-arquivo').onchange = pintarPrevia;
+$('btn-limpar').onclick = () => { idNaMao = false; limpar(); };
+
+$('btn-salvar').onclick = async () => {
+  const icone = {
+    id: slug($('f-id').value),
+    nome: $('f-nome').value.trim(),
+    arquivo: $('f-arquivo').value,
+    preco: Number($('f-preco').value) || 0,
+    raridade: $('f-raridade').value,
+    gratuito: $('f-gratuito').checked,
+    na_loja: $('f-loja').checked,
+    ordem: Number($('f-ordem').value) || 0,
+  };
+
+  if (!icone.id) return void avisar('o id ficou vazio — escreva um nome', 'erro');
+  if (!icone.nome) return void avisar('escreva um nome', 'erro');
+  if (!icone.arquivo) return void avisar('escolha a arte', 'erro');
+  // Um ícone à venda por 0 DP é de graça na Loja, o que quase nunca é o que se
+  // quis dizer — e ninguém percebe até alguém "comprar".
+  if (icone.na_loja && !icone.gratuito && icone.preco <= 0) {
+    return void avisar('à venda por 0 DP? ponha um preço, ou marque gratuito', 'erro');
+  }
+
+  $('btn-salvar').disabled = true;
+  const r = await salvarIcone(icone);
+  $('btn-salvar').disabled = false;
+  if (!r.ok) return void avisar(r.erro, 'erro');
+
+  avisar(`"${icone.nome}" salvo`, 'ok');
+  idNaMao = false;
+  await recarregar();
+  limpar();
+};
+
+$('btn-apagar').onclick = async () => {
+  if (!editando) return;
+  // Apagar leva junto a POSSE de todo mundo (`on delete cascade`) e devolve ao
+  // padrão quem estava usando (`on delete set null`). Não é desfazível, então
+  // é a única coisa aqui que pergunta.
+  if (!confirm(`Apagar "${editando}"?\n\nQuem tinha este ícone perde, e quem `
+             + 'estava usando volta para o padrão. Não dá para desfazer.')) return;
+  const r = await apagarIcone(editando);
+  if (!r.ok) return void avisar(r.erro, 'erro');
+  avisar('apagado', 'ok');
+  await recarregar();
+  limpar();
+};
+
+const avisar = (t, classe = '') => {
+  $('aviso').className = `aviso ${classe}`;
+  $('aviso').textContent = t ?? '';
+};
+
+// ------------------------------------------------------------------ lista
+function pintarLista() {
+  const caixa = $('lista');
+  $('conta').textContent = lista.length ? `(${lista.length})` : '';
+
+  if (!lista.length) {
+    caixa.replaceChildren(Object.assign(document.createElement('div'), {
+      className: 'vazio',
+      textContent: 'nenhum ícone cadastrado ainda — escolha uma arte ao lado e salve.',
+    }));
+    return;
+  }
+
+  const faltando = new Set(semImagem(lista, arquivos).map((i) => i.id));
+  const frag = document.createDocumentFragment();
+
+  for (const i of lista) {
+    const b = document.createElement('button');
+    b.className = 'item'
+      + (i.id === editando ? ' selecionado' : '')
+      + (faltando.has(i.id) ? ' quebrado' : '');
+    const img = document.createElement('img');
+    img.src = caminhoDoIcone(i);
+    img.alt = '';
+    // A arte pode sumir do repositório depois do cadastro (alguém apagou o
+    // PNG). Sem isto a linha ficaria com um ícone quebrado do navegador.
+    img.onerror = () => { img.src = PADRAO; };
+    const info = document.createElement('div');
+    info.className = 'info';
+    const nome = document.createElement('div');
+    nome.className = 'nome';
+    nome.textContent = i.nome;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = faltando.has(i.id)
+      ? `⚠ ${i.arquivo} não está no repositório`
+      : `<span class="${i.raridade}">${i.raridade}</span> · `
+        + (i.gratuito ? 'todo mundo tem' : i.na_loja ? `${i.preco} DP na Loja` : 'só por concessão');
+    info.append(nome, meta);
+    b.append(img, info);
+    b.onclick = () => abrir(i);
+    frag.append(b);
+  }
+  caixa.replaceChildren(frag);
+
+  const quebrados = faltando.size;
+  $('aviso-lista').className = `aviso ${quebrados ? 'erro' : ''}`;
+  $('aviso-lista').textContent = quebrados
+    ? `${quebrados} ícone(s) com a imagem faltando no repositório — quem joga vê `
+      + 'um quadrado vazio. Ponha o PNG em web/img/icones/, rode `node tools/icones.mjs` e publique.'
+    : '';
+}
+
+// ------------------------------------------------------------------- boot
+async function recarregar() {
+  lista = await catalogo();
+  pintarLista();
+}
+
+const repo = await arquivosDoRepo();
+arquivos = repo.arquivos;
+
+if (!repo.ok || !arquivos.length) {
+  // Sem o manifesto não dá para oferecer arte nenhuma — e um campo livre aqui
+  // seria convidar o cadastro que quebra em silêncio na tela do jogador.
+  $('f-arquivo').append(new Option('nenhuma arte encontrada', ''));
+  $('f-arquivo').disabled = true;
+  $('btn-salvar').disabled = true;
+  avisar('não achei web/img/icones/index.json — rode `node tools/icones.mjs`.', 'erro');
+} else {
+  for (const a of arquivos) $('f-arquivo').append(new Option(a, a));
+}
+
+$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+
+await recarregar();
+limpar();
+</script>
+</body>
+</html>

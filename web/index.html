@@ -45,12 +45,16 @@
   .cartao { border: 2px solid var(--line); background: var(--panel); padding: 10px; }
 
   .eu { display: flex; align-items: center; gap: 10px; }
+  /* O SLOT do ícone. É um botão: clicar abre a escolha entre os que você tem.
+     A borda dourada no hover é o único convite — um rótulo "trocar" ao lado
+     ocuparia a linha do nome, que é onde o olho vai primeiro. */
   .avatar {
-    width: 44px; height: 44px; border-radius: 50%; flex: none;
+    width: 44px; height: 44px; border-radius: 50%; flex: none; padding: 0;
     border: 2px solid var(--line2); background: var(--panel2);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 18px; color: var(--gold);
+    overflow: hidden; cursor: pointer;
   }
+  .avatar:hover { border-color: var(--gold); }
+  .avatar img { width: 100%; height: 100%; display: block; }
   .eu .quem { min-width: 0; flex: 1; }
   .eu .nome { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink);
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -74,9 +78,26 @@
     padding: 7px 9px; background: var(--panel2); border: 1px solid var(--line);
   }
   .amigo:hover:not(:disabled) { border-color: var(--gold); }
-  .amigo .mini { width: 26px; height: 26px; border-radius: 50%; flex: none;
-                 border: 1px solid var(--line2); background: var(--panel);
-                 display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--dim); }
+  .amigo .mini { width: 26px; height: 26px; border-radius: 50%; flex: none; overflow: hidden;
+                 border: 1px solid var(--line2); background: var(--panel); }
+  .amigo .mini img { width: 100%; height: 100%; display: block; }
+
+  /* A grade de escolha do ícone. O que você NÃO tem aparece apagado e não
+     clicável, em vez de sumir: ver o que dá para conseguir é metade da graça
+     de ter coleção — e é o que vai levar alguém à Loja quando ela vender
+     cosméticos. */
+  .icone-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+                 gap: 8px; max-height: 46vh; overflow-y: auto; }
+  .icone-op { padding: 6px; background: var(--panel2); border: 1px solid var(--line);
+              display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .icone-op:hover:not(:disabled) { border-color: var(--gold); }
+  .icone-op img { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line2); }
+  .icone-op .rot { font-size: 8px; letter-spacing: 1px; color: var(--dim);
+                   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icone-op.atual { border-color: var(--gold); background: var(--panel); }
+  .icone-op.atual img { border-color: var(--gold); }
+  .icone-op:disabled { opacity: .38; }
+  .icone-op:disabled .rot { color: var(--dim); }
   .amigo .nome { flex: 1; min-width: 0; font-size: 11px; overflow: hidden;
                  text-overflow: ellipsis; white-space: nowrap; }
   .amigo .estado { font-size: 9px; letter-spacing: 1px; color: var(--dim); }
@@ -216,7 +237,9 @@
   <aside class="lateral">
     <div class="cartao">
       <div class="eu">
-        <div class="avatar">🂠</div>
+        <button class="avatar" id="btn-icone" title="trocar o ícone do perfil">
+          <img id="eu-icone" src="/web/img/icone.png" alt="">
+        </button>
         <div class="quem">
           <div class="nome">
             <span id="eu-nome">…</span>
@@ -326,6 +349,10 @@ import { requireLogin, logout, desviarParaRecuperacao } from '/web/js/auth.js';
 import { meuPerfil, amigos as listarAmigos, desafiar, meusDecks } from '/web/js/multiplayer.js';
 import { vigiar, aceitar, recusar } from '/web/js/notificacoesvivo.js';
 import { baterPonto } from '/web/js/presenca.js';
+import {
+  meusIcones, escolherIcone, catalogo as catalogoDeIcones,
+  caminhoDoIcone, mapaDeArquivos, PADRAO,
+} from '/web/js/icones.js';
 
 // A Site URL do projeto aponta para a raiz, entao um link de recuperacao que o
 // Supabase nao redirecionou para recuperar.html cai AQUI. Precisa vir antes do
@@ -478,7 +505,10 @@ async function pintarAmigos() {
     b.disabled = !a.online;
     b.title = a.online ? `desafiar ${a.usuario} para um duelo`
                        : `${a.usuario} está offline`;
-    b.innerHTML = `<span class="mini">🂠</span>`
+    // O ícone do amigo vem como `icone_id` (`meus_amigos`), não como arquivo: a
+    // policy de `perfis` só deixa cada um ver o próprio registro, então quem
+    // cruza o id com a arte é o catálogo, que é de leitura aberta.
+    b.innerHTML = `<span class="mini"><img alt="" src="${caminhoDoIcone(arteDoIcone.get(a.icone_id))}"></span>`
       + `<span class="nome"></span>`
       + `<span class="estado">${a.online ? 'ONLINE' : 'OFFLINE'}</span>`
       + `<span class="ponto${a.online ? ' on' : ''}"></span>`;
@@ -660,12 +690,95 @@ function pintarNotificacoes(lista, { novas, tempoReal }) {
   if ((novas ?? []).length) pintarAmigos();
 }
 
+// --------------------------------------------------------------- ícones
+// O catálogo é de leitura aberta e muda pouco, então é lido UMA vez no boot: é
+// dele que sai a arte do meu ícone e a dos amigos (a lista de amigos traz só o
+// `icone_id`, porque a policy de `perfis` não deixaria ver o resto).
+let arteDoIcone = new Map();
+
+/** Desenha o meu ícone no slot. `null` cai no padrão do jogo. */
+function pintarMeuIcone(id) {
+  $('eu-icone').src = caminhoDoIcone(arteDoIcone.get(id));
+}
+
+/**
+ * A escolha. Mostra o catálogo inteiro, com o que você NÃO tem apagado e não
+ * clicável — ver o que dá para conseguir é metade da graça de ter coleção, e é
+ * o que vai levar alguém à Loja quando ela vender cosméticos.
+ *
+ * Quem decide se você pode usar é o SERVIDOR (`escolher_icone` mais o gatilho
+ * `perfis_icone_valido`): esta tela desabilitar o botão é conveniência, não
+ * trava. Uma trava que vive só aqui é uma trava que não existe.
+ */
+async function abrirIcones() {
+  const r = await meusIcones();
+  if (!r.ok) return void toast('não consegui ler os ícones agora');
+
+  const lista = r.dados ?? [];
+  const corpo = document.createElement('div');
+
+  if (!lista.length) {
+    corpo.innerHTML = '<div class="vazio">nenhum ícone no jogo ainda.</div>';
+    return void mostrarCartaz('ÍCONE DO PERFIL', 'nada para escolher', corpo);
+  }
+
+  const grade = document.createElement('div');
+  grade.className = 'icone-grade';
+
+  for (const i of lista) {
+    const b = document.createElement('button');
+    b.className = 'icone-op' + (i.em_uso ? ' atual' : '');
+    b.disabled = !i.tenho;
+    b.title = i.tenho ? i.nome
+            : i.na_loja ? `${i.nome} — ${i.preco} DP na Loja`
+                        : `${i.nome} — você ainda não tem`;
+    const img = document.createElement('img');
+    img.src = caminhoDoIcone(i);
+    img.alt = '';
+    // A arte pode não ter viajado no Release (o ícone é cadastrado no banco, a
+    // imagem vem no game.zip). Sem isto ficaria o quadrado quebrado do
+    // navegador, que parece falha de rede.
+    img.onerror = () => { img.src = PADRAO; };
+    const rot = document.createElement('span');
+    rot.className = 'rot';
+    rot.textContent = i.nome;
+    b.append(img, rot);
+    b.onclick = async () => {
+      const x = await escolherIcone(i.id);
+      if (!x.ok) return void erro(x.erro);
+      pintarMeuIcone(i.id);
+      fecharCartaz();
+      toast(`ícone: ${i.nome}`);
+      // A lista de amigos mostra o SEU ícone para os outros, não para você —
+      // mas o cache do catálogo é o mesmo, então redesenhar mantém tudo coerente
+      // se você for amigo de si mesmo em teste.
+      pintarAmigos();
+    };
+    grade.append(b);
+  }
+
+  corpo.append(grade);
+  const tenho = lista.filter((i) => i.tenho).length;
+  mostrarCartaz('ÍCONE DO PERFIL',
+                `${tenho} de ${lista.length} — os apagados você ainda não tem`, corpo);
+}
+
+$('btn-icone').onclick = abrirIcones;
+
 // ------------------------------------------------------------------ boot
 render();
+
+// O CATÁLOGO antes dos amigos, de propósito: é dele que sai a arte de cada
+// `icone_id`, e desenhar a lista sem ele mostraria todo mundo com o ícone
+// padrão por um instante — um pisca que parece "perdi meu ícone".
+try {
+  arteDoIcone = mapaDeArquivos(await catalogoDeIcones());
+} catch { /* sem catálogo, todo mundo fica com o padrão do jogo */ }
 
 meuPerfil().then((p) => {
   if (p?.etiqueta) $('eu-etiqueta').textContent = `[${p.etiqueta}]`;
   if (p?.usuario) { $('eu-nome').textContent = p.usuario; $('user-tag').textContent = p.usuario; }
+  pintarMeuIcone(p?.icone_id ?? null);
 });
 
 meusDecks().then((d) => { decksDoBanco = d; });

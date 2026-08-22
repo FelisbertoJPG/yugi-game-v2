@@ -1,0 +1,12 @@
+{
+  "_comentario": "Gerado por `node tools/icones.mjs`. Lista os arquivos de web/img/icones/ para o painel do admin oferecer e para o `npm run icones:check` cruzar com o catalogo do banco.",
+  "gerado_em": "2026-08-22",
+  "arquivos": [
+    "azul.png",
+    "ouro.png",
+    "roxo.png",
+    "verde.png",
+    "verso.png",
+    "vinho.png"
+  ]
+}

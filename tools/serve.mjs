@@ -76,14 +76,6 @@ const server = createServer(async (req, res) => {
       return void await handleBoards(rel.slice('/__boards/'.length), req, res);
     }
 
-    // As artes dos icones de perfil, recortadas no painel do admin. Mesma
-    // regra: so localhost, porque grava no disco — e aqui grava no
-    // REPOSITORIO, que e de onde o Release sai (ver o handler la embaixo).
-    if (rel.startsWith('/__icones/')) {
-      if (!isLocal(req)) return void res.writeHead(403).end('403');
-      return void await handleIcones(rel.slice('/__icones/'.length), req, res);
-    }
-
 
     // Redireciona de verdade em vez de servir o arquivo em '/': se o documento
     // ficasse na raiz, os caminhos relativos dele resolveriam contra '/' e
@@ -312,93 +304,6 @@ async function handleBoards(action, req, res) {
   return json(res, { ok: false, error: 'ação desconhecida' }, 404);
 }
 
-
-// ---------------------------------------------------------------------------
-// web/img/icones/ — as artes dos ícones de perfil, recortadas no painel do
-// admin (`web/icones.html`).
-//
-// Existe só AQUI, e não no `StaticServer.cs`, e a assimetria é deliberada: o
-// dev-server serve o REPOSITÓRIO, que é de onde o Release sai. O jogo instalado
-// serve `%LOCALAPPDATA%\ClassicDuels\game\`, então gravar por lá poria o PNG
-// numa pasta que nenhum Release lê — e pior, `web` é uma raiz gerenciada com
-// `removeMode: backup`, então a próxima atualização levaria o arquivo para o
-// backup como órfão. Seria uma armadilha, não uma conveniência.
-//
-// No jogo instalado o painel cai no DOWNLOAD do PNG, que sempre funciona e
-// deixa claro onde o arquivo precisa ir.
-// ---------------------------------------------------------------------------
-
-const ICONES = join(ROOT, 'web', 'img', 'icones');
-
-/** Só um nome simples de imagem dentro de web/img/icones/ (sem subpastas). */
-function safeIconePath(nome) {
-  // A MESMA regra do `check` da coluna `icones.arquivo` no banco: divergir aqui
-  // deixaria gravar um arquivo que o cadastro depois recusa.
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(String(nome ?? ''))) return null;
-  if (!/\.(png|jpg|jpeg|webp|gif)$/i.test(nome)) return null;
-  const full = join(ICONES, nome);
-  // `startsWith` continua sendo a trava contra `..`, como em safeStorePath — o
-  // regex acima só decide o formato do nome.
-  if (!full.startsWith(ICONES + sep)) return null;
-  return full;
-}
-
-/**
- * Reescreve `index.json` a partir do que a pasta TEM.
- *
- * É a mesma listagem de `tools/icones.mjs`, e a repetição é assumida: são um
- * `readdir` e um filtro de extensão, e a alternativa seria o servidor invocar o
- * script a cada gravação. O que NÃO pode divergir é o formato do arquivo — por
- * isso o `_comentario` diz quem mais escreve aqui.
- */
-async function regerarManifesto() {
-  let arquivos = [];
-  try {
-    arquivos = (await readdir(ICONES))
-      .filter((f) => /\.(png|jpg|jpeg|webp|gif)$/i.test(f))
-      .sort();
-  } catch { /* a pasta some se alguém apagar: manifesto vazio */ }
-
-  const manifesto = {
-    _comentario: 'Gerado por `node tools/icones.mjs` e pelo dev-server ao subir '
-               + 'uma arte em web/icones.html. Lista os arquivos de '
-               + 'web/img/icones/ para o painel do admin oferecer e para o '
-               + '`npm run icones:check` cruzar com o catalogo do banco.',
-    gerado_em: new Date().toISOString().slice(0, 10),
-    arquivos,
-  };
-  await writeFile(join(ICONES, 'index.json'), `${JSON.stringify(manifesto, null, 2)}\n`);
-  return arquivos;
-}
-
-async function handleIcones(action, req, res) {
-  if (action === 'save' && req.method === 'POST') {
-    const { arquivo, dataUrl } = await readBody(req);
-    const full = safeIconePath(arquivo);
-    if (!full) {
-      return json(res, { ok: false, error: 'nome inválido (só letras, números, . _ - e extensão de imagem)' }, 400);
-    }
-
-    const m = /^data:image\/[a-z+]+;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl ?? ''));
-    if (!m) return json(res, { ok: false, error: 'a imagem não veio como data URL de imagem' }, 400);
-
-    const bytes = Buffer.from(m[1], 'base64');
-    // Um ícone recortado em 128px dá ~1–30 KB. O teto não é sobre disco: é para
-    // um engano (arrastar a foto errada, de 12 MB) não virar um arquivo que
-    // viaja no game.zip de todo jogador para sempre.
-    if (bytes.length > 512 * 1024) {
-      return json(res, { ok: false, error: `imagem grande demais (${Math.round(bytes.length / 1024)} KB, o teto é 512)` }, 400);
-    }
-
-    await mkdir(ICONES, { recursive: true });
-    await writeFile(full, bytes);
-    const arquivos = await regerarManifesto();
-    console.log(`  icone salvo: ${relative(ROOT, full)} (${Math.round(bytes.length / 1024)} KB)`);
-    return json(res, { ok: true, arquivo, arquivos });
-  }
-
-  return json(res, { ok: false, error: 'ação desconhecida' }, 404);
-}
 
 // ---------------------------------------------------------------------------
 // store/ — config do jogo em JSON versionado (boosters, carteira do jogador…),

@@ -959,6 +959,9 @@ import { geometriaDaSeta, centroDe, haloDoAlvo, mostrarCamada, esconderCamada } 
 // Duelar conta como estar jogando: sem o batimento aqui, quem esta no meio de
 // um duelo aparece OFFLINE na lista de amigos dos outros e some do contador.
 import { baterPonto } from '/web/js/presenca.js';
+// O ícone ganho na vitória: a arte vem na resposta como data URL, e é esta
+// função que recusa o que não é imagem em vez de pôr um src quebrado na tela.
+import { caminhoDoIcone } from '/web/js/icones.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
@@ -3914,10 +3917,9 @@ function mostrarIconeGanho(icone) {
 
   caixa.hidden = false;
   const img = caixa.querySelector('img');
-  img.src = `/web/img/icones/${icone.arquivo}`;
-  // A arte pode não ter viajado no Release (o ícone mora no banco, a imagem no
-  // game.zip). Melhor o ícone do jogo que um quadrado quebrado.
-  img.onerror = () => { img.src = '/web/img/icone.png'; };
+  // A arte vem DENTRO da resposta (`premiar_vitoria` devolve a data URL), e
+  // não como um caminho de arquivo: a imagem mora no banco desde a 0039.
+  img.src = caminhoDoIcone(icone);
   caixa.querySelector('.nome').textContent = icone.nome;
 }
 

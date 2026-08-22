@@ -7,62 +7,62 @@
  *     icones_do_jogador  a POSSE    — quem tem cada um
  *     perfis.icone_id    a ESCOLHA  — qual está em uso agora
  *
- * **A imagem mora no repositório** (`web/img/icones/<arquivo>`) e viaja no
- * `game.zip`; o banco guarda só o nome do arquivo. É uma escolha com uma
- * consequência que precisa ser dita em voz alta: **um ícone cadastrado cuja
- * imagem não foi publicada aparece quebrado**, e nem o banco nem o navegador
- * sabem disso — o banco não enxerga o disco, e o navegador não lista pastas.
+ * **A imagem mora no BANCO**, na coluna `imagem`: uma `data:` URL de um PNG
+ * 128×128 (~1 a 40 KB). Ela chega junto com a linha, então funciona no jogo
+ * instalado, no `npm run dev` e para todo jogador — sem publicar Release.
  *
- * Por isso existe o **manifesto** (`web/img/icones/index.json`, gerado por
- * `node tools/icones.mjs`): o painel do admin só oferece arquivos que estão
- * nele, e o `npm run icones:check` cruza o catálogo publicado com ele antes de
- * a falha chegar em quem joga. É a mesma ideia do `boosters:check`.
+ * A versão anterior (0035) guardava só o nome de um arquivo em
+ * `web/img/icones/`, que viajava no `game.zip`. A ideia tinha lógica — arte é
+ * conteúdo do repositório, como os tabuleiros — e um custo que só apareceu no
+ * uso: a rota que grava o PNG só existe no dev-server, porque o jogo instalado
+ * serve `%LOCALAPPDATA%`, que nenhum Release lê. Para quem roda o `.exe`, que é
+ * como o jogo é usado, subir um ícone virava "mova o arquivo à mão e publique
+ * um Release" — **por ícone**. Na prática, era impossível.
  *
  * Quem decide o que você pode usar é o SERVIDOR (`escolher_icone` mais o
- * gatilho `perfis_icone_valido`, migration 0036). Esta camada só desenha e
- * pede — uma trava que vive só aqui é uma trava que não existe.
+ * gatilho `perfis_icone_valido`, 0036). Esta camada só desenha e pede — uma
+ * trava que vive só aqui é uma trava que não existe.
  */
 import { req } from './supabase.js';
-
-/** Onde as imagens moram. Um lugar só, e é este. */
-export const PASTA = '/web/img/icones';
 
 /**
  * O ícone de quem ainda não escolheu — e o de quem escolheu um que foi apagado
  * do catálogo (`on delete set null`).
  *
- * É o ícone do próprio jogo, que já está no repositório desde sempre: um padrão
- * que depende de conteúdo publicado poderia sumir, e aí a home nasceria com um
- * quadrado vazio no lugar do avatar.
+ * É o ícone do próprio jogo, que está no repositório desde sempre: um padrão
+ * que dependesse de conteúdo publicado poderia sumir, e aí a home nasceria com
+ * um quadrado vazio no lugar do avatar.
  */
 export const PADRAO = '/web/img/icone.png';
 
+/** O formato que a coluna `imagem` aceita — o MESMO `check` da 0039. */
+const IMAGEM = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
 /**
- * O caminho da imagem de um ícone. `null`/desconhecido cai no padrão — nunca
- * numa URL quebrada.
+ * O `src` da imagem de um ícone. Sem imagem, ou com lixo no lugar dela, cai no
+ * padrão — nunca num `src` que o navegador busca, não acha e desenha como
+ * quadrado vazio.
  *
- * Aceita tanto a linha do catálogo (`{arquivo}`) quanto só o nome do arquivo,
- * porque os dois formatos circulam: a tela de escolha tem a linha inteira, e a
- * lista de amigos recebe só o `icone_id` e resolve pelo mapa.
+ * Aceita a linha inteira (`{imagem}`) ou a data URL solta, porque os dois
+ * formatos circulam: a tela de escolha tem a linha, e a lista de amigos recebe
+ * só o `icone_id` e resolve pelo mapa.
  */
 export function caminhoDoIcone(icone) {
-  const arquivo = typeof icone === 'string' ? icone : icone?.arquivo;
-  if (!arquivo || !/^[A-Za-z0-9._-]{1,64}$/.test(arquivo)) return PADRAO;
-  return `${PASTA}/${arquivo}`;
+  const url = typeof icone === 'string' ? icone : icone?.imagem;
+  return url && IMAGEM.test(url) ? url : PADRAO;
 }
 
 /**
- * Mapa `id → arquivo` a partir do catálogo.
+ * Mapa `id → imagem` a partir do catálogo.
  *
- * Existe porque `meus_amigos()` devolve o `icone_id` de cada amigo, mas não o
- * arquivo — e não poderia: a policy de `perfis` só deixa cada um ver o próprio
- * registro, então a lateral precisa cruzar o id com o catálogo, que é de
- * leitura aberta.
+ * Existe porque `meus_amigos()` devolve o `icone_id` de cada amigo, mas não a
+ * arte — e não poderia: a policy de `perfis` só deixa cada um ver o próprio
+ * registro, então a lateral cruza o id com o catálogo, que é de leitura aberta.
  */
 export function mapaDeArquivos(catalogo) {
   const m = new Map();
   for (const i of Array.isArray(catalogo) ? catalogo : []) {
-    if (i?.id && i?.arquivo) m.set(String(i.id), String(i.arquivo));
+    if (i?.id && i?.imagem) m.set(String(i.id), String(i.imagem));
   }
   return m;
 }
@@ -71,14 +71,13 @@ export function mapaDeArquivos(catalogo) {
  * O id que o admin digitou, em forma de slug — o mesmo formato que o `check` da
  * coluna exige (`^[a-z0-9][a-z0-9-]{0,31}$`).
  *
- * Gerar o slug aqui, e não deixar o admin digitar livre, evita o erro que o
- * Postgres só reporta na hora de salvar, com a mensagem dele: um `check
- * constraint violation` no meio de um cadastro é o tipo de recusa que não
- * explica o que fazer.
+ * Gerar o slug aqui, e não deixar digitar livre, evita o erro que o Postgres só
+ * reporta na hora de salvar, com a mensagem dele: um `check constraint
+ * violation` no meio de um cadastro é uma recusa que não explica o que fazer.
  */
 export function slug(texto) {
   return String(texto ?? '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // tira os acentos
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')     // tira os acentos
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
@@ -87,16 +86,16 @@ export function slug(texto) {
 }
 
 /**
- * Quais ícones do catálogo estão SEM imagem no repositório.
+ * Quais ícones do catálogo estão **sem arte**.
  *
- * A conta que o `icones:check` faz, aqui porque a tela do admin mostra a mesma
- * coisa enquanto ele cadastra — descobrir na publicação o que dava para
- * descobrir na hora de digitar é tarde demais.
+ * Com a imagem no banco isso deixou de ser uma divergência entre duas fontes e
+ * virou uma linha incompleta — mas continua sendo o mesmo estrago na tela de
+ * quem joga (um círculo com o ícone genérico onde deveria haver arte), então
+ * continua valendo a pena apontar.
  */
-export function semImagem(catalogo, arquivosDoRepo) {
-  const tem = new Set((arquivosDoRepo ?? []).map(String));
+export function semImagem(catalogo) {
   return (Array.isArray(catalogo) ? catalogo : [])
-    .filter((i) => i?.arquivo && !tem.has(String(i.arquivo)));
+    .filter((i) => i && typeof i === 'object' && !IMAGEM.test(i.imagem ?? ''));
 }
 
 // ------------------------------------------------------------------- rede
@@ -127,38 +126,69 @@ export const escolherIcone = (id) => rpc('escolher_icone', { p_id: id ?? null })
 export const darIcone = (usuario, icone) =>
   rpc('dar_icone', { p_usuario: usuario, p_icone: icone });
 
-/** O catálogo cru, sem posse — leitura aberta, serve para a vitrine e o admin. */
-export async function catalogo() {
-  const r = await req('icones?select=*&order=ordem,nome');
+/**
+ * O catálogo cru, sem posse — leitura aberta, serve para a vitrine e o admin.
+ *
+ * `comArte: false` deixa a imagem de fora, e não é micro-otimização: a home
+ * carrega o catálogo no boot só para cruzar o `icone_id` dos amigos, e trazer
+ * 40 KB por ícone para descartar quase todos seria pagar a coleção inteira a
+ * cada abertura da tela.
+ */
+export async function catalogo({ comArte = true } = {}) {
+  const campos = comArte ? '*' : 'id,nome,preco,raridade,gratuito,na_loja,ordem';
+  const r = await req(`icones?select=${campos}&order=ordem,nome`);
   return r.ok && Array.isArray(r.dados) ? r.dados : [];
 }
 
 /**
- * Cadastra ou atualiza um ícone. Só admin — a RLS recusa o resto, e a mensagem
- * dela é repassada porque foi escrita para ser lida.
+ * As artes de um punhado de ícones: `Map<id, imagem>`.
+ *
+ * É o par de `catalogo({comArte:false})` — a home descobre de quais ícones
+ * precisa (o seu mais o dos amigos online) e busca só esses.
+ */
+export async function artesDe(ids) {
+  const limpos = [...new Set((ids ?? []).filter(Boolean).map(String))];
+  if (!limpos.length) return new Map();
+  const lista = limpos.map((i) => `"${i.replace(/"/g, '')}"`).join(',');
+  const r = await req(`icones?select=id,imagem&id=in.(${encodeURIComponent(lista)})`);
+  return mapaDeArquivos(r.ok && Array.isArray(r.dados) ? r.dados : []);
+}
+
+/**
+ * Cadastra ou atualiza um ícone, COM a arte. Só admin — a RLS recusa o resto, e
+ * a mensagem dela é repassada porque foi escrita para ser lida.
+ *
+ * A imagem vai no mesmo `upsert` que o resto: separá-la em duas chamadas
+ * deixaria a linha existir sem arte no intervalo entre elas, e para sempre se a
+ * segunda falhasse.
  */
 export async function salvarIcone(icone) {
+  const corpo = {
+    id: icone.id,
+    nome: icone.nome,
+    preco: Number(icone.preco) || 0,
+    raridade: icone.raridade || 'N',
+    gratuito: !!icone.gratuito,
+    na_loja: !!icone.na_loja,
+    ordem: Number(icone.ordem) || 0,
+  };
+  // Só manda a imagem quando há uma nova. Mandar `null` ao editar só o preço
+  // apagaria a arte de um ícone que já está no perfil de gente.
+  if (icone.imagem) corpo.imagem = icone.imagem;
+
   const r = await req('icones?on_conflict=id', {
     method: 'POST',
-    body: {
-      id: icone.id,
-      nome: icone.nome,
-      arquivo: icone.arquivo,
-      preco: Number(icone.preco) || 0,
-      raridade: icone.raridade || 'N',
-      gratuito: !!icone.gratuito,
-      na_loja: !!icone.na_loja,
-      ordem: Number(icone.ordem) || 0,
-    },
+    body: corpo,
     prefer: 'resolution=merge-duplicates,return=minimal',
   });
   if (r.ok) return { ok: true, erro: null };
-  return {
-    ok: false,
-    erro: /row-level security/i.test(r.error ?? '')
-      ? 'só um admin pode cadastrar ícones'
-      : (r.error || 'não consegui salvar'),
-  };
+
+  const m = r.error ?? '';
+  if (/row-level security/i.test(m)) return { ok: false, erro: 'só um admin pode cadastrar ícones' };
+  if (/icones_imagem_tamanho/i.test(m)) return { ok: false, erro: 'a imagem ficou grande demais (o teto é 256 KB)' };
+  if (/icones_imagem_e_imagem/i.test(m)) return { ok: false, erro: 'isso não é uma imagem' };
+  if (/icones_id_check/i.test(m)) return { ok: false, erro: 'id inválido (só minúsculas, números e traço)' };
+  return { ok: false, erro: m || 'não consegui salvar' };
 }
 
 /**
@@ -170,26 +200,4 @@ export async function salvarIcone(icone) {
 export async function apagarIcone(id) {
   const r = await req(`icones?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
   return { ok: r.ok, erro: r.error };
-}
-
-/**
- * O que a pasta `web/img/icones/` tem, pelo manifesto.
- *
- * Arquivo estático de propósito: uma rota de listagem custaria implementação
- * nos DOIS back-ends (`tools/serve.mjs` e `StaticServer.cs`), e divergir ali
- * faz a tela funcionar no `npm run dev` e falhar no jogo instalado.
- *
- * Devolve `{ok, arquivos}` — a falha importa: sem o manifesto, o painel do
- * admin não pode dizer "este arquivo não existe", e oferecer um campo livre ali
- * seria convidar o cadastro que quebra em silêncio.
- */
-export async function arquivosDoRepo() {
-  try {
-    const r = await fetch(`${PASTA}/index.json`, { cache: 'no-cache' });
-    if (!r.ok) return { ok: false, arquivos: [] };
-    const m = await r.json();
-    return { ok: true, arquivos: Array.isArray(m?.arquivos) ? m.arquivos : [] };
-  } catch {
-    return { ok: false, arquivos: [] };
-  }
 }

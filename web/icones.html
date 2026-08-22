@@ -27,15 +27,14 @@
   .campo.check { justify-content: flex-start; }
   .campo.check input { flex: none; width: auto; }
 
-  /* A prévia é o ponto do painel: o admin vê a arte no tamanho em que ela vai
-     aparecer, antes de publicar. O ícone é desenhado em dois tamanhos porque é
-     em dois que ele é usado — 44px no cartão do perfil e 26px na lista de
-     amigos, onde um desenho detalhado demais vira borrão. */
-  .previa { display: flex; align-items: center; gap: 12px; margin: 12px 0;
-            padding: 12px; background: var(--panel2); border: 1px solid var(--line); }
-  .previa .grande { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line2); }
-  .previa .pequeno { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line2); }
-  .previa .txt { font-size: 10px; color: var(--dim); line-height: 1.5; }
+ /* Os dois tamanhos REAIS em que o ícone aparece, ao lado do recorte: 44px no
+     cartão do perfil e 26px na lista de amigos. Um desenho detalhado demais
+     vira borrão nos 26px, e é melhor descobrir isso antes de publicar. */
+  .previa-tam { display: flex; align-items: center; gap: 12px; margin: 10px 0 0;
+                padding: 10px; background: var(--panel2); border: 1px solid var(--line); }
+  .previa-tam .grande { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line2); }
+  .previa-tam .pequeno { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line2); }
+  .previa-tam .txt { font-size: 10px; color: var(--dim); line-height: 1.5; }
 
   /* ------------------------------------------------------ recorte da foto
      O quadro é quadrado e a máscara é redonda — o mesmo arranjo de qualquer
@@ -103,67 +102,54 @@
   <div class="topo">
     <h1>ÍCONES</h1>
     <p class="sub">
-      O catálogo de ícones de perfil. Suba uma foto, enquadre no círculo e
-      cadastre. A <b>imagem</b> mora em <code>web/img/icones/</code> e viaja no
-      <code>game.zip</code>: mesmo depois de gravada, ela só chega em quem joga
-      quando você <b>publicar um Release</b>.
+      O catálogo de ícones de perfil. Escolha uma imagem, enquadre no círculo,
+      dê um nome e salve — a arte vai <b>junto com o cadastro</b>, direto para o
+      banco. Não precisa publicar Release, e quem joga recebe no próximo boot.
     </p>
   </div>
 
   <div class="grade">
 
     <div class="painel">
-      <h2>CADASTRAR</h2>
+      <h2 id="titulo-form">NOVO ÍCONE</h2>
       <p class="ajuda">
-        Escolha uma <b>arte</b> já no repositório, ou <b>suba</b> uma foto e
-        enquadre-a no círculo. Subindo pelo <code>npm run dev</code>, o PNG é
-        gravado direto em <code>web/img/icones/</code>; pelo jogo instalado ele
-        é <b>baixado</b> e você o move — de lá não dá para escrever no
-        repositório, que é de onde o Release sai.
+        A imagem é <b>a arte do ícone</b>: arraste para posicionar, use a roda
+        para o zoom. O que fica dentro do círculo vira um PNG de 128×128.
       </p>
 
-      <!-- A ARTE É o arquivo subido: `<id>.png`, sempre. Não há seletor, e a
-           ausência dele é a regra — escolher de uma lista deixaria dois ícones
-           apontando para o mesmo desenho, e um id sem arte nenhuma. -->
       <div class="campo">
         <label for="f-foto">imagem</label>
         <input type="file" id="f-foto" accept="image/*" style="font-size:10px">
       </div>
 
-      <div class="recorte" id="recorte">
-        <p class="dica">
-          Arraste para posicionar · roda do mouse ou a barra para o zoom.
-          O que estiver <b>dentro do círculo</b> vira o ícone, em 128×128.
-        </p>
+      <!-- O quadro fica SEMPRE visível: ele é a prévia e o recorte ao mesmo
+           tempo. Sem imagem, mostra o que o ícone tem hoje (ou o padrão), para
+           editar preço sem foto nova não parecer que a arte sumiu. -->
+      <div class="recorte aberto" id="recorte">
         <div class="quadro" id="quadro">
           <canvas id="tela" width="240" height="240"></canvas>
           <div class="mascara"></div>
           <div class="aro"></div>
         </div>
-        <div class="zoom">
+        <div class="zoom" id="zoom-linha" hidden>
           <span>zoom</span>
-          <input type="range" id="f-zoom" min="1" max="800" value="100">
+          <input type="range" id="f-zoom" min="100" max="800" value="100">
           <button id="btn-recentrar" class="secundario" style="padding:3px 8px;font-size:10px">centralizar</button>
         </div>
-        <div class="botoes">
-          <button id="btn-usar-foto">usar esta imagem</button>
-          <button id="btn-cancelar-foto" class="secundario">cancelar</button>
+        <div class="previa-tam" id="previa-tam">
+          <img class="grande" id="previa-grande" alt="">
+          <img class="pequeno" id="previa-pequeno" alt="">
+          <span class="txt">44px no perfil<br>26px na lista de amigos</span>
         </div>
-      </div>
-
-      <div class="previa">
-        <img class="grande" id="previa-grande" alt="">
-        <img class="pequeno" id="previa-pequeno" alt="">
-        <span class="txt">44px no perfil<br>26px na lista de amigos</span>
       </div>
 
       <div class="campo">
         <label for="f-nome">nome</label>
-        <input type="text" id="f-nome" placeholder="Enigma dourado" maxlength="60">
+        <input type="text" id="f-nome" placeholder="Inseto Básico" maxlength="60">
       </div>
       <div class="campo">
         <label for="f-id">id</label>
-        <input type="text" id="f-id" placeholder="enigma-dourado" maxlength="32">
+        <input type="text" id="f-id" placeholder="inseto-basico" maxlength="32">
       </div>
       <div class="campo">
         <label for="f-preco">preço</label>
@@ -194,18 +180,18 @@
         <button id="btn-limpar" class="secundario">limpar</button>
       </div>
       <div class="botoes">
-        <!-- Põe o ícone no SEU perfil agora. Existe porque conferir um ícone de
-             verdade — no cartão da home, no tamanho real, ao lado do nome —
-             exigia dá-lo a si mesmo pelo SQL e recarregar a home. -->
+        <!-- Põe o ícone no SEU perfil agora. Aparece assim que há um ícone
+             salvo em edição — inclusive o que você acabou de criar, que é
+             justamente quando se quer ver como ele ficou de verdade. -->
         <button id="btn-usar" class="secundario" hidden>usar no meu perfil agora</button>
-        <button id="btn-apagar" class="secundario" hidden>apagar este ícone</button>
+        <button id="btn-apagar" class="secundario" hidden>apagar</button>
       </div>
       <div class="aviso" id="aviso"></div>
     </div>
 
     <div class="painel">
       <h2>NO CATÁLOGO <span id="conta" style="color:var(--dim);font-size:10px"></span></h2>
-      <p class="ajuda">Clique num ícone para editá-lo.</p>
+      <p class="ajuda">Clique num ícone para editá-lo, trocar a arte ou usá-lo.</p>
       <div class="lista" id="lista"></div>
       <div class="aviso" id="aviso-lista"></div>
     </div>
@@ -219,7 +205,7 @@
 import { requireLogin } from '/web/js/auth.js';
 import { perfilAtual, contaAtual } from '/web/js/supabase.js';
 import {
-  catalogo, salvarIcone, apagarIcone, arquivosDoRepo, darIcone, escolherIcone,
+  catalogo, salvarIcone, apagarIcone, darIcone, escolherIcone,
   caminhoDoIcone, slug, semImagem, PADRAO,
 } from '/web/js/icones.js';
 // A conta do enquadramento mora fora do HTML e se prova em Node
@@ -244,143 +230,9 @@ if (!perfil?.admin) {
   for (const id of ['btn-salvar', 'btn-apagar']) $(id).disabled = true;
 }
 
-let arquivos = [];
 let lista = [];
-let editando = null;   // id do ícone aberto no formulário, ou null
-
-// -------------------------------------------------------------- formulário
-/** O nome do arquivo de um ícone é o id dele. Um lugar só decide isso. */
-const arquivoDe = (id) => (id ? `${id}.png` : '');
-
-/**
- * A prévia sai do ID, não de um campo de arte — e quando não há imagem para
- * aquele id, mostra o padrão em vez de um quadrado quebrado. O aviso de que
- * falta arte é dado no salvar, onde ele pode impedir alguma coisa.
- */
-function pintarPrevia() {
-  const arq = arquivoDe(slug($('f-id').value));
-  const caminho = arquivos.includes(arq) ? caminhoDoIcone(arq) : PADRAO;
-  $('previa-grande').src = caminho;
-  $('previa-pequeno').src = caminho;
-}
-
-function limpar() {
-  editando = null;
-  $('f-nome').value = '';
-  $('f-id').value = '';
-  $('f-preco').value = '0';
-  $('f-ordem').value = '0';
-  $('f-raridade').value = 'N';
-  $('f-gratuito').checked = false;
-  $('f-loja').checked = false;
-  $('btn-apagar').hidden = true;
-  $('btn-usar').hidden = true;
-  $('aviso').textContent = '';
-  pintarPrevia();
-  pintarLista();
-}
-
-function abrir(i) {
-  editando = i.id;
-  $('f-nome').value = i.nome;
-  $('f-id').value = i.id;
-  $('f-preco').value = String(i.preco ?? 0);
-  $('f-ordem').value = String(i.ordem ?? 0);
-  $('f-raridade').value = i.raridade ?? 'N';
-  $('f-gratuito').checked = !!i.gratuito;
-  $('f-loja').checked = !!i.na_loja;
-  $('btn-apagar').hidden = !perfil?.admin;
-  $('btn-usar').hidden = false;
-  $('aviso').textContent = '';
-  pintarPrevia();
-  pintarLista();
-}
-
-// O id é gerado do nome enquanto o campo não foi tocado à mão: digitar o slug
-// duas vezes é trabalho, e errá-lo custa uma mensagem de `check constraint` que
-// não diz o que fazer. Depois de editado, o campo é de quem o editou.
-let idNaMao = false;
-$('f-id').oninput = () => { idNaMao = true; pintarPrevia(); };
-$('f-nome').oninput = () => {
-  if (!idNaMao && !editando) { $('f-id').value = slug($('f-nome').value); pintarPrevia(); }
-};
-$('btn-limpar').onclick = () => { idNaMao = false; limpar(); };
-
-$('btn-salvar').onclick = async () => {
-  const icone = {
-    id: slug($('f-id').value),
-    nome: $('f-nome').value.trim(),
-    arquivo: arquivoDe(slug($('f-id').value)),
-    preco: Number($('f-preco').value) || 0,
-    raridade: $('f-raridade').value,
-    gratuito: $('f-gratuito').checked,
-    na_loja: $('f-loja').checked,
-    ordem: Number($('f-ordem').value) || 0,
-  };
-
-  if (!icone.id) return void avisar('o id ficou vazio — escreva um nome', 'erro');
-  if (!icone.nome) return void avisar('escreva um nome', 'erro');
-  // O cadastro sem arte é EXATAMENTE o quadrado vazio que este painel existe
-  // para não deixar passar: o banco aceita (ele não lê o disco) e só a tela de
-  // quem joga mostra o estrago.
-  if (!arquivos.includes(icone.arquivo)) {
-    return void avisar(`não há imagem para "${icone.id}" — suba uma foto acima `
-                     + '(o arquivo vai se chamar ' + icone.arquivo + ')', 'erro');
-  }
-  // Um ícone à venda por 0 DP é de graça na Loja, o que quase nunca é o que se
-  // quis dizer — e ninguém percebe até alguém "comprar".
-  if (icone.na_loja && !icone.gratuito && icone.preco <= 0) {
-    return void avisar('à venda por 0 DP? ponha um preço, ou marque gratuito', 'erro');
-  }
-
-  $('btn-salvar').disabled = true;
-  const r = await salvarIcone(icone);
-  $('btn-salvar').disabled = false;
-  if (!r.ok) return void avisar(r.erro, 'erro');
-
-  avisar(`"${icone.nome}" salvo`, 'ok');
-  idNaMao = false;
-  await recarregar();
-  limpar();
-};
-
-/**
- * "usar agora": dá o ícone a si mesmo e o escolhe, nas duas chamadas que o
- * servidor exige.
- *
- * As duas, e não só a segunda: escolher_icone() recusa o que não é seu, e um
- * ícone recém-cadastrado não é de ninguém — nem do admin que o criou. Chamar só
- * o escolher devolveria "você não tem este ícone" no exato momento em que a
- * pessoa quer conferir o próprio trabalho.
- *
- * Dar duas vezes é inofensivo (o insert é on conflict do nothing), e para um
- * ícone gratuito é desnecessário — mas pedir de novo custa menos que decidir
- * aqui, no cliente, quem já tem o quê.
- */
-$('btn-usar').onclick = async (e) => {
-  if (!editando) return;
-  e.target.disabled = true;
-  const conta = await contaAtual().catch(() => null);
-  if (conta?.id) await darIcone(conta.id, editando);
-  const r = await escolherIcone(editando);
-  e.target.disabled = false;
-  if (!r.ok) return void avisar(r.erro, 'erro');
-  avisar('pronto — este é o seu ícone agora. Abra a home para ver.', 'ok');
-};
-
-$('btn-apagar').onclick = async () => {
-  if (!editando) return;
-  // Apagar leva junto a POSSE de todo mundo (`on delete cascade`) e devolve ao
-  // padrão quem estava usando (`on delete set null`). Não é desfazível, então
-  // é a única coisa aqui que pergunta.
-  if (!confirm(`Apagar "${editando}"?\n\nQuem tinha este ícone perde, e quem `
-             + 'estava usando volta para o padrão. Não dá para desfazer.')) return;
-  const r = await apagarIcone(editando);
-  if (!r.ok) return void avisar(r.erro, 'erro');
-  avisar('apagado', 'ok');
-  await recarregar();
-  limpar();
-};
+let editando = null;    // id do ícone aberto no formulário, ou null
+let arteAtual = null;   // a data URL do ícone em edição (a que já está no banco)
 
 const avisar = (t, classe = '') => {
   $('aviso').className = `aviso ${classe}`;
@@ -389,14 +241,13 @@ const avisar = (t, classe = '') => {
 
 // --------------------------------------------------------- recorte da foto
 // A conta do enquadramento mora em `recorte.js`, sem DOM e com teste: ela erra
-// CALADA (uma faixa vazia na borda, a foto escorregando com o zoom) e não há
-// como um teste de lógica pegar isso depois que virou arquivo.
+// CALADA (uma faixa vazia na borda, a foto escorregando com o zoom).
 //
 // Aqui fica só o que é da tela: os gestos, o desenho no canvas e a exportação.
 const LADO = 240;          // o quadro na tela
-const SAIDA = 128;         // o PNG gravado — o mesmo tamanho das artes-semente
+const SAIDA = 128;         // o PNG salvo
 
-let foto = null;           // a Image carregada
+let foto = null;           // a Image carregada, quando há uma NOVA
 let enq = { escala: 1, x: 0, y: 0 };
 let escalaMin = 1;
 let arrastando = null;
@@ -404,11 +255,20 @@ let arrastando = null;
 const tela = $('tela');
 const ctx = tela.getContext('2d');
 
+/**
+ * Desenha o quadro. Sem foto nova, mostra a arte que o ícone já tem — assim
+ * editar só o preço não parece que a imagem sumiu.
+ */
 function desenhar() {
   ctx.clearRect(0, 0, LADO, LADO);
-  if (!foto) return;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(foto, enq.x, enq.y, foto.naturalWidth * enq.escala, foto.naturalHeight * enq.escala);
+  if (foto) {
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(foto, enq.x, enq.y, foto.naturalWidth * enq.escala, foto.naturalHeight * enq.escala);
+    return;
+  }
+  const img = new Image();
+  img.onload = () => { if (!foto) ctx.drawImage(img, 0, 0, LADO, LADO); };
+  img.src = caminhoDoIcone(arteAtual);
 }
 
 function ajustar(novo) {
@@ -417,6 +277,14 @@ function ajustar(novo) {
   // "cobrindo" e o fim é o teto, qualquer que seja o tamanho da foto.
   $('f-zoom').value = String(Math.round((enq.escala / escalaMin) * 100));
   desenhar();
+  pintarPrevia();
+}
+
+/** Os dois tamanhos reais, ao lado do quadro. */
+function pintarPrevia() {
+  const src = foto ? exportar() : caminhoDoIcone(arteAtual);
+  $('previa-grande').src = src;
+  $('previa-pequeno').src = src;
 }
 
 function abrirFoto(arquivo) {
@@ -428,10 +296,9 @@ function abrirFoto(arquivo) {
     URL.revokeObjectURL(url);
     foto = img;
     escalaMin = escalaMinima(img.naturalWidth, img.naturalHeight, LADO);
-    $('f-zoom').min = '100';
     $('f-zoom').max = String(TETO_DE_ZOOM * 100);
+    $('zoom-linha').hidden = false;
     ajustar(enquadrarInicial(img.naturalWidth, img.naturalHeight, LADO));
-    $('recorte').classList.add('aberto');
     avisar('');
   };
   img.onerror = () => {
@@ -482,14 +349,6 @@ $('btn-recentrar').onclick = () => {
   if (foto) ajustar(enquadrarInicial(foto.naturalWidth, foto.naturalHeight, LADO));
 };
 
-function fecharRecorte() {
-  foto = null;
-  $('recorte').classList.remove('aberto');
-  $('f-foto').value = '';
-  ctx.clearRect(0, 0, LADO, LADO);
-}
-$('btn-cancelar-foto').onclick = fecharRecorte;
-
 /** O PNG final: o círculo recortado da imagem original, em SAIDA x SAIDA. */
 function exportar() {
   const c = document.createElement('canvas');
@@ -514,52 +373,139 @@ function exportar() {
   return c.toDataURL('image/png');
 }
 
-$('btn-usar-foto').onclick = async () => {
-  if (!foto) return;
-  const nome = slug($('f-id').value || $('f-nome').value);
-  if (!nome) return void avisar('escreva o nome (ou o id) antes — é ele que dá o nome do arquivo', 'erro');
+// -------------------------------------------------------------- formulário
+function limpar() {
+  editando = null;
+  arteAtual = null;
+  foto = null;
+  $('titulo-form').textContent = 'NOVO ÍCONE';
+  $('f-foto').value = '';
+  $('zoom-linha').hidden = true;
+  $('f-nome').value = '';
+  $('f-id').value = '';
+  $('f-preco').value = '0';
+  $('f-ordem').value = '0';
+  $('f-raridade').value = 'N';
+  $('f-gratuito').checked = false;
+  $('f-loja').checked = false;
+  $('btn-apagar').hidden = true;
+  $('btn-usar').hidden = true;
+  avisar('');
+  desenhar();
+  pintarPrevia();
+  pintarLista();
+}
 
-  const arquivo = nome + '.png';
-  const dataUrl = exportar();
+function abrir(i) {
+  editando = i.id;
+  arteAtual = i.imagem ?? null;
+  foto = null;
+  $('titulo-form').textContent = 'EDITANDO';
+  $('f-foto').value = '';
+  $('zoom-linha').hidden = true;
+  $('f-nome').value = i.nome;
+  $('f-id').value = i.id;
+  $('f-preco').value = String(i.preco ?? 0);
+  $('f-ordem').value = String(i.ordem ?? 0);
+  $('f-raridade').value = i.raridade ?? 'N';
+  $('f-gratuito').checked = !!i.gratuito;
+  $('f-loja').checked = !!i.na_loja;
+  $('btn-apagar').hidden = !perfil?.admin;
+  $('btn-usar').hidden = false;
+  avisar('');
+  desenhar();
+  pintarPrevia();
+  pintarLista();
+}
 
-  // Primeiro tenta gravar no REPOSITÓRIO, pelo dev-server. Só ele pode: o jogo
-  // instalado serve %LOCALAPPDATA%, e um PNG gravado lá não entraria em Release
-  // nenhum — a próxima atualização ainda o levaria para o backup como órfão.
-  let gravou = false;
-  try {
-    const r = await fetch('/__icones/save', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ arquivo, dataUrl }),
-    });
-    const j = await r.json();
-    if (j?.ok) {
-      gravou = true;
-      arquivos = j.arquivos ?? arquivos;
-      $('btn-salvar').disabled = !perfil?.admin;
-    }
-  } catch { /* sem dev-server: cai no download, logo abaixo */ }
+// O id é gerado do nome enquanto o campo não foi tocado à mão: digitar o slug
+// duas vezes é trabalho, e errá-lo custa uma mensagem de `check constraint` que
+// não diz o que fazer. Depois de editado, o campo é de quem o editou.
+let idNaMao = false;
+$('f-id').oninput = () => { idNaMao = true; };
+$('f-nome').oninput = () => {
+  if (!idNaMao && !editando) $('f-id').value = slug($('f-nome').value);
+};
+$('btn-limpar').onclick = () => { idNaMao = false; limpar(); };
 
-  if (!gravou) {
-    // O caminho que sempre funciona. O arquivo desce para a pasta de downloads
-    // e o admin o move — dizer ISSO é obrigatório: um download silencioso
-    // pareceria "salvo", e o ícone quebraria na publicação.
-    const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = arquivo;
-    link.click();
-    avisar('"' + arquivo + '" foi BAIXADO. Mova-o para web/img/icones/ no repositório '
-         + 'e rode: node tools/icones.mjs — daqui não dá para gravar no repositório.', 'erro');
-    // O arquivo ainda não existe na pasta, então não dá para selecioná-lo no
-    // seletor. O cadastro espera.
-    fecharRecorte();
-    return;
+$('btn-salvar').onclick = async (e) => {
+  const icone = {
+    id: slug($('f-id').value),
+    nome: $('f-nome').value.trim(),
+    preco: Number($('f-preco').value) || 0,
+    raridade: $('f-raridade').value,
+    gratuito: $('f-gratuito').checked,
+    na_loja: $('f-loja').checked,
+    ordem: Number($('f-ordem').value) || 0,
+    // A arte vai junto SÓ quando há foto nova. Sem isto, editar o preço de um
+    // ícone mandaria a arte de novo a cada salvamento — e mandaria `null` se o
+    // canvas estivesse vazio, apagando a imagem de um ícone que está no perfil
+    // de gente.
+    ...(foto ? { imagem: exportar() } : {}),
+  };
+
+  if (!icone.id) return void avisar('o id ficou vazio — escreva um nome', 'erro');
+  if (!icone.nome) return void avisar('escreva um nome', 'erro');
+  // Um ícone sem arte nenhuma é o círculo genérico na tela de quem joga. Vale
+  // para o cadastro NOVO; editando, a arte que já está no banco continua.
+  if (!editando && !foto) return void avisar('escolha uma imagem para o ícone', 'erro');
+  // Um ícone à venda por 0 DP é de graça na Loja, o que quase nunca é o que se
+  // quis dizer — e ninguém percebe até alguém "comprar".
+  if (icone.na_loja && !icone.gratuito && icone.preco <= 0) {
+    return void avisar('à venda por 0 DP? ponha um preço, ou marque gratuito', 'erro');
   }
 
-  pintarPrevia();
-  fecharRecorte();
-  avisar('"' + arquivo + '" gravado em web/img/icones/ — publique um Release para '
-       + 'ele chegar em quem joga.', 'ok');
+  e.target.disabled = true;
+  const r = await salvarIcone(icone);
+  e.target.disabled = false;
+  if (!r.ok) return void avisar(r.erro, 'erro');
+
+  await recarregar();
+  // Fica EDITANDO o que acabou de ser salvo, em vez de limpar o formulário: é
+  // agora que se quer ver como ficou e clicar em "usar no meu perfil". Limpar
+  // aqui era o que escondia o botão do admin logo depois de criar o ícone.
+  const salvo = lista.find((x) => x.id === icone.id);
+  if (salvo) abrir(salvo);
+  idNaMao = false;
+  avisar(`"${icone.nome}" salvo — já está no jogo, sem publicar nada.`, 'ok');
+};
+
+/**
+ * "usar agora": dá o ícone a si mesmo e o escolhe, nas duas chamadas que o
+ * servidor exige.
+ *
+ * As duas, e não só a segunda: escolher_icone() recusa o que não é seu, e um
+ * ícone recém-cadastrado não é de ninguém — nem do admin que o criou. Chamar só
+ * o escolher devolveria "você não tem este ícone" no exato momento em que a
+ * pessoa quer conferir o próprio trabalho.
+ *
+ * Dar duas vezes é inofensivo (o insert é `on conflict do nothing`), e para um
+ * ícone gratuito é desnecessário — mas pedir de novo custa menos que decidir
+ * aqui, no cliente, quem já tem o quê.
+ */
+$('btn-usar').onclick = async (e) => {
+  if (!editando) return;
+  e.target.disabled = true;
+  const conta = await contaAtual().catch(() => null);
+  if (conta?.id) await darIcone(conta.id, editando);
+  const r = await escolherIcone(editando);
+  e.target.disabled = false;
+  if (!r.ok) return void avisar(r.erro, 'erro');
+  avisar('pronto — este é o seu ícone agora. Abra a home para ver.', 'ok');
+};
+
+$('btn-apagar').onclick = async () => {
+  if (!editando) return;
+  // Apagar leva junto a POSSE de todo mundo (`on delete cascade`) e devolve ao
+  // padrão quem estava usando (`on delete set null`). Não é desfazível, então
+  // é a única coisa aqui que pergunta.
+  if (!confirm(`Apagar "${editando}"?\n\nQuem tinha este ícone perde, e quem `
+             + 'estava usando volta para o padrão. Não dá para desfazer.')) return;
+  const r = await apagarIcone(editando);
+  if (!r.ok) return void avisar(r.erro, 'erro');
+  await recarregar();
+  limpar();
+  avisar('apagado', 'ok');
 };
 
 // ------------------------------------------------------------------ lista
@@ -570,12 +516,13 @@ function pintarLista() {
   if (!lista.length) {
     caixa.replaceChildren(Object.assign(document.createElement('div'), {
       className: 'vazio',
-      textContent: 'nenhum ícone cadastrado ainda — escolha uma arte ao lado e salve.',
+      textContent: 'nenhum ícone cadastrado ainda — escolha uma imagem ao lado, '
+                 + 'dê um nome e salve.',
     }));
     return;
   }
 
-  const faltando = new Set(semImagem(lista, arquivos).map((i) => i.id));
+  const faltando = new Set(semImagem(lista).map((i) => i.id));
   const frag = document.createDocumentFragment();
 
   for (const i of lista) {
@@ -586,9 +533,6 @@ function pintarLista() {
     const img = document.createElement('img');
     img.src = caminhoDoIcone(i);
     img.alt = '';
-    // A arte pode sumir do repositório depois do cadastro (alguém apagou o
-    // PNG). Sem isto a linha ficaria com um ícone quebrado do navegador.
-    img.onerror = () => { img.src = PADRAO; };
     const info = document.createElement('div');
     info.className = 'info';
     const nome = document.createElement('div');
@@ -597,7 +541,7 @@ function pintarLista() {
     const meta = document.createElement('div');
     meta.className = 'meta';
     meta.innerHTML = faltando.has(i.id)
-      ? `⚠ ${i.arquivo} não está no repositório`
+      ? '⚠ sem arte — abra e escolha uma imagem'
       : `<span class="${i.raridade}">${i.raridade}</span> · `
         + (i.gratuito ? 'todo mundo tem' : i.na_loja ? `${i.preco} DP na Loja` : 'só por concessão');
     info.append(nome, meta);
@@ -610,8 +554,7 @@ function pintarLista() {
   const quebrados = faltando.size;
   $('aviso-lista').className = `aviso ${quebrados ? 'erro' : ''}`;
   $('aviso-lista').textContent = quebrados
-    ? `${quebrados} ícone(s) com a imagem faltando no repositório — quem joga vê `
-      + 'um quadrado vazio. Ponha o PNG em web/img/icones/, rode `node tools/icones.mjs` e publique.'
+    ? `${quebrados} ícone(s) sem arte — quem joga vê o círculo genérico no lugar.`
     : '';
 }
 
@@ -619,16 +562,6 @@ function pintarLista() {
 async function recarregar() {
   lista = await catalogo();
   pintarLista();
-}
-
-const repo = await arquivosDoRepo();
-arquivos = repo.arquivos;
-
-if (!repo.ok) {
-  // Sem o manifesto não dá para saber se existe arte para um id — e cadastrar
-  // no escuro é convidar o quadrado vazio na tela de quem joga.
-  $('btn-salvar').disabled = true;
-  avisar('não achei web/img/icones/index.json — rode: node tools/icones.mjs', 'erro');
 }
 
 $('btn-voltar').onclick = () => (location.href = '/web/teste.html');

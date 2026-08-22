@@ -132,22 +132,16 @@ node web/js/recorte.test.mjs # 23 testes do ENQUADRAMENTO do recorte circular
                              # recorta, salva, publica, e o ícone só fica torto
 node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # escolha são decididas no SERVIDOR, então o que
-                             # se prova aqui é o que erra CALADO no cliente: um
-                             # nome de arquivo torto vira uma URL que o
-                             # navegador busca, não acha e desenha como
-                             # quadrado vazio; e a conta de "quais ícones do
-                             # catálogo estão sem imagem no repositório", que é
-                             # a mesma do icones:check
-node tools/icones.mjs        # desenha as artes-semente em web/img/icones/ (em
-                             # CÓDIGO, como o ícone do jogo) e regera o
-                             # index.json — o manifesto que o painel do admin
-                             # oferece e que o icones:check cruza com o banco.
-                             # Rode depois de pôr qualquer PNG novo na pasta
-npm run icones:check         # todo ícone do catálogo tem imagem publicada? A
-                             # imagem viaja no game.zip e o banco guarda só o
-                             # NOME: um ícone cadastrado sem a arte publicada é
-                             # um quadrado vazio na tela de quem joga, e nem o
-                             # banco nem o navegador sabem disso
+                             # se prova aqui é o que erra CALADO no cliente: a
+                             # arte vem do banco como data URL, e um valor
+                             # torto (vazio, texto, `data:text/html`) vira um
+                             # `src` que o navegador busca, não acha e desenha
+                             # como quadrado vazio
+npm run icones:check         # todo ícone do catálogo tem arte? A imagem mora na
+                             # coluna `imagem` (0039) e a coluna é nullable de
+                             # propósito, então o banco aceita a linha sem ela —
+                             # e quem joga vê o círculo genérico no lugar do
+                             # desenho, sem erro em lugar nenhum
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run conteudo:check       # o que o admin editou chegou ao BANCO? (conteudo,
                              # decks de NPC e tabuleiros, disco x Supabase).
@@ -920,28 +914,48 @@ Três coisas separadas no banco (migration 0035), e a separação é o ponto:
 > Juntar posse e escolha num campo só perderia a coleção no instante em que a
 > pessoa trocasse de ícone, e não haveria como oferecer "os que você tem".
 
-**A imagem mora no repositório** (`web/img/icones/<arquivo>`) e viaja no
-`game.zip`; o banco guarda só o **nome do arquivo**. Foi uma escolha
-deliberada, e ela tem um preço que precisa ser dito em voz alta: **arte nova
-exige publicar um Release** — o painel do admin cadastra id, preço e raridade,
-mas não cria imagem. E como o banco não lê o disco e o navegador não lista
-pastas, um ícone cadastrado cuja arte não foi publicada é um **quadrado vazio**
-na tela de quem joga, sem erro em lugar nenhum.
+**A imagem mora no BANCO**, na coluna `imagem` de cada ícone: uma `data:` URL de
+um PNG 128×128 (~1 a 40 KB). Ela chega junto com a linha, então funciona no
+`.exe`, no `npm run dev` e para todo jogador — **sem publicar Release**.
 
-Daí as duas peças que fecham o buraco:
+> **A versão anterior (0035) guardava só o nome de um arquivo** em
+> `web/img/icones/`, que viajava no `game.zip`. A ideia tinha lógica — arte é
+> conteúdo do repositório, como os tabuleiros — e um custo que só apareceu no
+> uso: a rota que grava o PNG só existe no `tools/serve.mjs`, porque o jogo
+> instalado serve `%LOCALAPPDATA%`, que nenhum Release lê. Para quem roda o
+> `.exe`, que é como o jogo é usado, subir um ícone virava "mova o arquivo à mão
+> e publique um Release" — **por ícone**. Na prática, cadastrar era impossível,
+> e foi assim que a feature saiu publicada sem funcionar.
+>
+> `arquivo` **saiu** junto (0039). Com a imagem no banco ele seria uma segunda
+> fonte para a mesma coisa — o erro que este projeto já pagou (`chancesDe` ×
+> `chancesDoPacote`) —, e as duas se desencontrariam no primeiro ícone
+> cadastrado por um caminho só.
 
-- **`web/img/icones/index.json`**, o manifesto da pasta, gerado por
-  `node tools/icones.mjs`. É um arquivo estático de propósito: uma rota de
-  listagem custaria implementação nos DOIS back-ends (`tools/serve.mjs` e
-  `StaticServer.cs`), e divergir ali faz a tela funcionar no `npm run dev` e
-  falhar no jogo instalado. O painel do admin **só oferece o que está nele**;
-- **`npm run icones:check`**, que cruza o catálogo publicado com o manifesto —
-  a mesma família do `boosters:check` (carta vendida e injogável) e do
-  `conteudo:check` (edição que ficou só em disco).
+Duas travas na coluna, porque as duas erram calado: um **teto de 256 KB** (um
+engano — a foto de 12 MB sem recortar — viajaria para todo jogador que abrisse a
+lista, para sempre) e o formato, que precisa ser `data:image/...`. Sem o
+segundo, um `data:text/html` entraria e o navegador simplesmente não desenharia
+nada. `npm run icones:check` continua existindo, agora perguntando só *"algum
+ícone está sem arte?"* — a coluna é nullable de propósito.
 
-As artes-semente são desenhadas **em código** (`tools/icones.mjs`), como o
-ícone do jogo e a pixel art do mundo andável: arte gerada tem fonte, um PNG
-solto no repositório não tem — ninguém sabe refazê-lo maior dois meses depois.
+**O painel é um formulário só.** Escolher a imagem, enquadrar no círculo, dar
+nome e salvar: a arte vai no MESMO `upsert` que o preço e a raridade. Separá-la
+em duas chamadas deixaria a linha existir sem arte no intervalo entre elas — e
+para sempre, se a segunda falhasse.
+
+> Ao editar, a arte só é reenviada quando há **foto nova**. Mandar a imagem a
+> cada salvamento reenviaria 40 KB para trocar um preço, e mandar `null` (o que
+> um canvas vazio produz) **apagaria** a arte de um ícone que já está no perfil
+> de gente.
+
+**[usar no meu perfil agora]** põe o ícone aberto no perfil do próprio admin.
+São **duas** chamadas e não uma: `escolher_icone()` recusa o que não é seu, e um
+ícone recém-cadastrado não é de ninguém — nem de quem o criou. Sem o
+`dar_icone()` antes, o botão devolveria *"você não tem este ícone"* no exato
+momento em que a pessoa quer conferir o próprio trabalho. Depois de salvar, o
+formulário **continua editando** o que acabou de ser criado, em vez de limpar:
+era o `limpar()` que escondia esse botão justamente na hora de usá-lo.
 
 **Quem decide o que você pode usar é o servidor**, e por dois caminhos, não um:
 
@@ -955,14 +969,10 @@ solto no repositório não tem — ninguém sabe refazê-lo maior dois meses dep
 > perfil tem". Assim vale igual para o jogador, para o admin editando outra
 > pessoa e para qualquer função futura.
 
-A lista de amigos recebe o `icone_id` de cada um (`meus_amigos`), nunca o
-arquivo — a policy de `perfis` não deixaria. Quem cruza o id com a arte é o
-catálogo, que é de leitura aberta, carregado uma vez no boot da home.
-
-**A arte É o arquivo subido.** Não há seletor de arte: o arquivo de um ícone é
-sempre `<id>.png`. Escolher de uma lista deixaria dois ícones apontando para o
-mesmo desenho e um id sem arte nenhuma — e a validação do salvar (*"não há
-imagem para este id"*) é o que impede o cadastro que vira quadrado vazio.
+A lista de amigos recebe o `icone_id` de cada um (`meus_amigos`), nunca a arte —
+a policy de `perfis` não deixaria. A home busca as artes de quem aparece na tela
+(`artesDe`: a minha e a dos amigos), e não o catálogo inteiro: trazer 40 KB por
+ícone a cada abertura para desenhar meia dúzia seria pagar a coleção toda.
 
 **Subir uma arte pelo painel.** O admin escolhe um arquivo, **arrasta para
 posicionar e usa a roda para o zoom** dentro de um círculo — o mesmo arranjo de
@@ -978,31 +988,10 @@ com uma faixa vazia na borda.
 > toda tela onde aparece, e um quadrado com os cantos escondidos por CSS
 > mostraria as pontas em qualquer lugar que esquecesse o `border-radius`.
 
-Onde o PNG cai depende de **quem está servindo**, e a assimetria é deliberada:
+O PNG não vai para lugar nenhum: ele **é** a coluna `imagem` da linha do ícone,
+gravada no mesmo `upsert` que o resto do cadastro.
 
-| ambiente | o que acontece |
-|---|---|
-| `npm run dev` | grava direto em `web/img/icones/` (rota `/__icones/save`, só localhost) e regera o `index.json` |
-| jogo instalado | **baixa** o PNG e diz para movê-lo — não grava |
 
-> A rota existe **só no `tools/serve.mjs`**, e não no `StaticServer.cs`. O
-> dev-server serve o REPOSITÓRIO, que é de onde o Release sai; o jogo instalado
-> serve `%LOCALAPPDATA%ClassicDuelsgame`, então gravar por lá poria o PNG
-> numa pasta que nenhum Release lê — e pior, `web` é raiz gerenciada com
-> `removeMode: backup`, então a próxima atualização levaria o arquivo para o
-> backup como órfão. Seria uma armadilha, não uma conveniência: por isso o
-> painel cai no download e **diz** que caiu.
-
-A rota recusa nome com `..`, subpasta, extensão que não é de imagem, `dataUrl`
-que não é imagem, e arquivo acima de 512 KB — o teto não é sobre disco, é para
-um engano (arrastar a foto errada, de 12 MB) não virar um arquivo que viaja no
-`game.zip` de todo jogador para sempre.
-
-**[usar no meu perfil agora]**, no painel, põe o ícone aberto no perfil do
-próprio admin. São **duas** chamadas e não uma: `escolher_icone()` recusa o que
-não é seu, e um ícone recém-cadastrado não é de ninguém — nem de quem o criou.
-Sem o `dar_icone()` antes, o botão devolveria *"você não tem este ícone"* no
-exato momento em que a pessoa quer conferir o próprio trabalho.
 
 #### Ícone como prêmio de vitória (migration 0038)
 

@@ -5,17 +5,16 @@
  * gatilho `perfis_icone_valido`), entao nao ha' regra de jogo para provar
  * aqui. O que se prova e' o que erra CALADO no cliente:
  *
- *   • **o caminho da imagem.** Um nome de arquivo torto vira uma URL que o
- *     navegador busca, nao acha, e desenha como quadrado vazio — sem erro
- *     nenhum. Cair no padrao e' sempre melhor que apontar para o nada;
- *   • **o cruzamento catalogo x repositorio.** A imagem viaja no `game.zip` e o
- *     banco so' guarda o nome: um icone cadastrado cuja arte nao foi publicada
- *     e' invisivel para os dois lados. E' esta conta que o `icones:check` e o
- *     painel do admin usam para avisar antes;
+ *   • **o `src` da imagem.** A arte vem do banco como data URL. Um valor torto
+ *     — vazio, texto, `data:text/html` — vira um `src` que o navegador busca,
+ *     nao acha, e desenha como quadrado vazio. Sem erro nenhum;
+ *   • **o cruzamento id → arte.** A lista de amigos recebe so' o `icone_id` (a
+ *     policy de `perfis` nao deixaria mais), entao quem nao estiver no mapa
+ *     precisa cair no padrao em vez de sumir;
  *   • **o slug.** Ele existe para o admin nao esbarrar no `check constraint` do
  *     Postgres, cuja mensagem nao diz o que fazer.
  */
-import { caminhoDoIcone, mapaDeArquivos, slug, semImagem, PADRAO, PASTA } from './icones.js';
+import { caminhoDoIcone, mapaDeArquivos, slug, semImagem, PADRAO } from './icones.js';
 import assert from 'node:assert/strict';
 
 let pass = 0, fail = 0;
@@ -24,83 +23,87 @@ const t = (nome, fn) => {
   catch (e) { console.log(`  \x1b[31mFALHA\x1b[0m ${nome}\n        ${e.message}`); fail++; }
 };
 
-// --------------------------------------------------------- caminho da arte
+// Um PNG minusculo de verdade (1x1 transparente), para nao inventar formato.
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
-t('a linha do catalogo vira o caminho do arquivo', () => {
-  assert.equal(caminhoDoIcone({ id: 'ouro', arquivo: 'ouro.png' }), `${PASTA}/ouro.png`);
+// --------------------------------------------------------- src da imagem
+
+t('a linha do catalogo vira o src da arte', () => {
+  assert.equal(caminhoDoIcone({ id: 'ouro', imagem: PNG }), PNG);
 });
 
-t('so o nome do arquivo tambem serve', () => {
-  assert.equal(caminhoDoIcone('verso.png'), `${PASTA}/verso.png`);
+t('a data URL solta tambem serve', () => {
+  assert.equal(caminhoDoIcone(PNG), PNG);
 });
 
-// Sem icone escolhido é o caso NORMAL (todo jogador novo), nao um erro.
-t('sem icone nenhum, o padrao do jogo', () => {
-  for (const nada of [null, undefined, '', {}, { arquivo: null }, { arquivo: '' }]) {
+// Sem icone escolhido e' o caso NORMAL (todo jogador novo), nao um erro.
+t('sem arte nenhuma, o padrao do jogo', () => {
+  for (const nada of [null, undefined, '', {}, { imagem: null }, { imagem: '' }]) {
     assert.equal(caminhoDoIcone(nada), PADRAO);
   }
 });
 
-// Um nome torto vira uma URL que o navegador busca, nao acha e desenha como
-// quadrado vazio — sem erro nenhum. E `../` sairia da pasta.
-t('nome de arquivo torto cai no padrao, nunca numa URL quebrada', () => {
-  for (const torto of ['../../etc/passwd', 'a/b.png', 'com espaco.png', 'x'.repeat(65),
-                       'aspas".png', '<script>.png']) {
+// O que nao e' imagem vira um `src` que o navegador busca e nao desenha —
+// calado. Um `data:text/html` no meio disso seria pior que so' feio.
+t('o que nao e imagem cai no padrao, nunca num src quebrado', () => {
+  for (const torto of ['data:text/html;base64,YWJj', 'http://exemplo/x.png',
+                       'javascript:alert(1)', 'data:image/png;base64,', 'nada disso',
+                       'data:image/svg+xml;base64,YWJj']) {
     assert.equal(caminhoDoIcone(torto), PADRAO, `deveria recusar: ${torto}`);
+  }
+});
+
+t('os formatos de imagem aceitos passam', () => {
+  for (const tipo of ['png', 'jpeg', 'webp', 'gif']) {
+    const url = `data:image/${tipo};base64,YWJjZA==`;
+    assert.equal(caminhoDoIcone(url), url, tipo);
   }
 });
 
 // -------------------------------------------------------------- o mapa
 
-t('o mapa liga o id do amigo ao arquivo', () => {
-  const m = mapaDeArquivos([{ id: 'ouro', arquivo: 'ouro.png' }, { id: 'azul', arquivo: 'azul.png' }]);
-  assert.equal(m.get('ouro'), 'ouro.png');
+t('o mapa liga o id do amigo a arte', () => {
+  const m = mapaDeArquivos([{ id: 'ouro', imagem: PNG }, { id: 'azul', imagem: PNG }]);
+  assert.equal(m.get('ouro'), PNG);
   assert.equal(m.size, 2);
 });
 
-t('id sem arquivo (e lixo) nao entra no mapa', () => {
-  const m = mapaDeArquivos([{ id: 'x' }, { arquivo: 'y.png' }, null, 'z', 42]);
+t('id sem arte (e lixo) nao entra no mapa', () => {
+  const m = mapaDeArquivos([{ id: 'x' }, { imagem: PNG }, null, 'z', 42]);
   assert.equal(m.size, 0);
 });
 
-// O amigo que nunca escolheu tem `icone_id` null: o mapa nao acha, e o caminho
-// cai no padrao. As duas metades juntas sao o que faz a lateral nunca quebrar.
-t('amigo sem icone: o mapa nao acha e o caminho vira o padrao', () => {
-  const m = mapaDeArquivos([{ id: 'ouro', arquivo: 'ouro.png' }]);
+// O amigo que nunca escolheu tem `icone_id` null: o mapa nao acha, e o src cai
+// no padrao. As duas metades juntas sao o que faz a lateral nunca quebrar.
+t('amigo sem icone: o mapa nao acha e o src vira o padrao', () => {
+  const m = mapaDeArquivos([{ id: 'ouro', imagem: PNG }]);
   assert.equal(caminhoDoIcone(m.get(null)), PADRAO);
   assert.equal(caminhoDoIcone(m.get('apagado')), PADRAO);
 });
 
-// ------------------------------------------------ catalogo x repositorio
+// ------------------------------------------------ catalogo sem arte
 
-t('acusa o icone cadastrado cuja imagem nao foi publicada', () => {
-  const catalogo = [{ id: 'ouro', arquivo: 'ouro.png' }, { id: 'dragao', arquivo: 'dragao.png' }];
-  const faltando = semImagem(catalogo, ['ouro.png', 'verso.png']);
+t('acusa o icone cadastrado sem arte', () => {
+  const faltando = semImagem([{ id: 'ouro', imagem: PNG }, { id: 'dragao', imagem: null }]);
   assert.equal(faltando.length, 1);
   assert.equal(faltando[0].id, 'dragao');
 });
 
-t('com tudo publicado, nao acusa nada', () => {
-  const catalogo = [{ id: 'ouro', arquivo: 'ouro.png' }];
-  assert.deepEqual(semImagem(catalogo, ['ouro.png', 'sobrando.png']), []);
+t('com todos com arte, nao acusa nada', () => {
+  assert.deepEqual(semImagem([{ id: 'ouro', imagem: PNG }]), []);
 });
 
-// Arte no repositorio que ninguem cadastrou NAO e' problema: e' arte esperando
-// virar icone. So' o contrario quebra a tela de quem joga.
-t('arquivo no repo sem icone no catalogo nao e acusado', () => {
-  assert.deepEqual(semImagem([], ['orfao.png']), []);
+// Uma arte que nao e' imagem e' o mesmo que nao ter arte: o navegador desenha
+// nada nos dois casos.
+t('arte que nao e imagem conta como sem arte', () => {
+  assert.equal(semImagem([{ id: 'x', imagem: 'data:text/html;base64,YWJj' }]).length, 1);
 });
 
-t('sem manifesto, TUDO e acusado (e nao o contrario)', () => {
-  // Se a lista de arquivos nao chegou, o certo e' avisar de tudo em vez de
-  // dizer "esta tudo bem" — um manifesto ausente nao prova imagem nenhuma.
-  const catalogo = [{ id: 'ouro', arquivo: 'ouro.png' }];
-  assert.equal(semImagem(catalogo, []).length, 1);
-  assert.equal(semImagem(catalogo, null).length, 1);
-});
-
-t('lixo no catalogo nao derruba a conta', () => {
-  assert.deepEqual(semImagem([null, {}, 'x', { id: 'sem-arquivo' }], ['a.png']), []);
+t('catalogo vazio ou torto nao derruba a conta', () => {
+  for (const nada of [[], null, undefined, 'x', 42]) {
+    assert.deepEqual(semImagem(nada), []);
+  }
+  assert.equal(semImagem([null, 'x', 42]).length, 0);
 });
 
 // ---------------------------------------------------------------- o slug

@@ -350,8 +350,8 @@ import { meuPerfil, amigos as listarAmigos, desafiar, meusDecks } from '/web/js/
 import { vigiar, aceitar, recusar } from '/web/js/notificacoesvivo.js';
 import { baterPonto } from '/web/js/presenca.js';
 import {
-  meusIcones, escolherIcone, catalogo as catalogoDeIcones,
-  caminhoDoIcone, mapaDeArquivos, PADRAO,
+  meusIcones, escolherIcone, artesDe,
+  caminhoDoIcone, PADRAO,
 } from '/web/js/icones.js';
 
 // A Site URL do projeto aponta para a raiz, entao um link de recuperacao que o
@@ -746,6 +746,10 @@ async function abrirIcones() {
     b.onclick = async () => {
       const x = await escolherIcone(i.id);
       if (!x.ok) return void erro(x.erro);
+      // O mapa só conhece as artes que a home pediu no boot (a minha e a dos
+      // amigos). Sem guardar a nova aqui, escolher um ícone o desenharia como
+      // o padrão até o próximo F5 — parecendo que a escolha não pegou.
+      if (i.imagem) arteDoIcone.set(i.id, i.imagem);
       pintarMeuIcone(i.id);
       fecharCartaz();
       toast(`ícone: ${i.nome}`);
@@ -768,18 +772,29 @@ $('btn-icone').onclick = abrirIcones;
 // ------------------------------------------------------------------ boot
 render();
 
-// O CATÁLOGO antes dos amigos, de propósito: é dele que sai a arte de cada
-// `icone_id`, e desenhar a lista sem ele mostraria todo mundo com o ícone
+// As ARTES antes dos amigos, de propósito: é delas que sai o avatar de cada
+// `icone_id`, e desenhar a lista sem elas mostraria todo mundo com o ícone
 // padrão por um instante — um pisca que parece "perdi meu ícone".
-try {
-  arteDoIcone = mapaDeArquivos(await catalogoDeIcones());
-} catch { /* sem catálogo, todo mundo fica com o padrão do jogo */ }
+//
+// As artes de quem aparece na tela: a minha e a dos amigos. Trazer o catálogo
+// inteiro seria baixar a coleção de ícones (até 40 KB cada) a cada abertura da
+// home para desenhar meia dúzia deles.
+//
+// O perfil é lido UMA vez e reaproveitado: ele dá o nome, a etiqueta e o meu
+// `icone_id`, e pedir de novo seria uma segunda ida de rede pelo mesmo dado.
+const meuPerfilAgora = await meuPerfil().catch(() => null);
+if (meuPerfilAgora?.etiqueta) $('eu-etiqueta').textContent = `[${meuPerfilAgora.etiqueta}]`;
+if (meuPerfilAgora?.usuario) {
+  $('eu-nome').textContent = meuPerfilAgora.usuario;
+  $('user-tag').textContent = meuPerfilAgora.usuario;
+}
 
-meuPerfil().then((p) => {
-  if (p?.etiqueta) $('eu-etiqueta').textContent = `[${p.etiqueta}]`;
-  if (p?.usuario) { $('eu-nome').textContent = p.usuario; $('user-tag').textContent = p.usuario; }
-  pintarMeuIcone(p?.icone_id ?? null);
-});
+try {
+  const amigosAgora = await listarAmigos();
+  arteDoIcone = await artesDe([meuPerfilAgora?.icone_id,
+                               ...(amigosAgora.dados ?? []).map((x) => x.icone_id)]);
+} catch { /* sem as artes, todo mundo fica com o ícone padrão do jogo */ }
+pintarMeuIcone(meuPerfilAgora?.icone_id ?? null);
 
 meusDecks().then((d) => { decksDoBanco = d; });
 pintarAmigos();

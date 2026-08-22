@@ -35,7 +35,7 @@ import {
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 // O ícone como prêmio de vitória: a lista sai do catálogo publicado, e quem
 // sorteia é o servidor (`premiar_vitoria`, migration 0038).
-import { catalogo as catalogoDeIcones, caminhoDoIcone, PADRAO as ICONE_PADRAO } from '/web/js/icones.js';
+import { catalogo as catalogoDeIcones, caminhoDoIcone } from '/web/js/icones.js';
 import { requireLogin } from '/web/js/auth.js';
 import { perfilAtual } from '/web/js/supabase.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
@@ -717,10 +717,7 @@ function renderIcones() {
                         : `${ic.nome} — clique para incluir no prêmio`;
     const img = document.createElement('img');
     img.src = caminhoDoIcone(ic);
-    img.alt = '';
-    // A arte pode não ter viajado no Release (o ícone é cadastrado no banco, a
-    // imagem vem no game.zip). Sem isto ficaria o quadrado quebrado do navegador.
-    img.onerror = () => { img.src = ICONE_PADRAO; };
+    img.alt = '';
     const rot = document.createElement('span');
     rot.className = 'rot';
     rot.textContent = ic.nome;

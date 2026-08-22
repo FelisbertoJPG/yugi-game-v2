@@ -8,7 +8,7 @@
  * É deliberado: o cliente é a parte que o jogador controla. Toda checagem que
  * vive só aqui é uma checagem que não existe.
  */
-import { req, sessao } from '/web/js/supabase.js';
+import { req, sessao, contaAtual } from '/web/js/supabase.js';
 
 /** Chama uma função do banco. Devolve `{ok, dados, erro}`. */
 async function rpc(nome, args = {}) {
@@ -25,9 +25,24 @@ export const logado = () => !!sessao();
 
 // ------------------------------------------------------------------ perfil
 
-/** Seu nome e sua etiqueta — o `[22502]` que os outros usam para te achar. */
+/**
+ * Seu nome e sua etiqueta — o `[22502]` que os outros usam para te achar.
+ *
+ * **Filtra pelo SEU id, e isso não é redundância.** A policy de `perfis` é
+ * `id = auth.uid() OR eh_admin()`: para uma conta comum o `select` já devolve
+ * uma linha só, mas para um ADMIN devolve a tabela inteira — e o `limit=1` que
+ * havia aqui pegava a primeira linha que o Postgres entregasse, que é o perfil
+ * de OUTRA PESSOA.
+ *
+ * O sintoma foi exatamente esse: o admin abria a home e via o nome e a etiqueta
+ * de outro jogador no próprio cartão, com o DP e a lista de amigos certos ao
+ * lado. Nada acusava — a consulta respondia 200 com um perfil legítimo. Pior no
+ * Multiplayer, onde é essa etiqueta que ele copia e manda para alguém adicionar.
+ */
 export async function meuPerfil() {
-  const r = await req('perfis?select=usuario,etiqueta&limit=1');
+  const conta = await contaAtual();
+  if (!conta?.id) return null;
+  const r = await req(`perfis?select=usuario,etiqueta&id=eq.${encodeURIComponent(conta.id)}`);
   return r.ok && r.dados?.[0] ? r.dados[0] : null;
 }
 

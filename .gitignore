@@ -167,3 +167,4 @@ supabase/.temp/
 # recompila-las aqui. Ver "oq-faltou" / INSTALADOR.md.
 duel-server/native/libocgcore.so
 bancada.html
+bancada-home.html

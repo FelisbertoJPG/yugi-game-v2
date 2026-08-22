@@ -143,6 +143,18 @@ node tools/bancada-visual.mjs # gera bancada.html na raiz: as animacoes da mesa
                              # teste de logica — a seta foi publicada invisivel
                              # com 13 testes de geometria passando
 
+node tools/bancada-home.mjs  # gera bancada-home.html na raiz: a HOME com a
+                             # lateral social desenhada com dados de mentira,
+                             # sem servidor e sem login — dois cliques no
+                             # arquivo. O CSS e o markup sao FATIADOS do
+                             # web/index.html por marcadores, nunca copiados
+                             # (uma copia passaria a valer por si e daria para
+                             # consertar a bancada publicando a home quebrada).
+                             # Existe porque a lateral saiu publicada uma vez
+                             # FLUTUANDO no meio da tela, com os 21 testes de
+                             # notificacao passando: nenhum deles olha para
+                             # onde a caixa aterrissa
+
 node tools/gerar-icone.mjs   # redesenha assets/icone.ico + web/img/icone.png
                              # (o ícone é CÓDIGO, não um binário sem fonte)
 npm run launcher:build       # gera classic-duels.exe / classic-duels-stop.exe (SDK .NET 8)
@@ -779,6 +791,16 @@ seu perfil (nome, etiqueta, DP), a **lista de amigos** com quem está online, e 
 botão de **notificações** no pé. O menu de sempre (Loja, Deck Builder,
 Inventário, Trilha, Multiplayer) e os atalhos 1–5 continuam intactos à direita,
 e o canto superior direito mostra **quantas pessoas estão jogando agora**.
+
+> **O cartão do perfil errava para o ADMIN.** `meuPerfil()` fazia
+> `perfis?select=…&limit=1`, e a policy de `perfis` é `id = auth.uid() OR
+> eh_admin()`: para uma conta comum aquilo devolve uma linha só, mas para um
+> admin devolve a tabela inteira — e o `limit=1` pegava o perfil de OUTRA
+> PESSOA. O admin via o nome e a etiqueta de outro jogador no próprio cartão,
+> com o DP e a lista de amigos certos ao lado, e nada acusava (a consulta
+> respondia 200 com um perfil legítimo). Pior no Multiplayer, onde é essa
+> etiqueta que ele copia e manda para alguém adicionar. Hoje filtra pelo
+> próprio id, como `perfilAtual` e o `auth.js` sempre fizeram.
 
 **Presença** (`web/js/presenca.js` + migration 0034). O mecanismo é um
 **batimento**: cada tela que conta como estar jogando — home, Multiplayer e

@@ -7,24 +7,40 @@
 <link rel="icon" href="/web/img/icone.png">
 <link rel="stylesheet" href="/web/css/ui.css">
 <style>
-  /* A home passou a ter DUAS colunas: a lateral social (perfil, amigos,
-     notificações) e o menu de sempre. A lateral é a coluna fixa porque ela é
-     um painel de estado — quem está online, quem te chamou — e não uma lista
-     que cresce; o menu é o que muda de tamanho conforme o jogo ganha telas. */
+  /* A lateral social (perfil, amigos, notificações) é FIXA na borda esquerda da
+     janela, do topo ao rodapé — é um painel de estado do jogo, não conteúdo da
+     página: ela não rola junto e não muda de lugar quando o menu cresce. O
+     conteúdo fica centralizado no espaço que sobra.
+
+     A largura dela é a MESMA em `--lateral`, usada no padding do body e no
+     deslocamento do botão do deck. Repetir 280px em três lugares faria dois
+     deles envelhecerem no dia em que a lateral mudar de tamanho. */
+  :root { --lateral: 280px; }
+
   body {
-    display: flex; align-items: center; justify-content: center; padding: 18px;
+    display: block; margin: 0;
+    padding: 18px 18px 18px calc(var(--lateral) + 18px);
     background: radial-gradient(ellipse at 50% 0%, #1b2438 0%, var(--bg) 60%);
   }
-  .home { width: min(1060px, 96vw); display: grid; gap: 18px;
-          grid-template-columns: 280px 1fr; align-items: start; }
-  /* Numa tela estreita a lateral vai para cima do menu, e não some: perder o
-     aviso de que alguém te chamou para duelar é o pior desfecho possível. */
-  @media (max-width: 880px) { .home { grid-template-columns: 1fr; } }
+  .home { width: min(760px, 100%); margin: 0 auto; }
 
   /* ------------------------------------------------------------- lateral */
-  .lateral { display: flex; flex-direction: column; gap: 10px;
-             border: 2px solid var(--line); background: var(--bg2); padding: 10px;
-             max-height: calc(100vh - 36px); }
+  .lateral {
+    position: fixed; left: 0; top: 0; bottom: 0; width: var(--lateral); z-index: 10;
+    display: flex; flex-direction: column; gap: 10px;
+    border-right: 2px solid var(--line); background: var(--bg2); padding: 10px;
+    overflow: hidden;
+  }
+
+  /* Numa tela estreita a lateral deixa de ser fixa e vira o topo da página, e
+     não some: perder o aviso de que alguém te chamou para duelar é o pior
+     desfecho possível. */
+  @media (max-width: 880px) {
+    body { padding: 18px; }
+    .lateral { position: static; width: auto; max-height: 50vh;
+               border: 2px solid var(--line); margin-bottom: 18px; }
+    .home { width: 100%; }
+  }
 
   .cartao { border: 2px solid var(--line); background: var(--panel); padding: 10px; }
 
@@ -147,7 +163,7 @@
   /* Ícone de canto — mesmo padrão do .log-fab do duel.html: um botão
      flutuante que abre um painel, em vez de ocupar espaço fixo na tela. */
   .deck-fab {
-    position: fixed; left: 16px; bottom: 16px; z-index: 20;
+    position: fixed; left: calc(var(--lateral) + 16px); bottom: 16px; z-index: 20;
     width: 44px; height: 44px; border-radius: 50%;
     background: var(--panel); border: 2px solid var(--line);
     font-size: 20px; display: flex; align-items: center; justify-content: center;
@@ -163,7 +179,7 @@
   .deck-fab .badge.ok { background: var(--green); }
 
   .deck-popup {
-    display: none; position: fixed; left: 16px; bottom: 68px; z-index: 20;
+    display: none; position: fixed; left: calc(var(--lateral) + 16px); bottom: 68px; z-index: 20;
     width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px);
     overflow: auto; background: var(--panel); border: 2px solid var(--gold);
     padding: 14px;
@@ -183,6 +199,14 @@
   .preview .thumb:hover { border-color: var(--line); }
 
   footer { text-align: center; color: var(--dim); font-size: 10px; margin-top: 18px; }
+
+  /* Sem lateral fixa, o botao do deck volta para o canto da janela. Esta media
+     query fica no FIM de proposito: vindo antes da regra de .deck-fab, ela
+     perderia na cascata (mesma especificidade) e o botao ficaria deslocado
+     numa tela onde nao ha lateral nenhuma para desviar. */
+  @media (max-width: 880px) {
+    .deck-fab, .deck-popup { left: 16px; }
+  }
 </style>
 </head>
 <body>

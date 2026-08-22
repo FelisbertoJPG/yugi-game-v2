@@ -20,11 +20,29 @@ import { req, sessao } from '/web/js/supabase.js';
 // quem já pedia `paraYdk`/`deYdk` a este módulo continuar funcionando.
 export { paraYdk, deYdk, gavetasDoDeck, totalDoDeck } from './ydk.js';
 
-/** `[{id, nome, preco, capa, ydk, na_loja, ordem}]`, na ordem da vitrine. */
-export async function listarEstruturais({ soLoja = false } = {}) {
+/**
+ * O mesmo que {@link listarEstruturais}, mas dizendo se a leitura
+ * ALCANÇOU o banco: `{ok, decks, erro}`.
+ *
+ * A diferença importa para quem usa os estruturais como FONTE DE RARIDADE (o
+ * [definir rápido] do pool de drop): `listarEstruturais` devolve `[]` tanto
+ * quando não há estrutural nenhum quanto quando a rede caiu, e as duas coisas
+ * não são a mesma. Tratar a falha como "nenhum" faria a carta que só existe em
+ * estrutural sumir do preenchimento em silêncio — e um pool cheio parece certo.
+ *
+ * É a mesma distinção que `pullFileEx` já faz (o `alcancou`): cópia local nunca
+ * vence a nuvem, e "não sei" nunca vira "não tem".
+ */
+export async function listarEstruturaisEx({ soLoja = false } = {}) {
   const filtro = soLoja ? '&na_loja=eq.true' : '';
   const r = await req(`decks_estruturais?select=*${filtro}&order=ordem,nome`);
-  return r.ok && Array.isArray(r.dados) ? r.dados : [];
+  if (r.ok && Array.isArray(r.dados)) return { ok: true, decks: r.dados, erro: null };
+  return { ok: false, decks: [], erro: r.error ?? 'sem conexao' };
+}
+
+/** `[{id, nome, preco, capa, ydk, na_loja, ordem}]`, na ordem da vitrine. */
+export async function listarEstruturais({ soLoja = false } = {}) {
+  return (await listarEstruturaisEx({ soLoja })).decks;
 }
 
 /** Ids dos estruturais que ESTA conta já comprou (a Loja marca "adquirido"). */

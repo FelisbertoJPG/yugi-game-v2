@@ -21,9 +21,13 @@ import {
 } from '/web/js/npcs.js';
 import { inLista1 } from '/web/js/lista1.js';
 import { hydrateCardLists } from '/web/js/cardlists.js';
+// A raridade tambem vem dos Decks Estruturais, nao so' dos boosters — a mesma
+// ordem do servidor (`raridade_da_carta`, migration 0019).
+import { listarEstruturaisEx } from '/web/js/estruturais.js';
+import { raridadesDosEstruturais } from '/web/js/ydk.js';
 import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
-import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters, reprintsOf } from '/web/js/boosters.js';
+import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import {
   carregarDrops, salvarDrops, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
   RARIDADES, MAX_DROPS, planoRapido,
@@ -95,6 +99,17 @@ let ownedMode = new URLSearchParams(location.search).get('owned') === '1';
 // Raridade das cartas (dos boosters). Estável durante a sessão do builder, então
 // calculo uma vez no boot.
 let rarIdx = new Map();
+
+// A OUTRA fonte de raridade: os Decks Estruturais, cada um com o seu mapa
+// (`decks_estruturais.raridades`). É ela que dá raridade à carta que nunca
+// entrou em pacote nenhum, e é a mesma ordem que o servidor segue —
+// booster primeiro, estrutural depois (`raridade_da_carta`, migration 0019).
+//
+// `null` enquanto não foi lido, e `null` se a leitura FALHOU: as duas coisas
+// significam "não sei", e o [definir rápido] se recusa a rodar sem saber. Um
+// preenchimento que ignora os estruturais em silêncio deixaria de fora
+// justamente as cartas que só existem neles — e um pool cheio parece certo.
+let rarEstrutural = null;
 
 /**
  * Gravar no banco SEM a conferência de Coleção (`p_livre` de `salvar_deck`).
@@ -438,16 +453,30 @@ function atualizaAlvoDeClique() {
 }
 
 /**
- * A raridade que os BOOSTERS dão para esta carta — a mesma fonte que a Loja usa
- * (`rarityIndex`, e no servidor `raridade_da_carta`). Carta que não está em
- * booster nenhum é N.
+ * **A raridade da carta, na MESMA ordem do servidor**: o booster primeiro, o
+ * Deck Estrutural depois (`raridade_da_carta`, migration 0019). `null` quando
+ * ela não está em nenhum dos dois — e aí ela não tem raridade nenhuma, o que é
+ * diferente de ser N.
  *
- * Aqui ela é só uma SUGESTÃO: ao arrastar, o quadro correspondente se destaca.
+ * Inverter a ordem, ou parar no booster, faz a mesma carta valer uma coisa aqui
+ * e outra na venda do Inventário — cada tela "certa" pela sua conta, e nada
+ * acusa. É por isso que a fonte é uma só, e não um `reprintsOf` solto em cada
+ * lugar que precisa de raridade.
+ */
+function raridadeReal(id) {
+  id = Number(id);
+  return rarIdx.get(id)?.rarity ?? rarEstrutural?.get(id) ?? null;
+}
+
+/**
+ * A raridade para a SUGESTÃO de arrasto: ao arrastar, o quadro correspondente
+ * se destaca. Sem raridade em lugar nenhum, sugere N.
+ *
  * Quem manda é o quadro em que a carta foi solta, porque é a gaveta gravada que
  * o servidor lê no sorteio (`premiar_vitoria`) — o mesmo adversário pode querer
  * largar uma Normal como prêmio raro, e o contrário também.
  */
-const raridadeDe = (id) => reprintsOf(Number(id))?.rarity ?? 'N';
+const raridadeDe = (id) => raridadeReal(id) ?? 'N';
 
 /** Em qual quadro esta carta está, ou `null`. */
 function raridadeNoPool(id) {
@@ -497,22 +526,25 @@ function porNoQuadro(id, rar) {
  * A regra mora em `planoRapido` (drops.js), com teste, porque cada uma das
  * decisões dela erra em silêncio — carta sem raridade ficando de fora, a carta
  * já posta à mão numa gaveta diferente não sendo mexida, e a cópia repetida
- * contando uma vez só. Aqui fica só o que é da TELA: a raridade vem dos
- * boosters e o relato diz o que entrou E o que ficou de fora, que é a metade
- * que ninguém confere carta por carta depois.
+ * contando uma vez só. Aqui fica só o que é da TELA: a raridade sai de
+ * `raridadeReal` (booster e estrutural, na ordem do servidor) e o relato diz o
+ * que entrou E o que ficou de fora — a metade que ninguém confere carta por
+ * carta depois.
  */
 function definirRapido() {
-  // O índice UMA vez: `rarityOf` reconstrói o mapa de todos os boosters a cada
-  // chamada, e aqui são dezenas de cartas.
-  const idx = rarityIndex();
-  const plano = planoRapido(
-    [...deck.main, ...deck.extra], dropPool,
-    (id) => idx.get(Number(id))?.rarity ?? null,
-  );
+  // Sem os estruturais lidos, ficariam de fora justamente as cartas que só
+  // existem neles — e o pool cheio pareceria certo. Não sabendo, não faz.
+  if (!rarEstrutural) {
+    return void toast('nao consegui ler os decks estruturais, e sem eles o '
+                    + 'preenchimento sairia incompleto — recarregue a pagina');
+  }
+
+  const plano = planoRapido([...deck.main, ...deck.extra], dropPool, raridadeReal);
 
   if (!plano.total) {
     return void toast(plano.semRaridade.length
-      ? `nenhuma carta nova: as ${plano.semRaridade.length} de fora nao estao em booster nenhum`
+      ? `nenhuma carta nova: as ${plano.semRaridade.length} de fora nao tem raridade `
+        + 'em booster nem em estrutural'
       : 'nenhuma carta nova para o pool — o deck ja esta todo nos quadros');
   }
 
@@ -1601,6 +1633,16 @@ if (npc) {
   // pool do NPC como reserva para o deck que ainda nao tem o seu. Falha de rede
   // nao derruba o builder — so' deixa o pool vazio, e o aviso aparece ao salvar.
   try { dropsCfg = await carregarDrops(); } catch { dropsCfg = {}; }
+
+  // A SEGUNDA fonte de raridade. Precisa vir do banco: os estruturais não têm
+  // espelho em `store/`, e é neles que mora a raridade da carta que nunca
+  // entrou em booster. Falha de rede deixa `rarEstrutural` em `null`, e o
+  // [definir rápido] se recusa a rodar sem saber — em vez de preencher pela
+  // metade e parecer certo.
+  try {
+    const r = await listarEstruturaisEx();
+    rarEstrutural = r.ok ? raridadesDosEstruturais(r.decks) : null;
+  } catch { rarEstrutural = null; }
   nomeDoDropAntigo = slot?.name ?? null;
   const meuDrop = dropsDoDeck(dropsCfg, npcId, nomeDoDropAntigo);
   dropPool = meuDrop ? meuDrop.pool : poolVazio();

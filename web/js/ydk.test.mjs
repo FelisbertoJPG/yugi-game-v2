@@ -13,7 +13,8 @@
  *     aparecer UR na Loja e ser vendida como N no Inventário, cada tela
  *     "certa" pela sua conta.
  */
-import { paraYdk, deYdk, gavetasDoDeck, totalDoDeck, gavetasVazias, RARIDADES } from './ydk.js';
+import { paraYdk, deYdk, gavetasDoDeck, totalDoDeck, gavetasVazias, RARIDADES,
+         raridadesDosEstruturais } from './ydk.js';
 
 let ok = 0, fail = 0;
 const eq = (o, e, what) => {
@@ -80,6 +81,40 @@ const grande = deYdk(paraYdk({ 100: 3, 200: 3, 300: 2, 400: 1 }));
 const pool = gavetasDoDeck(grande, { 300: 'R' }, (id) => (String(id) === '100' ? 'UR' : null));
 t(RARIDADES.reduce((n, r) => n + pool[r].length, 0) === Object.keys(grande).length,
   'toda carta distinta do deck aparece em exatamente uma gaveta');
+
+
+// ------------------------------------------ raridade vinda dos ESTRUTURAIS
+// O booster nao e' a unica fonte: um Deck Estrutural carrega o proprio mapa, e
+// e' ele que da' raridade a' carta que nunca entrou em pacote nenhum. Errar
+// aqui e' calado — a carta some do preenchimento automatico e do preco.
+{
+  const A = { nome: 'Dragoes', raridades: { 100: 'UR', 200: 'R' } };
+  const B = { nome: 'Insetos', raridades: { 200: 'SR', 300: 'N' } };
+
+  const m = raridadesDosEstruturais([A, B]);
+  t(m.get(100) === 'UR', 'carta de um estrutural entra com a raridade dela');
+  t(m.get(300) === 'N', '...inclusive a N, que existe de proposito');
+  // A MESMA regra do rarityIndex dos boosters e do `order by` da migration
+  // 0019: sem ela a carta valeria uma coisa na tela e outra na venda.
+  t(m.get(200) === 'SR', 'em dois estruturais, a MAIOR raridade vence');
+
+  t(raridadesDosEstruturais([B, A]).get(200) === 'SR',
+    '...independente da ordem em que os estruturais vieram');
+
+  t(m.get(999) === undefined, 'carta fora de todo estrutural nao entra no mapa');
+  t(m.size === 3, 'o mapa tem so as cartas que algum estrutural lista');
+
+  t(raridadesDosEstruturais([]).size === 0, 'lista vazia da mapa vazio');
+  for (const lixo of [null, undefined, 'x', 42, [null], [{}], [{ raridades: null }]])
+    t(raridadesDosEstruturais(lixo).size === 0, `lixo (${JSON.stringify(lixo)}) nao derruba nada`);
+
+  // Uma raridade que as gavetas nao conhecem e' o mesmo que nao ter raridade:
+  // o pool de drop e o preco leem a GAVETA, e 'UT' nao existe em nenhum dos
+  // dois. Aceita-la poria a carta num quadro que ninguem sorteia.
+  const torto = raridadesDosEstruturais([{ raridades: { 10: 'UT', 11: '', 12: 'SR', x: 'UR', 0: 'UR' } }]);
+  t(torto.size === 1, 'raridade fora das quatro (e id invalido) sao ignorados');
+  t(torto.get(12) === 'SR', '...e a carta boa do mesmo deck continua entrando');
+}
 
 console.log(`\n=== ${ok} passaram, ${fail} falharam ===`);
 process.exit(fail === 0 ? 0 : 1);

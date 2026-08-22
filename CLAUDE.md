@@ -96,7 +96,7 @@ node web/js/pacote.test.mjs  # 19 testes da CHANCE que a Loja promete em cada
                              # daria 3,8% onde o sorteio da' 4,2%: a tela
                              # prometeria o que o servidor nao cumpre, e nada
                              # acusaria
-node web/js/ydk.test.mjs     # 19 testes do formato .ydk e das gavetas de um
+node web/js/ydk.test.mjs     # 35 testes do formato .ydk e das gavetas de um
                              # DECK (o "ver as cartas" de um Deck Estrutural na
                              # Loja). Ler o .ydk errado nao da' erro nenhum:
                              # devolve um deck com cartas a menos, ou com o
@@ -552,19 +552,32 @@ que faz sentido é o do baralho que o jogador acabou de enfrentar) e montá-lo �
 mão são 40 a 60 cliques. A regra mora em `planoRapido` (`drops.js`), sem DOM e
 com teste, porque as três decisões dela erram **caladas**:
 
-> **carta sem raridade fica de FORA.** Quem dá raridade é o booster (`rarityOf`,
-> a mesma fonte da Loja e do `raridade_da_carta` no servidor). Jogá-la em N
-> "para não perder" despejaria o deck inteiro no pool — e um pool cheio parece
-> certo. **Carta já no pool não é mexida**, nem para a gaveta do booster: ela
-> pode ter sido posta à mão numa gaveta diferente de propósito, que é o que
-> deixa um adversário largar uma Normal como prêmio raro. E **cópia repetida
-> conta uma vez**: o sorteio é uniforme dentro da gaveta, então três cópias da
-> mesma carta roubariam a chance das outras.
+> **carta sem raridade fica de FORA.** Quem dá raridade são **duas** fontes, na
+> mesma ordem do servidor (`raridade_da_carta`, migration 0019): o **booster**
+> primeiro (`rarityIndex`) e o **Deck Estrutural** depois
+> (`decks_estruturais.raridades`, juntados por `raridadesDosEstruturais` em
+> `ydk.js` — a maior vence quando dois listam a mesma carta). Parar no booster
+> deixaria de fora justamente a carta que só existe em estrutural, e hoje são
+> **36** delas. Jogar a sem-raridade em N "para não perder" faria o oposto:
+> despejaria o deck inteiro no pool — e um pool cheio parece certo.
+> **Carta já no pool não é mexida**, nem para a gaveta do booster: ela pode ter
+> sido posta à mão numa gaveta diferente de propósito, que é o que deixa um
+> adversário largar uma Normal como prêmio raro. E **cópia repetida conta uma
+> vez**: o sorteio é uniforme dentro da gaveta, então três cópias da mesma carta
+> roubariam a chance das outras.
 
 O toast diz o que entrou por gaveta **e o que ficou de fora** — a segunda metade
 é a que ninguém confere carta por carta depois.
 
-A raridade dos boosters (`reprintsOf`) virou **sugestão**: o quadro
+> **Sem conseguir ler os estruturais, o botão se recusa a rodar.** Eles vêm do
+> banco (não têm espelho em `store/`), e `listarEstruturais` devolvia `[]` tanto
+> para "não há nenhum" quanto para "a rede caiu" — tratar a segunda como a
+> primeira faria o preenchimento sair pela metade, calado. Por isso existe
+> `listarEstruturaisEx`, que diz se a leitura **alcançou** o banco: a mesma
+> distinção do `alcancou` de `pullFileEx`. "Não sei" nunca vira "não tem".
+
+A raridade (booster e estrutural, por `raridadeReal` no builder) virou
+**sugestão**: o quadro
 correspondente se destaca durante o arrasto, mas quem manda é onde a carta foi
 solta — o servidor lê a gaveta gravada, sem reconsultar booster nenhum. É o que
 deixa um adversário largar um Normal como prêmio raro sem mexer na Loja.

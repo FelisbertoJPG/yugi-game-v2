@@ -68,6 +68,38 @@ export function gavetasDoDeck(quantidades, raridades = {}, doBooster = () => nul
   return pool;
 }
 
+/**
+ * **Mapa `id → raridade` juntando TODOS os Decks Estruturais publicados.**
+ *
+ * O booster não é a única fonte de raridade: um Deck Estrutural carrega o seu
+ * próprio mapa (`decks_estruturais.raridades`), e é ele que dá raridade à carta
+ * que nunca entrou em pacote nenhum. Quem lê os dois é o servidor, nesta ordem
+ * — booster primeiro, estrutural depois (`raridade_da_carta`, migration 0019).
+ *
+ * Quando dois estruturais listam a mesma carta em raridades diferentes, vence a
+ * **MAIOR**, que é o mesmo critério do `rarityIndex` dos boosters e o do
+ * `order by` daquela função. Sem isso a carta valeria uma coisa na tela e outra
+ * na venda, cada uma certa pela sua conta.
+ *
+ * Aqui porque é puro: `estruturais.js` fala com o Supabase e não roda em Node.
+ *
+ * @param {Array<{raridades?: object}>} estruturais  o que `listarEstruturais()` devolve
+ * @returns {Map<number, string>}
+ */
+export function raridadesDosEstruturais(estruturais) {
+  const mapa = new Map();
+  for (const deck of Array.isArray(estruturais) ? estruturais : []) {
+    for (const [cru, r] of Object.entries(deck?.raridades ?? {})) {
+      const id = Number(cru);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      if (!RARIDADES.includes(r)) continue;
+      const atual = mapa.get(id);
+      if (!atual || RARIDADES.indexOf(r) < RARIDADES.indexOf(atual)) mapa.set(id, r);
+    }
+  }
+  return mapa;
+}
+
 /** Quantas cartas o deck tem no total (contando as cópias). */
 export function totalDoDeck(quantidades) {
   return Object.values(quantidades ?? {}).reduce((a, b) => a + b, 0);

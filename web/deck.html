@@ -388,11 +388,12 @@
         <span class="n" id="drop-count" style="color:var(--ink)">0</span>
         <span class="spacer"></span>
         <!-- Enche o pool com as cartas DESTE deck que ja tem raridade (a dos
-             BOOSTERS, a mesma fonte da Loja e do servidor). Carta que nao esta
-             em booster nenhum fica de fora, e carta ja posta a mao num quadro
-             nao e mexida — a regra inteira esta em planoRapido(), com teste. -->
+             BOOSTERS e a dos DECKS ESTRUTURAIS, nesta ordem — a mesma do
+             servidor, raridade_da_carta). Carta sem raridade em nenhum dos dois
+             fica de fora, e carta ja posta a mao num quadro nao e mexida: a
+             regra inteira esta em planoRapido(), com teste. -->
         <button type="button" id="drop-rapido"
-                title="pega as cartas deste deck que ja tem raridade e as poe na gaveta de cada uma&#10;as sem raridade ficam de fora, e o que ja esta nos quadros nao e mexido">
+                title="pega as cartas deste deck que ja tem raridade (booster ou deck estrutural) e as poe na gaveta de cada uma&#10;as sem raridade nenhuma ficam de fora, e o que ja esta nos quadros nao e mexido">
           definir rápido
         </button>
         <label style="display:flex; gap:5px; align-items:center"
@@ -409,7 +410,8 @@
           quadro para tirá-la; arraste-a para outro quadro para trocar a raridade
           dela. Nada disto mexe no deck.
           <br><b>definir rápido</b> enche os quadros de uma vez com as cartas
-          <i>deste deck</i> que já têm raridade nos boosters — as sem raridade
+          <i>deste deck</i> que já têm raridade (num booster ou num Deck
+          Estrutural) — as sem raridade nenhuma
           ficam de fora, e o que você já pôs à mão num quadro não é mexido.
         </p>
         <div id="drop-buckets"></div>

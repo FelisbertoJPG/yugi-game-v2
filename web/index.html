@@ -7,30 +7,142 @@
 <link rel="icon" href="/web/img/icone.png">
 <link rel="stylesheet" href="/web/css/ui.css">
 <style>
+  /* A home passou a ter DUAS colunas: a lateral social (perfil, amigos,
+     notificações) e o menu de sempre. A lateral é a coluna fixa porque ela é
+     um painel de estado — quem está online, quem te chamou — e não uma lista
+     que cresce; o menu é o que muda de tamanho conforme o jogo ganha telas. */
   body {
-    display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: center; justify-content: center; padding: 18px;
     background: radial-gradient(ellipse at 50% 0%, #1b2438 0%, var(--bg) 60%);
   }
-  .home { width: min(760px, 94vw); }
+  .home { width: min(1060px, 96vw); display: grid; gap: 18px;
+          grid-template-columns: 280px 1fr; align-items: start; }
+  /* Numa tela estreita a lateral vai para cima do menu, e não some: perder o
+     aviso de que alguém te chamou para duelar é o pior desfecho possível. */
+  @media (max-width: 880px) { .home { grid-template-columns: 1fr; } }
 
+  /* ------------------------------------------------------------- lateral */
+  .lateral { display: flex; flex-direction: column; gap: 10px;
+             border: 2px solid var(--line); background: var(--bg2); padding: 10px;
+             max-height: calc(100vh - 36px); }
+
+  .cartao { border: 2px solid var(--line); background: var(--panel); padding: 10px; }
+
+  .eu { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%; flex: none;
+    border: 2px solid var(--line2); background: var(--panel2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; color: var(--gold);
+  }
+  .eu .quem { min-width: 0; flex: 1; }
+  .eu .nome { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .eu .etiqueta { color: var(--gold); font-size: 11px; }
+  .eu .dp { font-size: 12px; color: var(--gold); letter-spacing: 1px; margin-top: 2px; }
+
+  /* O pontinho de presença. Verde/vermelho é a leitura instantânea, mas quem
+     não distingue as duas cores ainda tem o texto ONLINE/OFFLINE ao lado —
+     cor sozinha nunca carrega a informação. */
+  .ponto { width: 9px; height: 9px; border-radius: 50%; flex: none;
+           background: var(--red); box-shadow: 0 0 0 1px #0006; }
+  .ponto.on { background: var(--green); }
+
+  .amigos-topo { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .amigos-topo h2 { margin: 0; font-size: 10px; letter-spacing: 2px; color: var(--dim); font-weight: normal; }
+  .amigos-topo .n { margin-left: auto; font-size: 10px; color: var(--dim); }
+
+  .amigos { flex: 1; min-height: 90px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .amigo {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 7px 9px; background: var(--panel2); border: 1px solid var(--line);
+  }
+  .amigo:hover:not(:disabled) { border-color: var(--gold); }
+  .amigo .mini { width: 26px; height: 26px; border-radius: 50%; flex: none;
+                 border: 1px solid var(--line2); background: var(--panel);
+                 display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--dim); }
+  .amigo .nome { flex: 1; min-width: 0; font-size: 11px; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+  .amigo .estado { font-size: 9px; letter-spacing: 1px; color: var(--dim); }
+  .amigo.on .estado { color: var(--green); }
+  /* Offline continua VISÍVEL, só apagado: sumir com o amigo quando ele fecha o
+     jogo faria a lista dançar sozinha e esconderia quem você tem. */
+  .amigo:disabled { opacity: .55; }
+
+  .vazio { font-size: 10px; color: var(--dim); line-height: 1.6; padding: 6px 2px; }
+
+  /* Notificações: o botão fica no PÉ da lateral, como no desenho. Ele pisca
+     quando chega coisa nova e mostra a contagem. */
+  .notif-btn { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+               padding: 11px 12px; background: var(--panel); border: 2px solid var(--line); }
+  .notif-btn:hover:not(:disabled) { border-color: var(--gold); }
+  .notif-btn .txt { flex: 1; font-size: 10px; letter-spacing: 1px; color: var(--dim); }
+  .notif-btn .cont { font-size: 11px; font-weight: bold; color: var(--bg); background: var(--dim);
+                     border-radius: 9px; padding: 1px 7px; }
+  .notif-btn.tem { border-color: var(--gold); animation: pulsa 1.6s ease-in-out infinite; }
+  .notif-btn.tem .txt { color: var(--ink); }
+  .notif-btn.tem .cont { background: var(--red); color: #fff; }
+  @keyframes pulsa { 0%, 100% { box-shadow: 0 0 0 0 #e8c46a55; } 50% { box-shadow: 0 0 0 5px #e8c46a00; } }
+  @media (prefers-reduced-motion: reduce) { .notif-btn.tem { animation: none; } }
+
+  /* ------------------------------------------------------------- conteúdo */
   .topline { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .topline .spacer { flex: 1; }
-  .dp {
-    font-size: 14px; color: var(--gold); font-weight: bold;
-    border: 1px solid var(--gold); padding: 3px 10px; letter-spacing: 1px;
-  }
-  .test-link {
-    font-size: 11px; color: var(--dim); border: 1px solid var(--line);
-    padding: 4px 10px; background: var(--panel);
-  }
+  .test-link { font-size: 11px; color: var(--dim); border: 1px solid var(--line);
+               padding: 4px 10px; background: var(--panel); }
   .test-link:hover { color: var(--ink); border-color: var(--dim); }
+
+  /* Quantas pessoas estão no jogo agora. Canto superior direito, como pedido. */
+  .online-agora { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim);
+                  border: 1px solid var(--line); background: var(--panel); padding: 4px 10px; }
+  .online-agora b { color: var(--green); }
+  /* O pontinho de "ao vivo" só some quando o canal cai — e aí o número continua
+     certo, só demora mais a mudar. É informação, não alarme. */
+  .online-agora .vivo { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .online-agora.frio .vivo { background: var(--dim); }
 
   .title { text-align: center; margin-bottom: 22px; border-bottom: 2px solid var(--line); padding-bottom: 16px; }
   .title h1 { margin: 0; font-size: 30px; letter-spacing: 5px; color: var(--gold); text-shadow: 0 2px 0 #0008; }
   .title p { margin: 6px 0 0; color: var(--dim); font-size: 11px; letter-spacing: 2px; }
 
-  .slot { background: var(--panel); border: 2px solid var(--line); padding: 14px; margin-bottom: 16px; }
-  .slot h2 { margin: 0 0 10px; font-size: 11px; letter-spacing: 2px; color: var(--dim); font-weight: normal; }
+  .menu { display: grid; gap: 9px; }
+  .menu button {
+    text-align: left; padding: 15px 16px; font-size: 15px;
+    background: var(--panel); border: 2px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  .menu button:hover:not(:disabled) { background: var(--panel2); }
+  .menu .k { color: var(--gold); font-weight: bold; min-width: 18px; }
+  .menu .why { margin-left: auto; font-size: 10px; color: var(--dim); }
+
+  /* ---------------------------------------------------- cartão de aviso */
+  .fundo { display: none; position: fixed; inset: 0; z-index: 30;
+           background: #060810cc; align-items: center; justify-content: center; padding: 18px; }
+  .fundo.show { display: flex; }
+  .cartaz { width: min(440px, 96vw); background: var(--panel); border: 2px solid var(--gold); padding: 18px; }
+  .cartaz h2 { margin: 0 0 4px; font-size: 13px; letter-spacing: 2px; color: var(--gold); }
+  .cartaz .sub { font-size: 10px; color: var(--dim); margin-bottom: 14px; }
+  .aviso-lista { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; }
+  .aviso {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 11px 12px; background: var(--panel2); border: 1px solid var(--line);
+  }
+  .aviso:hover { border-color: var(--gold); }
+  .aviso .icone { font-size: 16px; }
+  .aviso .txt { flex: 1; min-width: 0; font-size: 12px; }
+  .aviso .txt b { color: var(--gold); }
+  .aviso .tipo { font-size: 9px; letter-spacing: 1px; color: var(--dim); display: block; margin-top: 2px; }
+
+  .detalhe { border: 1px solid var(--line); background: var(--panel2); padding: 14px; }
+  .detalhe .frase { font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+  .detalhe .frase b { color: var(--gold); }
+  .detalhe .campo { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 11px; color: var(--dim); }
+  .detalhe .campo select { flex: 1; min-width: 0; }
+  .botoes { display: flex; gap: 8px; }
+  .botoes button { flex: 1; padding: 9px; }
+  .botoes .aceitar { border-color: var(--green); color: var(--green); }
+  .botoes .recusar { border-color: var(--line2); color: var(--dim); }
+  .erro { font-size: 11px; color: var(--red); margin-top: 10px; min-height: 15px; }
 
   /* Ícone de canto — mesmo padrão do .log-fab do duel.html: um botão
      flutuante que abre um painel, em vez de ocupar espaço fixo na tela. */
@@ -66,16 +178,6 @@
   .pill.ok  { color: var(--green); border-color: var(--green); }
   .pill.err { color: var(--red);   border-color: var(--red); }
 
-  .menu { display: grid; gap: 9px; }
-  .menu button {
-    text-align: left; padding: 15px 16px; font-size: 15px;
-    background: var(--panel); border: 2px solid var(--line);
-    display: flex; align-items: baseline; gap: 12px;
-  }
-  .menu button:hover:not(:disabled) { background: var(--panel2); }
-  .menu .k { color: var(--gold); font-weight: bold; min-width: 18px; }
-  .menu .why { margin-left: auto; font-size: 10px; color: var(--dim); }
-
   .preview { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; margin-top: 12px; }
   .preview .thumb { cursor: default; }
   .preview .thumb:hover { border-color: var(--line); }
@@ -85,48 +187,99 @@
 </head>
 <body>
 <div class="home">
-  <div class="topline">
-    <span class="dp" id="dp">— DP</span>
-    <span class="muted" id="user-tag"></span>
-    <span class="spacer"></span>
-    <button class="test-link" id="btn-logout">sair</button>
-    <button class="test-link" id="btn-test">⚙ Área de Teste</button>
-  </div>
 
-  <div class="title">
-    <h1>CLASSIC DUELS</h1>
-    <p>YUGI GAME V2</p>
-  </div>
+  <!-- ============================================================ LATERAL -->
+  <aside class="lateral">
+    <div class="cartao">
+      <div class="eu">
+        <div class="avatar">🂠</div>
+        <div class="quem">
+          <div class="nome">
+            <span id="eu-nome">…</span>
+            <span class="etiqueta" id="eu-etiqueta"></span>
+            <span class="ponto on" title="você está online"></span>
+          </div>
+          <div class="dp" id="dp">— DP</div>
+        </div>
+      </div>
+    </div>
 
-  <div class="menu">
-    <button id="btn-shop">
-      <span class="k">1</span>
-      <span>Loja</span>
-      <span class="why">comprar boosters (100 DP · 5 cartas)</span>
-    </button>
-    <button id="btn-deck">
-      <span class="k">2</span>
-      <span>Deck Builder</span>
-      <span class="why">montar deck com as cartas da sua Coleção</span>
-    </button>
-    <button id="btn-inv">
-      <span class="k">3</span>
-      <span>Inventário</span>
-      <span class="why">suas cartas e decks · vender cópias por DP</span>
-    </button>
-    <button id="btn-adv">
-      <span class="k">4</span>
-      <span>Trilha de Duelos</span>
-      <span class="why">a campanha em trilha · cada vitória libera o próximo adversário</span>
-    </button>
-    <button id="btn-mp">
-      <span class="k">5</span>
-      <span>Multiplayer</span>
-      <span class="why">duele com uma pessoa · amigos, convite e desafio de 1 clique</span>
-    </button>
-  </div>
+    <div class="cartao" style="display:flex; flex-direction:column; flex:1; min-height:0">
+      <div class="amigos-topo">
+        <h2>AMIGOS</h2>
+        <span class="n" id="amigos-n"></span>
+      </div>
+      <div class="amigos" id="amigos">
+        <div class="vazio">carregando…</div>
+      </div>
+    </div>
 
-  <footer id="foot">carregando…</footer>
+    <button class="notif-btn" id="btn-notif">
+      <span class="txt">SOLICITAÇÕES<br>NOTIFICAÇÃO</span>
+      <span class="cont" id="notif-n">0</span>
+    </button>
+  </aside>
+
+  <!-- =========================================================== CONTEÚDO -->
+  <main>
+    <div class="topline">
+      <span class="muted" id="user-tag"></span>
+      <span class="spacer"></span>
+      <span class="online-agora frio" id="online-agora" title="jogadores vistos nos últimos 2 minutos">
+        <span class="vivo"></span> <b id="online-n">—</b> online
+      </span>
+      <button class="test-link" id="btn-logout">sair</button>
+      <button class="test-link" id="btn-test">⚙ Área de Teste</button>
+    </div>
+
+    <div class="title">
+      <h1>CLASSIC DUELS</h1>
+      <p>YUGI GAME V2</p>
+    </div>
+
+    <div class="menu">
+      <button id="btn-shop">
+        <span class="k">1</span>
+        <span>Loja</span>
+        <span class="why">comprar boosters (100 DP · 5 cartas)</span>
+      </button>
+      <button id="btn-deck">
+        <span class="k">2</span>
+        <span>Deck Builder</span>
+        <span class="why">montar deck com as cartas da sua Coleção</span>
+      </button>
+      <button id="btn-inv">
+        <span class="k">3</span>
+        <span>Inventário</span>
+        <span class="why">suas cartas e decks · vender cópias por DP</span>
+      </button>
+      <button id="btn-adv">
+        <span class="k">4</span>
+        <span>Trilha de Duelos</span>
+        <span class="why">a campanha em trilha · cada vitória libera o próximo adversário</span>
+      </button>
+      <button id="btn-mp">
+        <span class="k">5</span>
+        <span>Multiplayer</span>
+        <span class="why">duele com uma pessoa · amigos, convite e desafio de 1 clique</span>
+      </button>
+    </div>
+
+    <footer id="foot">carregando…</footer>
+  </main>
+</div>
+
+<!-- O cartão que abre ao clicar numa notificação (ou no botão da lateral). -->
+<div class="fundo" id="fundo">
+  <div class="cartaz" id="cartaz">
+    <h2 id="cartaz-titulo">NOTIFICAÇÕES</h2>
+    <p class="sub" id="cartaz-sub">o que está esperando a sua resposta</p>
+    <div id="cartaz-corpo"></div>
+    <div class="erro" id="cartaz-erro"></div>
+    <div class="botoes" style="margin-top:12px">
+      <button class="recusar" id="btn-fechar">fechar</button>
+    </div>
+  </div>
 </div>
 
 <button class="deck-fab" id="btn-deck-fab" title="deck atual">
@@ -146,6 +299,9 @@ import { getActiveDeck, listDecks, hydrateDecks } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
 import { getDP, totalCards, hydrateWallet } from '/web/js/wallet.js';
 import { requireLogin, logout, desviarParaRecuperacao } from '/web/js/auth.js';
+import { meuPerfil, amigos as listarAmigos, desafiar, meusDecks } from '/web/js/multiplayer.js';
+import { vigiar, aceitar, recusar } from '/web/js/notificacoesvivo.js';
+import { baterPonto } from '/web/js/presenca.js';
 
 // A Site URL do projeto aponta para a raiz, entao um link de recuperacao que o
 // Supabase nao redirecionou para recuperar.html cai AQUI. Precisa vir antes do
@@ -164,6 +320,15 @@ await hydrateDecks();    // e os decks de decks/users/<u>/player/*.ydk
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 
+const toast = (t) => {
+  const el = $('toast');
+  el.textContent = t;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 2600);
+};
+
+// ------------------------------------------------------------------ deck
 function render() {
   $('dp').textContent = `${getDP()} DP`;
   const deck = getActiveDeck();
@@ -214,7 +379,9 @@ document.addEventListener('click', (e) => {
   if (popup.classList.contains('show') && !popup.contains(e.target)) popup.classList.remove('show');
 });
 
+// ------------------------------------------------------------- navegação
 $('user-tag').textContent = username;
+$('eu-nome').textContent = username;
 $('btn-logout').onclick = async () => { await logout(); location.href = '/web/login.html'; };
 
 $('btn-shop').onclick = () => (location.href = '/web/loja.html');
@@ -225,12 +392,266 @@ $('btn-mp').onclick = () => (location.href = '/web/multiplayer.html');
 $('btn-test').onclick = () => (location.href = '/web/teste.html');
 
 document.addEventListener('keydown', (e) => {
+  // Com o cartão aberto, os números seriam atalhos para SAIR da tela em cima de
+  // um convite com prazo. Esc fecha; o resto espera.
+  if ($('fundo').classList.contains('show')) {
+    if (e.key === 'Escape') fecharCartaz();
+    return;
+  }
   if (e.key === '1') $('btn-shop').click();
   if (e.key === '2') $('btn-deck').click();
   if (e.key === '3') $('btn-inv').click();
   if (e.key === '4') $('btn-adv').click();
   if (e.key === '5') $('btn-mp').click();
 });
+
+// ------------------------------------------------------------- presença
+// O contador do canto e o meu próprio "estou vivo" saem da MESMA chamada
+// (`bater_ponto`): a home precisa dos dois, e separá-los seria uma segunda ida
+// de rede a cada 45s para saber um número que acabou de ser calculado.
+// A classe frio NAO e mexida aqui: ela diz se o canal de tempo real esta de pe,
+// e quem sabe disso e o vigiar(). Misturar as duas faria o pontinho de ao vivo
+// acender por causa de um contador que chegou por outro caminho.
+baterPonto((n) => { $('online-n').textContent = String(n); });
+
+// --------------------------------------------------------------- amigos
+// A lista vem do banco (`meus_amigos`, migration 0034), já com `online` e já
+// ordenada — quem tem pedido pendente primeiro, depois quem está online. A
+// ordem mora lá porque esta tela e a de Multiplayer precisam concordar.
+let decksDoBanco = [];
+
+async function pintarAmigos() {
+  const r = await listarAmigos();
+  const caixa = $('amigos');
+  if (!r.ok) {
+    // Sem rede, o que já estava na tela continua valendo. Só a primeira carga
+    // mostra o aviso, porque aí não há nada para preservar.
+    if (!caixa.querySelector('.amigo')) {
+      caixa.replaceChildren(Object.assign(document.createElement('div'),
+        { className: 'vazio', textContent: 'não consegui ler a lista de amigos agora.' }));
+    }
+    return;
+  }
+
+  const lista = (r.dados ?? []).filter((a) => a.direcao === 'amigo');
+  $('amigos-n').textContent = lista.length
+    ? `${lista.filter((a) => a.online).length}/${lista.length} online` : '';
+
+  if (!lista.length) {
+    caixa.replaceChildren(Object.assign(document.createElement('div'), {
+      className: 'vazio',
+      textContent: 'nenhum amigo ainda — adicione pela etiqueta no Multiplayer.',
+    }));
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const a of lista) {
+    const b = document.createElement('button');
+    b.className = 'amigo' + (a.online ? ' on' : '');
+    // Offline não é clicável: o desafio expira em 10 minutos e chamar quem não
+    // está com o jogo aberto é gastar o convite à toa.
+    b.disabled = !a.online;
+    b.title = a.online ? `desafiar ${a.usuario} para um duelo`
+                       : `${a.usuario} está offline`;
+    b.innerHTML = `<span class="mini">🂠</span>`
+      + `<span class="nome"></span>`
+      + `<span class="estado">${a.online ? 'ONLINE' : 'OFFLINE'}</span>`
+      + `<span class="ponto${a.online ? ' on' : ''}"></span>`;
+    b.querySelector('.nome').textContent = `[${a.etiqueta}] ${a.usuario}`;
+    b.onclick = () => abrirDesafio(a);
+    frag.append(b);
+  }
+  caixa.replaceChildren(frag);
+}
+
+/** O cartão de "chamar para duelar", com a escolha do deck. */
+function abrirDesafio(amigo) {
+  const corpo = document.createElement('div');
+  corpo.className = 'detalhe';
+  corpo.innerHTML = `<div class="frase">Chamar <b></b> para um duelo.</div>`;
+  corpo.querySelector('b').textContent = `[${amigo.etiqueta}] ${amigo.usuario}`;
+  corpo.append(campoDeDeck());
+
+  const botoes = document.createElement('div');
+  botoes.className = 'botoes';
+  botoes.innerHTML = `<button class="aceitar">chamar</button><button class="recusar">voltar</button>`;
+  botoes.querySelector('.recusar').onclick = () => abrirNotificacoes();
+  botoes.querySelector('.aceitar').onclick = async (e) => {
+    const deck = corpo.querySelector('select')?.value;
+    if (!deck) return void erro('escolha um deck para chamar alguém');
+    e.target.disabled = true;
+    const r = await desafiar(amigo.id, deck);
+    e.target.disabled = false;
+    if (!r.ok) return void erro(r.erro);
+    // Vai para o MULTIPLAYER, e isto não é preguiça de fazer aqui: quem
+    // desafia precisa ser levado ao duelo no instante em que o outro aceita, e
+    // essa espera já existe lá (o pintarPartida com o aguardavaSala). Ficando na
+    // home, o convite seria aceito do outro lado e o desafiante continuaria
+    // parado olhando o menu — a falha calada de sempre. Duplicar o vaivém aqui
+    // daria dois caminhos para o mesmo estado, e eles divergiriam.
+    location.href = '/web/multiplayer.html';
+  };
+  corpo.append(botoes);
+
+  mostrarCartaz('DESAFIAR', 'ele recebe o convite na hora, na tela dele', corpo);
+}
+
+/**
+ * O seletor de deck. Vem do BANCO (`decks_jogador`), não do localStorage: é o
+ * deck do banco que a partida usa, e oferecer um nome que só existe neste
+ * navegador daria um erro do servidor no momento menos oportuno.
+ */
+function campoDeDeck() {
+  const campo = document.createElement('div');
+  campo.className = 'campo';
+  campo.innerHTML = '<span>seu deck:</span>';
+  const sel = document.createElement('select');
+  if (!decksDoBanco.length) {
+    sel.append(new Option('nenhum deck salvo no servidor', ''));
+    sel.disabled = true;
+  } else {
+    for (const n of decksDoBanco) sel.append(new Option(n, n));
+    // O deck ativo daqui costuma ser o que a pessoa quer usar; se ele existe no
+    // banco, já vem escolhido.
+    const ativo = getActiveDeck()?.name;
+    if (ativo && decksDoBanco.includes(ativo)) sel.value = ativo;
+  }
+  campo.append(sel);
+  return campo;
+}
+
+// --------------------------------------------------------- notificações
+let notificacoes = [];
+
+function mostrarCartaz(titulo, sub, corpo) {
+  $('cartaz-titulo').textContent = titulo;
+  $('cartaz-sub').textContent = sub;
+  $('cartaz-corpo').replaceChildren(corpo);
+  $('cartaz-erro').textContent = '';
+  $('fundo').classList.add('show');
+}
+
+const fecharCartaz = () => $('fundo').classList.remove('show');
+const erro = (t) => { $('cartaz-erro').textContent = t ?? 'não deu certo'; };
+
+$('btn-fechar').onclick = fecharCartaz;
+$('fundo').onclick = (e) => { if (e.target === $('fundo')) fecharCartaz(); };
+$('btn-notif').onclick = () => abrirNotificacoes();
+
+/** A LISTA de notificações. Clicar numa abre o cartão dela. */
+function abrirNotificacoes() {
+  const corpo = document.createElement('div');
+  corpo.className = 'aviso-lista';
+
+  if (!notificacoes.length) {
+    corpo.innerHTML = '<div class="vazio">nada esperando resposta agora.</div>';
+  } else {
+    for (const n of notificacoes) {
+      const b = document.createElement('button');
+      b.className = 'aviso';
+      b.innerHTML = `<span class="icone">${n.tipo === 'duelo' ? '⚔️' : '🤝'}</span>`
+        + `<span class="txt"><b></b><span class="tipo">${
+             n.tipo === 'duelo' ? 'CHAMOU VOCÊ PARA DUELAR' : 'QUER TE ADICIONAR'}</span></span>`;
+      b.querySelector('b').textContent = `[${n.quem.etiqueta}] ${n.quem.usuario}`;
+      b.onclick = () => abrirNotificacao(n);
+      corpo.append(b);
+    }
+  }
+
+  mostrarCartaz('NOTIFICAÇÕES',
+                notificacoes.length ? 'clique numa para responder' : 'o que está esperando a sua resposta',
+                corpo);
+}
+
+/** O cartão de UMA notificação: o que é, e aceitar/recusar. */
+function abrirNotificacao(n) {
+  const corpo = document.createElement('div');
+  corpo.className = 'detalhe';
+
+  const frase = document.createElement('div');
+  frase.className = 'frase';
+  frase.innerHTML = n.tipo === 'duelo'
+    ? '<b></b> chamou você para um duelo.<br><span class="muted" style="font-size:11px">'
+      + 'O convite vale por 10 minutos.</span>'
+    : '<b></b> quer te adicionar como amigo.<br><span class="muted" style="font-size:11px">'
+      + 'Aceitando, ele entra na sua lista aqui ao lado.</span>';
+  frase.querySelector('b').textContent = `[${n.quem.etiqueta}] ${n.quem.usuario}`;
+  corpo.append(frase);
+
+  // Só o duelo precisa de deck — e ele precisa ANTES de aceitar: o banco recusa
+  // um aceite sem baralho, e perguntar depois deixaria a partida de pé com um
+  // dos lados sem deck.
+  if (n.tipo === 'duelo') corpo.append(campoDeDeck());
+
+  const botoes = document.createElement('div');
+  botoes.className = 'botoes';
+  botoes.innerHTML = `<button class="aceitar">aceitar</button>`
+                   + `<button class="recusar">recusar</button>`;
+
+  botoes.querySelector('.aceitar').onclick = async (e) => {
+    e.target.disabled = true;
+    const deck = corpo.querySelector('select')?.value || null;
+    const r = await aceitar(n, deck);
+    e.target.disabled = false;
+    if (!r.ok) return void erro(r.erro);
+    if (r.ir) { location.href = r.ir; return; }
+    fecharCartaz();
+    toast(`${n.quem.usuario} agora é seu amigo`);
+    pintarAmigos();
+  };
+
+  botoes.querySelector('.recusar').onclick = async (e) => {
+    e.target.disabled = true;
+    const r = await recusar(n);
+    e.target.disabled = false;
+    if (!r.ok) return void erro(r.erro);
+    fecharCartaz();
+    toast('recusado');
+    pintarAmigos();
+  };
+
+  corpo.append(botoes);
+  mostrarCartaz(n.tipo === 'duelo' ? 'DESAFIO' : 'PEDIDO DE AMIZADE',
+                'responda aqui mesmo', corpo);
+}
+
+function pintarNotificacoes(lista, { novas, tempoReal }) {
+  notificacoes = lista;
+  const btn = $('btn-notif');
+  $('notif-n').textContent = String(lista.length);
+  btn.classList.toggle('tem', lista.length > 0);
+  $('online-agora').classList.toggle('frio', !tempoReal);
+
+  // Chegou coisa nova enquanto a pessoa olhava outra coisa: o toast diz o quê,
+  // sem roubar o clique dela. O cartão só abre por vontade de quem clica.
+  for (const n of novas ?? []) {
+    toast(n.tipo === 'duelo'
+      ? `${n.quem.usuario} chamou você para duelar`
+      : `${n.quem.usuario} quer te adicionar`);
+  }
+
+  // Um pedido de amizade aceito/recusado do outro lado muda a lista de amigos
+  // também — redesenhar aqui é o que faz o ponto verde aparecer sem F5.
+  if ((novas ?? []).length) pintarAmigos();
+}
+
+// ------------------------------------------------------------------ boot
+render();
+
+meuPerfil().then((p) => {
+  if (p?.etiqueta) $('eu-etiqueta').textContent = `[${p.etiqueta}]`;
+  if (p?.usuario) { $('eu-nome').textContent = p.usuario; $('user-tag').textContent = p.usuario; }
+});
+
+meusDecks().then((d) => { decksDoBanco = d; });
+pintarAmigos();
+vigiar(pintarNotificacoes);
+
+// A presença dos amigos expira em 2 minutos no banco, então a lista precisa ser
+// relida de tempos em tempos — o Realtime avisa de amizade nova, nunca de
+// "fulano fechou o jogo", que não é um evento: é a ausência de um.
+setInterval(pintarAmigos, 45_000);
 
 try {
   const meta = await (await fetch('/ygo-data/data/meta.json')).json();
@@ -239,8 +660,6 @@ try {
 } catch {
   $('foot').textContent = `sua Coleção: ${totalCards()} cartas`;
 }
-
-render();
 </script>
 </body>
 </html>

@@ -7,6 +7,9 @@
  */
 import { requireLogin } from '/web/js/auth.js';
 import * as mp from '/web/js/multiplayer.js';
+// Estar nesta tela conta como estar jogando: sem bater o ponto aqui, quem
+// espera um adversario aparece OFFLINE na lista de amigos e ninguem o chama.
+import { baterPonto } from '/web/js/presenca.js';
 
 const $ = (id) => document.getElementById(id);
 const texto = (s) => document.createTextNode(String(s ?? ''));
@@ -341,6 +344,8 @@ async function boot() {
   // E a minha própria sala pode fechar a qualquer momento — quando o convidado
   // aceitar, `pintarPartida` leva os dois para o duelo.
   setInterval(pintarPartida, 3000);
+
+  baterPonto();
 }
 
 boot();

@@ -111,6 +111,15 @@ node web/js/ydk.test.mjs     # 35 testes do formato .ydk e das gavetas de um
 node web/js/pendencias.test.mjs # 23 testes da fila do que ainda não subiu para a
                              # nuvem (uma pendência por chave, sempre a mais nova;
                              # sai quando o BANCO aceita — o disco não conta)
+node web/js/notificacoes.test.mjs # 21 testes das notificações da home e do
+                             # protocolo do Realtime. As duas metades erram
+                             # CALADAS: a CHAVE de uma notificação precisa ser
+                             # estável (senão o cartão aberto se fecha sozinho a
+                             # cada 15s, na cara de quem lia o convite) e única
+                             # (senão a mesma coisa aparece duas vezes e o
+                             # contador mente); e um campo do Phoenix lido do
+                             # lugar errado devolve `undefined`, o aviso não
+                             # aparece e não há erro nem no console
 npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run conteudo:check       # o que o admin editou chegou ao BANCO? (conteudo,
                              # decks de NPC e tabuleiros, disco x Supabase).
@@ -762,6 +771,83 @@ Ela é organizada só por campanha — sem lista "todos" solta — com uma seç�
 campanha" para quem ainda não tem uma definida. Em `duel.html`, o tabuleiro
 do NPC (`advNpc.board`) manda mais que o `ygo:activeBoard` global, então cada
 adversário duela sobre o próprio campo sem o jogador precisar ativar nada.
+
+### A home é social (22/08/2026)
+
+`web/index.html` deixou de ser só o menu: ganhou uma **coluna lateral** com o
+seu perfil (nome, etiqueta, DP), a **lista de amigos** com quem está online, e o
+botão de **notificações** no pé. O menu de sempre (Loja, Deck Builder,
+Inventário, Trilha, Multiplayer) e os atalhos 1–5 continuam intactos à direita,
+e o canto superior direito mostra **quantas pessoas estão jogando agora**.
+
+**Presença** (`web/js/presenca.js` + migration 0034). O mecanismo é um
+**batimento**: cada tela que conta como estar jogando — home, Multiplayer e
+duelo — chama `bater_ponto()` a cada 45s; o banco carimba `perfis.visto_em` e
+devolve, na MESMA resposta, quantos bateram dentro da janela.
+
+> **Por que carimbo de tempo, e não um booleano `online`.** Um booleano ligado no
+> login fica preso em `true` para sempre quando o navegador é fechado, a máquina
+> cai ou a rede some — não existe evento de "saiu" em que se possa confiar. Um
+> carimbo expira sozinho. E **quem decide o que é estar online é o banco**
+> (`janela_online()`, hoje 2 minutos): se o cliente decidisse, duas máquinas com
+> relógios diferentes discordariam sobre quem está online, cada uma certa pela
+> sua conta.
+
+O batimento é de 45s contra uma janela de 2 minutos de propósito: dá duas
+batidas por janela, então uma pode se perder inteira sem ninguém piscar entre
+online e offline.
+
+> `visto_em` **não vaza**: a policy de `perfis` só deixa cada um ver o próprio
+> registro, então a presença sai por dois caminhos estreitos — o booleano
+> `online` que `meus_amigos()` (security definer) devolve **dos seus amigos**, e
+> o número agregado de `bater_ponto()`. Conferido: uma conta comum autenticada
+> enxerga 1 perfil, o dela.
+
+**Notificações em tempo real** (`notificacoes.js` + `notificacoesvivo.js` +
+`realtime.js`). Desafio para duelar e pedido de amizade viram uma lista só; o
+botão da lateral mostra a contagem e pisca, e clicar abre o cartão que diz o que
+é e oferece aceitar/recusar — aceitar um duelo leva à partida, aceitar uma
+amizade põe a pessoa na lista ao lado.
+
+Chegam por **dois caminhos**, e isso não é redundância desperdiçada:
+
+- o **Realtime** do Supabase, que traz em menos de um segundo;
+- uma **consulta de reserva** a cada 15s, que garante a entrega com o socket
+  caído, o token vencido ou o serviço fora do ar. *Um push que falha calado é
+  pior que nenhum push.*
+
+O cliente de Realtime é escrito à mão sobre o `WebSocket` do navegador
+(`web/js/realtime.js`): o `@supabase/realtime-js` é um pacote npm e este front
+tem **zero dependências**. O protocolo é o do Phoenix — `phx_join` num tópico
+`realtime:*` declarando as tabelas, `heartbeat` a cada 30s, e as linhas chegando
+como `postgres_changes`. Três armadilhas, todas silenciosas:
+
+> **O RLS vale no Realtime.** O `access_token` vai no join e o servidor só
+> entrega o que aquele usuário poderia ler por `select` — é por isso que a
+> policy de `partidas` precisou enxergar o `convidado` (0012). Sem a policy, a
+> linha não chega e nada acusa.
+> **O token expira** (~1h) e o canal não renova sozinho: o socket segue aberto,
+> aparentemente saudável, e para de entregar. Por isso o `access_token` é
+> reenviado a cada batida de heartbeat.
+> **O canal só está de pé depois do `phx_reply`.** Anunciar "ligado" no `onopen`
+> desligaria a reserva cedo demais, e um join recusado passaria por conexão boa.
+
+O evento é usado só como *"algo mudou, olhe de novo"* — quem monta a lista é o
+banco, com a RLS e o prazo (`meus_desafios` só devolve os últimos 10 minutos).
+Reconstruir isso da linha crua faria a tela mostrar um desafio já expirado.
+
+> **`amizades` entrou na publicação do Realtime** (0034) e ganhou `replica
+> identity full`. Sem o `full`, o UPDATE chega sem a linha ANTIGA — "o pedido
+> foi aceito" sem dizer de quem era.
+
+**Desafiar da home leva ao Multiplayer.** Não é preguiça: quem desafia precisa
+entrar no duelo no instante em que o outro aceita, e essa espera já existe lá
+(`pintarPartida` + `aguardavaSala`). Ficando na home, o convite seria aceito do
+outro lado e o desafiante continuaria parado olhando o menu.
+
+O **amigo offline não é clicável** — o convite expira em 10 minutos e chamar
+quem está com o jogo fechado é gastá-lo à toa —, mas continua **visível**:
+sumir com ele faria a lista dançar sozinha e esconderia quem você tem.
 
 ### Mundo andável (mapa mundi + cenários) — **em standby**
 

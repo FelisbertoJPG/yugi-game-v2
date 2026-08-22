@@ -935,12 +935,17 @@ import { rotuloReposicao, estaVirada } from '/web/js/posicao.js';
 import { banir, desbanir, topoBanido, contarAbertas, LOCATION_BANIDO } from '/web/js/banimento.js';
 import { ofertasPorMao, linhasDeAtivacao, textoDoEfeito } from '/web/js/ofertas.js';
 import { geometriaDaSeta, centroDe, haloDoAlvo, mostrarCamada, esconderCamada } from '/web/js/setaataque.js';
+// Duelar conta como estar jogando: sem o batimento aqui, quem esta no meio de
+// um duelo aparece OFFLINE na lista de amigos dos outros e some do contador.
+import { baterPonto } from '/web/js/presenca.js';
 
 // Com ou sem `?npc=`, o duelo sempre usa SEU deck/wallet — as duas coisas
 // agora são dado de conta. Gate incondicional, diferente do deck.html (lá
 // `?npc=` edita o deck do NPC, não mexe em nada seu).
 const username = await requireLogin();
 if (!username) throw new Error('redirecionando para login');
+
+baterPonto();
 
 // Modo Adversário: duel.html?npc=<id>. Sem npc = Treino (Área de Teste, sem
 // recompensa). Com npc, o NPC usa o próprio deck e vencer dá o prêmio em DP

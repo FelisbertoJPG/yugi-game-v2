@@ -18,9 +18,11 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 31 testes do drop por DECK (pool por raridade, a % de cada
-                             # uma, o descarte de quem tem carta mas quantidade zero, e a
-                             # reserva por NPC de quem ainda não tem pool próprio)
+node web/js/drops.test.mjs   # 41 testes do drop por DECK (pool por raridade, a % de cada
+                             # uma, o descarte de quem tem carta mas quantidade zero, a
+                             # reserva por NPC de quem ainda não tem pool próprio, e o
+                             # [definir rápido] — que só leva carta COM raridade e nunca
+                             # remexe a que já está num quadro)
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 10 testes do rascunho do Deck Estrutural: ele salva
                              # o trabalho, mas NUNCA é carregado de volta — ao abrir a
@@ -543,6 +545,24 @@ de prêmio, nasciam **sem `draggable`** no pool da direita (`el.draggable =
 !full`, uma regra do DECK aplicada a um alvo que não é o deck). Não havia aviso
 nenhum: o gesto simplesmente não começava. Hoje, no modo NPC, a miniatura arrasta
 mesmo no limite de cópias, e o clique é um caminho que não depende do arrasto.
+
+O botão **[definir rápido]** enche os quadros de uma vez com as cartas **deste
+deck** que já têm raridade, cada uma na gaveta dela — é o caso comum (o prêmio
+que faz sentido é o do baralho que o jogador acabou de enfrentar) e montá-lo à
+mão são 40 a 60 cliques. A regra mora em `planoRapido` (`drops.js`), sem DOM e
+com teste, porque as três decisões dela erram **caladas**:
+
+> **carta sem raridade fica de FORA.** Quem dá raridade é o booster (`rarityOf`,
+> a mesma fonte da Loja e do `raridade_da_carta` no servidor). Jogá-la em N
+> "para não perder" despejaria o deck inteiro no pool — e um pool cheio parece
+> certo. **Carta já no pool não é mexida**, nem para a gaveta do booster: ela
+> pode ter sido posta à mão numa gaveta diferente de propósito, que é o que
+> deixa um adversário largar uma Normal como prêmio raro. E **cópia repetida
+> conta uma vez**: o sorteio é uniforme dentro da gaveta, então três cópias da
+> mesma carta roubariam a chance das outras.
+
+O toast diz o que entrou por gaveta **e o que ficou de fora** — a segunda metade
+é a que ninguém confere carta por carta depois.
 
 A raridade dos boosters (`reprintsOf`) virou **sugestão**: o quadro
 correspondente se destaca durante o arrasto, mas quem manda é onde a carta foi

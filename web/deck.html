@@ -137,6 +137,7 @@
     font-size: 11px; color: var(--dim);
   }
   .drop-topo input[type="number"] { width: 62px; font-size: 11px; }
+  .drop-topo button { font-size: 11px; padding: 3px 9px; }
   .drop-topo .spacer { flex: 1; }
   .drop-ajuda { font-size: 10px; color: var(--dim); margin: 0 0 10px; line-height: 1.6; }
   .drop-ajuda b { color: var(--ink); }
@@ -386,6 +387,14 @@
         <span title="o pool e' DESTE deck; o deck sem pool proprio cai no do adversario">POOL DE DROP <b style="color:var(--gold)">deste deck</b></span>
         <span class="n" id="drop-count" style="color:var(--ink)">0</span>
         <span class="spacer"></span>
+        <!-- Enche o pool com as cartas DESTE deck que ja tem raridade (a dos
+             BOOSTERS, a mesma fonte da Loja e do servidor). Carta que nao esta
+             em booster nenhum fica de fora, e carta ja posta a mao num quadro
+             nao e mexida — a regra inteira esta em planoRapido(), com teste. -->
+        <button type="button" id="drop-rapido"
+                title="pega as cartas deste deck que ja tem raridade e as poe na gaveta de cada uma&#10;as sem raridade ficam de fora, e o que ja esta nos quadros nao e mexido">
+          definir rápido
+        </button>
         <label style="display:flex; gap:5px; align-items:center"
                title="quantas cartas o jogador leva ao vencer, sorteadas nos quadros abaixo">
           por vitória:
@@ -399,6 +408,9 @@
           carta para cima do quadro, aberto ou fechado. Clique numa carta já no
           quadro para tirá-la; arraste-a para outro quadro para trocar a raridade
           dela. Nada disto mexe no deck.
+          <br><b>definir rápido</b> enche os quadros de uma vez com as cartas
+          <i>deste deck</i> que já têm raridade nos boosters — as sem raridade
+          ficam de fora, e o que você já pôs à mão num quadro não é mexido.
         </p>
         <div id="drop-buckets"></div>
         <div id="drop-resumo" class="drop-ajuda" style="margin:10px 0 0"></div>

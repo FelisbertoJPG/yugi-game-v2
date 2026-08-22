@@ -10,7 +10,7 @@
  */
 import {
   normalizarDrops, dropsDoNpc, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
-  MAX_DROPS, DROP_ODDS, RARIDADES,
+  MAX_DROPS, DROP_ODDS, RARIDADES, planoRapido,
 } from './drops.js';
 import assert from 'node:assert/strict';
 
@@ -233,6 +233,91 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
   // que ainda nao sabem de deck nenhum seguem funcionando.
   t('dropsDoNpc devolve a reserva, sem o mapa de decks dentro', () => {
     assert.deepEqual(dropsDoNpc(cfg, 'para_dox'), { quantidade: 1, pool: p(111) });
+  });
+}
+
+
+// ------------------------------------------------------ definir rapido
+// O botao [definir rapido] da aba DROPS: pega as cartas do DECK que ja' tem
+// raridade e as poe na gaveta de cada uma. O que ele erra, erra CALADO — um
+// pool cheio parece certo, e ninguem confere carta por carta o que entrou.
+{
+  // Raridade de mentira, no lugar do `rarityOf` dos boosters (que fala com o
+  // localStorage e nao roda aqui). Quem nao esta' no mapa nao tem raridade,
+  // que e' exatamente o caso da carta que nao esta' em booster nenhum.
+  const mapa = { 10: 'UR', 11: 'UR', 20: 'SR', 21: 'SR', 30: 'R', 40: 'N' };
+  const rar = (id) => mapa[id] ?? null;
+
+  t('pega as cartas com raridade e as separa por gaveta', () => {
+    const r = planoRapido([10, 20, 30, 40], poolVazio(), rar);
+    assert.deepEqual(r.novas, { UR: [10], SR: [20], R: [30], N: [40] });
+    assert.equal(r.total, 4);
+  });
+
+  t('carta sem raridade fica de FORA — nao cai em N', () => {
+    const r = planoRapido([10, 999, 998], poolVazio(), rar);
+    assert.deepEqual(r.novas.N, []);
+    assert.deepEqual(r.semRaridade, [999, 998]);
+    assert.equal(r.total, 1);
+  });
+
+  t('tres copias da mesma carta viram UMA entrada', () => {
+    const r = planoRapido([10, 10, 10, 20], poolVazio(), rar);
+    assert.deepEqual(r.novas.UR, [10]);
+    assert.equal(r.total, 2);
+  });
+
+  // Sem isto, o botao desfaz a decisao de quem pos a carta na mao numa gaveta
+  // diferente da do booster — que e' justamente o que deixa um adversario
+  // largar uma Normal como premio raro.
+  t('carta que JA esta no pool nao e mexida, nem para a gaveta do booster', () => {
+    const pool = { UR: [], SR: [], R: [], N: [10] };   // a UR posta a mao em N
+    const r = planoRapido([10, 20], pool, rar);
+    assert.deepEqual(r.novas.UR, []);
+    assert.deepEqual(r.jaNoPool, [10]);
+    assert.deepEqual(r.novas.SR, [20]);
+  });
+
+  t('o deck inteiro ja no pool nao adiciona nada', () => {
+    const pool = { UR: [10], SR: [20], R: [], N: [] };
+    const r = planoRapido([10, 20], pool, rar);
+    assert.equal(r.total, 0);
+    assert.deepEqual(r.jaNoPool, [10, 20]);
+  });
+
+  t('deck vazio, lixo e id invalido nao derrubam nada', () => {
+    for (const entrada of [[], null, undefined, ['x', 0, -1, NaN, null]]) {
+      const r = planoRapido(entrada, poolVazio(), rar);
+      assert.equal(r.total, 0);
+    }
+  });
+
+  t('sem funcao de raridade, nada entra (em vez de tudo cair em N)', () => {
+    const r = planoRapido([10, 20], poolVazio(), null);
+    assert.equal(r.total, 0);
+    assert.deepEqual(r.semRaridade, [10, 20]);
+  });
+
+  // Uma raridade que o pool nao conhece e' o mesmo que nao ter raridade: o
+  // servidor le' a GAVETA gravada, e uma gaveta 'UT' nao existe la'.
+  t('raridade fora das quatro gavetas conta como sem raridade', () => {
+    const r = planoRapido([10, 20], poolVazio(), (id) => (id === 10 ? 'UT' : 'SR'));
+    assert.deepEqual(r.semRaridade, [10]);
+    assert.deepEqual(r.novas.SR, [20]);
+  });
+
+  // O resultado tem de poder ser gravado direto: e' um pool de verdade, com as
+  // quatro gavetas, e nao um objeto so' com as raridades que apareceram.
+  t('o resultado e um pool completo, aceito pelo normalizarDrops', () => {
+    const r = planoRapido([10, 20], poolVazio(), rar);
+    assert.deepEqual(Object.keys(r.novas), RARIDADES);
+    const c = normalizarDrops({ yugi: { quantidade: 2, pool: r.novas } }).yugi;
+    assert.deepEqual(c.pool, { UR: [10], SR: [20], R: [], N: [] });
+  });
+
+  t('a ordem do deck e preservada dentro da gaveta', () => {
+    const r = planoRapido([11, 10], poolVazio(), rar);
+    assert.deepEqual(r.novas.UR, [11, 10]);
   });
 }
 

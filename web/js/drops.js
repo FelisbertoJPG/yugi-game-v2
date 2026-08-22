@@ -126,6 +126,64 @@ export function totalDoPool(pool) {
 }
 
 /**
+ * **Definir rápido**: o que entra no pool quando o admin manda preencher a
+ * partir do DECK que ele está editando.
+ *
+ * A pergunta que isto responde é "quais cartas DESTE deck já têm raridade, e em
+ * que gaveta cada uma cai" — montar isso à mão é clicar carta por carta num
+ * deck de 40 a 60, e o pool de drop quase sempre quer justamente as cartas do
+ * próprio deck.
+ *
+ * Três regras, e todas as três erram CALADAS se estiverem sozinhas na tela:
+ *
+ *   • **carta sem raridade fica de fora.** Quem decide a raridade é o booster
+ *     (`rarityOf`, a mesma fonte da Loja e do `raridade_da_carta` no servidor);
+ *     carta que não está em booster nenhum não tem raridade nenhuma. Jogá-la em
+ *     N "para não perder" despejaria o deck inteiro no pool — o contrário do
+ *     que o botão promete, e sem aviso, porque um pool cheio parece certo.
+ *   • **carta que já está no pool não se mexe.** Ela pode ter sido posta à mão
+ *     numa gaveta diferente da do booster, o que é uma decisão deliberada (é o
+ *     que deixa um adversário largar uma Normal como prêmio raro). Um preenchi-
+ *     mento automático que reescreve isso desfaz trabalho sem dizer nada.
+ *   • **cópia repetida conta uma vez.** Três cópias no deck não são três
+ *     entradas no pool: o sorteio é uniforme dentro da gaveta, então a carta
+ *     repetida roubaria a chance das outras.
+ *
+ * Puro de propósito — quem sabe de raridade é o `boosters.js`, que fala com o
+ * `localStorage` e não roda em Node. A raridade entra como função, e é por isso
+ * que isto tem teste.
+ *
+ * @param {number[]} cartas  os ids do deck (main + extra), com repetição
+ * @param {object} pool      o pool atual, para não repisar o que já está lá
+ * @param {(id:number)=>string|null} raridadeDe  a raridade nos boosters, ou null
+ * @returns {{novas:object, total:number, jaNoPool:number[], semRaridade:number[]}}
+ */
+export function planoRapido(cartas, pool, raridadeDe) {
+  const novas = poolVazio();
+  const jaNoPool = [];
+  const semRaridade = [];
+  const vistos = new Set();
+
+  const noPool = new Set();
+  for (const r of RARIDADES) for (const id of pool?.[r] ?? []) noPool.add(Number(id));
+
+  for (const bruto of Array.isArray(cartas) ? cartas : []) {
+    const id = Number(bruto);
+    if (!Number.isInteger(id) || id <= 0 || vistos.has(id)) continue;
+    vistos.add(id);
+
+    if (noPool.has(id)) { jaNoPool.push(id); continue; }
+
+    const r = raridadeDe?.(id) ?? null;
+    if (!RARIDADES.includes(r)) { semRaridade.push(id); continue; }
+
+    novas[r].push(id);
+  }
+
+  return { novas, total: totalDoPool(novas), jaNoPool, semRaridade };
+}
+
+/**
  * **A chance real de cada raridade**, em %, já renormalizada entre as que têm
  * carta. É o número que a tela mostra — e é o mesmo que o servidor usa para
  * sortear, por isso a conta mora aqui e não num texto solto na tela.

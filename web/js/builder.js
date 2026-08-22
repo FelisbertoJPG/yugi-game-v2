@@ -26,7 +26,7 @@ import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js'
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters, reprintsOf } from '/web/js/boosters.js';
 import {
   carregarDrops, salvarDrops, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
-  RARIDADES, MAX_DROPS,
+  RARIDADES, MAX_DROPS, planoRapido,
 } from '/web/js/drops.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
@@ -386,6 +386,7 @@ function enterNpcModeUI() {
   $('deck-tabs').hidden = false;
   $('tab-deck').onclick = () => mostrarAba('deck');
   $('tab-drops').onclick = () => mostrarAba('drops');
+  $('drop-rapido').onclick = definirRapido;
   // Abre o quadro que já tem carta; sem nenhuma, o primeiro. Um quadro aberto
   // desde o começo é o que faz o clique no pool da direita ter para onde ir.
   dropAberto = RARIDADES.find((r) => dropPool[r].length) ?? RARIDADES[0];
@@ -484,6 +485,64 @@ function porNoQuadro(id, rar) {
   renderDropPool();
   toast(atual ? `${nome}: ${atual} -> ${rar}` : `+ ${nome} -> ${rar}`);
 }
+
+/**
+ * **[definir rápido]** — enche o pool com as cartas DESTE deck que já têm
+ * raridade, cada uma na gaveta dela.
+ *
+ * O pool de drop quase sempre quer as cartas do próprio deck: é o prêmio que
+ * faz sentido para quem acabou de enfrentá-lo. Montar isso à mão é clicar carta
+ * por carta num deck de 40 a 60.
+ *
+ * A regra mora em `planoRapido` (drops.js), com teste, porque cada uma das
+ * decisões dela erra em silêncio — carta sem raridade ficando de fora, a carta
+ * já posta à mão numa gaveta diferente não sendo mexida, e a cópia repetida
+ * contando uma vez só. Aqui fica só o que é da TELA: a raridade vem dos
+ * boosters e o relato diz o que entrou E o que ficou de fora, que é a metade
+ * que ninguém confere carta por carta depois.
+ */
+function definirRapido() {
+  // O índice UMA vez: `rarityOf` reconstrói o mapa de todos os boosters a cada
+  // chamada, e aqui são dezenas de cartas.
+  const idx = rarityIndex();
+  const plano = planoRapido(
+    [...deck.main, ...deck.extra], dropPool,
+    (id) => idx.get(Number(id))?.rarity ?? null,
+  );
+
+  if (!plano.total) {
+    return void toast(plano.semRaridade.length
+      ? `nenhuma carta nova: as ${plano.semRaridade.length} de fora nao estao em booster nenhum`
+      : 'nenhuma carta nova para o pool — o deck ja esta todo nos quadros');
+  }
+
+  for (const r of RARIDADES) dropPool[r].push(...plano.novas[r]);
+
+  // A MESMA regra da carta posta à mão (`porNoQuadro`): pool com carta e
+  // quantidade 0 é descartado na hora de salvar, e a tela não avisava.
+  if (dropQtd <= 0) {
+    dropQtd = 1;
+    $('npc-drop-qtd').value = '1';
+  }
+
+  // Abre a gaveta mais alta que ganhou carta: é onde estão as que o admin mais
+  // provavelmente quer conferir.
+  dropAberto = RARIDADES.find((r) => plano.novas[r].length) ?? dropAberto;
+
+  markDirty();
+  renderDropPool();
+
+  const porGaveta = RARIDADES
+    .filter((r) => plano.novas[r].length)
+    .map((r) => `${plano.novas[r].length} ${r}`)
+    .join(', ');
+  const sobras = [];
+  if (plano.jaNoPool.length) sobras.push(`${plano.jaNoPool.length} ja estava(m) no pool`);
+  if (plano.semRaridade.length) sobras.push(`${plano.semRaridade.length} sem raridade`);
+  toast(`+ ${plano.total} carta(s): ${porGaveta}`
+      + (sobras.length ? ` — de fora: ${sobras.join(', ')}` : ''));
+}
+
 
 function tiraDoDropPool(id) {
   id = Number(id);

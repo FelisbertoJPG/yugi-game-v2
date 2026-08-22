@@ -47,6 +47,24 @@ export const MAX_DROPS = 20;
  */
 export const DROP_ODDS = { UR: 4, SR: 14, R: 30, N: 52 };
 
+/**
+ * A chance de um ÍCONE por vitória, em % inteiros de 0 a 100.
+ *
+ * O ícone não entra nas gavetas de raridade das cartas, e a razão é dupla:
+ * carta repete e ícone não (a segunda cópia de uma rara é o jogo funcionando; o
+ * mesmo ícone duas vezes é um prêmio vazio), e as gavetas já significam a % que
+ * a tela promete — um ícone dentro da gaveta UR mudaria essa conta sem mudar o
+ * texto, e a tela passaria a mentir sem ninguém mexer nela.
+ *
+ * O MESMO teto e o mesmo arredondamento estão no servidor, que é quem sorteia
+ * (`premiar_vitoria`, migration 0038).
+ */
+export function chanceDoIcone(bruto) {
+  const n = Number(bruto);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.trunc(n)));
+}
+
 /** Pool vazio, com as quatro gavetas. */
 export const poolVazio = () => ({ UR: [], SR: [], R: [], N: [] });
 
@@ -86,8 +104,35 @@ function normalizarUm(cfg) {
   if (!Number.isFinite(qtd)) qtd = 0;
   qtd = Math.max(0, Math.min(MAX_DROPS, Math.trunc(qtd)));
 
-  if (!vistos.size || qtd <= 0) return null;
-  return { quantidade: qtd, pool };
+  // Os ÍCONES são um prêmio à parte, com chance própria — não entram nas
+  // gavetas de carta. O porquê está em `chanceDoIcone` e na migration 0038.
+  const icones = [];
+  const jaVi = new Set();
+  for (const bruto of Array.isArray(cfg.icones) ? cfg.icones : []) {
+    // TEM de ser texto. Um `0` ou um `false` vindos de um JSON torto viram
+    // "0" e "false" no `String()`, e os dois casam com o formato de slug —
+    // entrariam como ids legítimos de ícones que não existem.
+    if (typeof bruto !== 'string') continue;
+    const id = bruto.trim();
+    // O mesmo formato do `check` da coluna `icones.id`: um id que o banco
+    // recusaria não pode ficar guardado aqui parecendo configuração boa.
+    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(id) || jaVi.has(id)) continue;
+    jaVi.add(id);
+    icones.push(id);
+  }
+  const chance = chanceDoIcone(cfg.chanceIcone);
+
+  // Sem carta E sem ícone não há prêmio nenhum: some da configuração, como já
+  // acontecia com o pool vazio.
+  const semCarta = !vistos.size || qtd <= 0;
+  const semIcone = !icones.length || chance <= 0;
+  if (semCarta && semIcone) return null;
+
+  return {
+    quantidade: semCarta ? 0 : qtd,
+    pool,
+    ...(semIcone ? {} : { icones, chanceIcone: chance }),
+  };
 }
 
 export function normalizarDrops(bruto) {

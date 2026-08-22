@@ -30,9 +30,12 @@ import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js'
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import {
   carregarDrops, salvarDrops, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
-  RARIDADES, MAX_DROPS, planoRapido,
+  RARIDADES, MAX_DROPS, planoRapido, chanceDoIcone,
 } from '/web/js/drops.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
+// O ícone como prêmio de vitória: a lista sai do catálogo publicado, e quem
+// sorteia é o servidor (`premiar_vitoria`, migration 0038).
+import { catalogo as catalogoDeIcones, caminhoDoIcone, PADRAO as ICONE_PADRAO } from '/web/js/icones.js';
 import { requireLogin } from '/web/js/auth.js';
 import { perfilAtual } from '/web/js/supabase.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
@@ -82,6 +85,13 @@ let npcSignature = null;
 let dropsCfg = {};              // a configuração de TODOS os NPCs (é uma chave só)
 let dropPool = poolVazio();     // a do DECK aberto aqui
 let dropQtd = 0;
+// Os ÍCONES que este deck pode largar, e a chance por vitória. Ficam ao lado
+// do pool e não dentro dele: carta repete e ícone não, e as gavetas já
+// significam a % que a tela promete (ver `chanceDoIcone` em drops.js).
+let dropIcones = [];
+let dropChanceIcone = 0;
+// O catálogo publicado, para a aba oferecer os ícones pelo nome e pela arte.
+let catalogoIcones = [];
 // Sob qual nome o pool foi CARREGADO. Renomear o deck e salvar precisa mover o
 // pool de chave; sem isto ele ficaria órfão na chave antiga e o deck renomeado
 // nasceria sem drop.
@@ -666,7 +676,75 @@ function renderDropPool() {
       ? `Cada vitória entrega <b>${dropQtd} carta(s)</b>, sorteadas entre as <b>${total}</b> `
         + 'destes quadros: primeiro a raridade, pela % de cada quadro, depois uma carta dentro dela.'
       : 'Quantidade <b>0</b> — nada é sorteado. Ajuste "por vitória" aí em cima.';
+  renderIcones();
   atualizaAlvoDeClique();
+}
+
+/**
+ * Os ÍCONES que este deck pode largar.
+ *
+ * O catálogo inteiro aparece; o que não está escolhido fica apagado, e não
+ * escondido — escolher o prêmio à luz do que existe é diferente de escolher
+ * de memória. Ícone GRATUITO fica de fora: o servidor nunca o sortearia (todo
+ * mundo já o tem), e oferecê-lo aqui seria prometer um prêmio impossível.
+ */
+function renderIcones() {
+  const caixa = $('icone-escolha');
+  if (!caixa) return;
+
+  const oferecidos = catalogoIcones.filter((i) => !i.gratuito);
+
+  if (!oferecidos.length) {
+    caixa.innerHTML = catalogoIcones.length
+      ? '<div class="quadro-vazio">só há ícones gratuitos no catálogo — '
+        + 'e esses todo mundo já tem, então não servem de prêmio.</div>'
+      : '<div class="quadro-vazio">nenhum ícone cadastrado ainda. '
+        + 'Cadastre em Área de Teste → Ícones de perfil.</div>'
+    ;
+    $('icone-conta').textContent = 'nenhum';
+    return;
+  }
+
+  const grade = document.createElement('div');
+  grade.className = 'icone-ops';
+
+  for (const ic of oferecidos) {
+    const escolhido = dropIcones.includes(ic.id);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'icone-op' + (escolhido ? ' on' : '');
+    b.title = escolhido ? `${ic.nome} — clique para tirar do prêmio`
+                        : `${ic.nome} — clique para incluir no prêmio`;
+    const img = document.createElement('img');
+    img.src = caminhoDoIcone(ic);
+    img.alt = '';
+    // A arte pode não ter viajado no Release (o ícone é cadastrado no banco, a
+    // imagem vem no game.zip). Sem isto ficaria o quadrado quebrado do navegador.
+    img.onerror = () => { img.src = ICONE_PADRAO; };
+    const rot = document.createElement('span');
+    rot.className = 'rot';
+    rot.textContent = ic.nome;
+    b.append(img, rot);
+    b.onclick = () => {
+      dropIcones = escolhido ? dropIcones.filter((x) => x !== ic.id)
+                             : [...dropIcones, ic.id];
+      // A PRIMEIRA escolha liga a chance, pela mesma razão que a primeira
+      // carta liga a quantidade: uma lista montada com chance 0 é descartada
+      // ao salvar, e a tela não dizia nada.
+      if (dropIcones.length && dropChanceIcone <= 0) {
+        dropChanceIcone = 5;
+        $('npc-drop-chance-icone').value = '5';
+        toast('chance do icone: 5% (mude no campo ao lado se quiser)');
+      }
+      markDirty();
+      renderIcones();
+    };
+    grade.append(b);
+  }
+
+  caixa.replaceChildren(grade);
+  $('icone-conta').textContent = dropIcones.length
+    ? `${dropIcones.length} de ${oferecidos.length}` : `nenhum de ${oferecidos.length}`;
 }
 
 /* ---------------------------------------------------------------- moldura
@@ -775,8 +853,16 @@ async function saveNpcDeckFromUI() {
   const doNpc = { ...(dropsCfg[npcMode.id] ?? {}) };
   const porDeck = { ...(doNpc.decks ?? {}) };
   if (nomeDoDropAntigo && nomeDoDropAntigo !== name) delete porDeck[nomeDoDropAntigo];
-  if (temCarta && dropQtd > 0) porDeck[name] = { quantidade: dropQtd, pool: dropPool };
-  else delete porDeck[name];
+  const temIcone = dropIcones.length > 0 && dropChanceIcone > 0;
+  // Um deck que só dá ÍCONE é configuração legítima: nem todo adversário
+  // precisa largar carta. Exigir carta aqui faria o ícone sumir junto, calado.
+  if ((temCarta && dropQtd > 0) || temIcone) {
+    porDeck[name] = {
+      quantidade: temCarta ? dropQtd : 0,
+      pool: dropPool,
+      ...(temIcone ? { icones: dropIcones, chanceIcone: dropChanceIcone } : {}),
+    };
+  } else delete porDeck[name];
 
   if (Object.keys(porDeck).length) doNpc.decks = porDeck; else delete doNpc.decks;
   if (Object.keys(doNpc).length) dropsCfg[npcMode.id] = doNpc;
@@ -793,8 +879,11 @@ async function saveNpcDeckFromUI() {
   } else if (temCarta && dropQtd <= 0) {
     toast('pool de drop NAO salvo: falta a quantidade por vitoria (esta zerada)');
     $('npc-drop-qtd').focus();
-  } else if (dropQtd > 0) {
-    toast(`pool de drop publicado: ${dropQtd} carta(s) de ${totalDoPool(dropPool)}`);
+  } else if (dropQtd > 0 || temIcone) {
+    const partes = [];
+    if (temCarta && dropQtd > 0) partes.push(`${dropQtd} carta(s) de ${totalDoPool(dropPool)}`);
+    if (temIcone) partes.push(`${dropIcones.length} icone(s) a ${dropChanceIcone}%`);
+    toast(`pool de drop publicado: ${partes.join(' + ')}`);
   }
 
   if (r.path) {
@@ -1287,6 +1376,14 @@ $('npc-drop-qtd').oninput = () => {
   renderDropPool();
 };
 
+// A CHANCE do ícone. Presa em 0..100 pela mesma função que o `normalizarDrops`
+// usa — e o mesmo teto está no servidor, que é quem sorteia.
+$('npc-drop-chance-icone').oninput = () => {
+  dropChanceIcone = chanceDoIcone($('npc-drop-chance-icone').value);
+  markDirty();
+  renderIcones();
+};
+
 const TYPE_IDS = ['f-mon', 'f-spell', 'f-trap'];
 const FILTER_IDS = ['f-name', 'f-attr', 'f-race', 'f-arch', 'f-tag', 'f-rar', 'f-banlist', 'f-sort',
                     'f-lvmin', 'f-lvmax', 'f-atk', 'f-def'];
@@ -1647,7 +1744,13 @@ if (npc) {
   const meuDrop = dropsDoDeck(dropsCfg, npcId, nomeDoDropAntigo);
   dropPool = meuDrop ? meuDrop.pool : poolVazio();
   dropQtd = meuDrop ? meuDrop.quantidade : 0;
+  dropIcones = meuDrop?.icones ?? [];
+  dropChanceIcone = meuDrop?.chanceIcone ?? 0;
+  // O catálogo é de leitura aberta e muda pouco: uma vez no boot basta, e é
+  // dele que sai o nome e a arte de cada ícone oferecido na aba.
+  try { catalogoIcones = await catalogoDeIcones(); } catch { catalogoIcones = []; }
   $('npc-drop-qtd').value = dropQtd ? String(dropQtd) : '';
+  $('npc-drop-chance-icone').value = dropChanceIcone ? String(dropChanceIcone) : '';
 
   enterNpcModeUI();
   markDirty(false);

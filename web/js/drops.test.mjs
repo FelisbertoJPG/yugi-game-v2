@@ -10,7 +10,7 @@
  */
 import {
   normalizarDrops, dropsDoNpc, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
-  MAX_DROPS, DROP_ODDS, RARIDADES, planoRapido,
+  MAX_DROPS, DROP_ODDS, RARIDADES, planoRapido, chanceDoIcone,
 } from './drops.js';
 import assert from 'node:assert/strict';
 
@@ -321,5 +321,88 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
   });
 }
 
+
+// ------------------------------------------------- icone como premio
+// O icone e um premio A PARTE do pool de cartas: carta repete e icone nao, e
+// as gavetas ja significam a % que a tela promete. Quem sorteia e o servidor
+// (`premiar_vitoria`, 0038) — o que se prova aqui e que a CONFIGURACAO
+// aguenta ser editada por gente sem virar uma promessa que o banco recusa.
+{
+  const cfgIcone = (extra) => normalizarDrops({ yugi: { quantidade: 3, pool: { UR: [1] }, ...extra } }).yugi;
+
+  t('a lista de icones e a chance passam inteiras', () => {
+    const c = cfgIcone({ icones: ['dourado', 'dragao-azul'], chanceIcone: 5 });
+    assert.deepEqual(c.icones, ['dourado', 'dragao-azul']);
+    assert.equal(c.chanceIcone, 5);
+  });
+
+  t('id repetido entra UMA vez', () => {
+    const c = cfgIcone({ icones: ['a', 'a', 'a'], chanceIcone: 5 });
+    assert.deepEqual(c.icones, ['a']);
+  });
+
+  // O mesmo formato do `check` da coluna `icones.id`: guardar um id que o
+  // banco recusaria e guardar configuracao que parece boa e nao e.
+  t('id fora do formato de slug e descartado', () => {
+    const c = cfgIcone({ icones: ['MAIUSCULO', 'com espaco', 'acentuação', '-comeca-com-traco',
+                                  'a'.repeat(40), '', 'valido-1'], chanceIcone: 5 });
+    assert.deepEqual(c.icones, ['valido-1']);
+  });
+
+  t('lixo no lugar da lista nao derruba nada', () => {
+    for (const lixo of [null, undefined, 42, 'x', {}, [null, 0, false]]) {
+      const c = cfgIcone({ icones: lixo, chanceIcone: 5 });
+      assert.ok(!c.icones, JSON.stringify(lixo));
+    }
+  });
+
+  // Chance 0 com lista cheia e o mesmo que nao ter icone — e o contrario
+  // tambem: uma chance de 5% sobre uma lista vazia nunca daria nada.
+  t('chance 0 (ou lista vazia) tira o icone da configuracao', () => {
+    assert.ok(!cfgIcone({ icones: ['a'], chanceIcone: 0 }).icones);
+    assert.ok(!cfgIcone({ icones: [], chanceIcone: 50 }).icones);
+  });
+
+  t('a chance e presa entre 0 e 100, sempre inteira', () => {
+    assert.equal(chanceDoIcone(-5), 0);
+    assert.equal(chanceDoIcone(999), 100);
+    assert.equal(chanceDoIcone(7.9), 7);
+    assert.equal(chanceDoIcone(100), 100);
+  });
+
+  t('chance invalida vira 0, e nao NaN', () => {
+    for (const lixo of [NaN, null, undefined, 'x', {}, Infinity]) {
+      assert.equal(chanceDoIcone(lixo), 0, String(lixo));
+    }
+  });
+
+  // Um deck que so da ICONE e uma configuracao legitima: nem todo adversario
+  // precisa largar carta. Antes disto, quantidade 0 fazia a configuracao
+  // inteira ser descartada e o icone ia junto, calado.
+  t('so icone, sem carta nenhuma, continua sendo configuracao valida', () => {
+    const c = normalizarDrops({ yugi: { quantidade: 0, pool: {}, icones: ['a'], chanceIcone: 10 } }).yugi;
+    assert.ok(c);
+    assert.equal(c.quantidade, 0);
+    assert.deepEqual(c.icones, ['a']);
+  });
+
+  t('sem carta E sem icone continua sumindo da configuracao', () => {
+    assert.ok(!normalizarDrops({ yugi: { quantidade: 0, pool: {}, icones: [], chanceIcone: 0 } }).yugi);
+  });
+
+  t('normalizar duas vezes da o mesmo, tambem com icone', () => {
+    const uma = normalizarDrops({ yugi: { quantidade: 2, pool: { UR: [1] }, icones: ['a'], chanceIcone: 5 } });
+    assert.deepEqual(normalizarDrops(uma), uma);
+  });
+
+  // O icone e configurado POR DECK, como o pool: e o que faz o deck dificil
+  // valer a pena.
+  t('o icone tambem vale por deck', () => {
+    const cfg = { para_dox: { decks: { 'Labirinto': { quantidade: 0, pool: {}, icones: ['x'], chanceIcone: 3 } } } };
+    const d = dropsDoDeck(normalizarDrops(cfg), 'para_dox', 'Labirinto');
+    assert.deepEqual(normalizarDrops(cfg).para_dox.decks['Labirinto'].icones, ['x']);
+    assert.ok(d);
+  });
+}
 console.log(`\n  ${pass} passaram, ${fail} falharam`);
 process.exit(fail === 0 ? 0 : 1);

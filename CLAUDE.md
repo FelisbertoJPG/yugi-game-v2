@@ -18,7 +18,7 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 41 testes do drop por DECK (pool por raridade, a % de cada
+node web/js/drops.test.mjs   # 52 testes do drop por DECK (pool por raridade, a % de cada
                              # uma, o descarte de quem tem carta mas quantidade zero, a
                              # reserva por NPC de quem ainda não tem pool próprio, e o
                              # [definir rápido] — que só leva carta COM raridade e nunca
@@ -631,6 +631,11 @@ correspondente se destaca durante o arrasto, mas quem manda é onde a carta foi
 solta — o servidor lê a gaveta gravada, sem reconsultar booster nenhum. É o que
 deixa um adversário largar um Normal como prêmio raro sem mexer na Loja.
 
+A aba DROPS configura também o **ícone de perfil** que o deck pode largar —
+uma lista e uma chance em %, ao lado do pool. Ver "Ícone como prêmio de
+vitória", mais abaixo: ele fica FORA das gavetas de raridade de propósito, e
+um deck que só dá ícone (sem carta nenhuma) é configuração legítima.
+
 > **Pool com carta e quantidade ZERO é descartado** (`normalizarDrops`) — é o
 > mesmo que não ter drop, e é o que faz o servidor cair na carta de assinatura.
 > A regra está certa; o que faltava era a TELA dizer. O editor agora liga a
@@ -954,6 +959,11 @@ A lista de amigos recebe o `icone_id` de cada um (`meus_amigos`), nunca o
 arquivo — a policy de `perfis` não deixaria. Quem cruza o id com a arte é o
 catálogo, que é de leitura aberta, carregado uma vez no boot da home.
 
+**A arte É o arquivo subido.** Não há seletor de arte: o arquivo de um ícone é
+sempre `<id>.png`. Escolher de uma lista deixaria dois ícones apontando para o
+mesmo desenho e um id sem arte nenhuma — e a validação do salvar (*"não há
+imagem para este id"*) é o que impede o cadastro que vira quadrado vazio.
+
 **Subir uma arte pelo painel.** O admin escolhe um arquivo, **arrasta para
 posicionar e usa a roda para o zoom** dentro de um círculo — o mesmo arranjo de
 uma foto de perfil de rede social —, e o que fica dentro vira um PNG de 128×128.
@@ -987,6 +997,39 @@ A rota recusa nome com `..`, subpasta, extensão que não é de imagem, `dataUrl
 que não é imagem, e arquivo acima de 512 KB — o teto não é sobre disco, é para
 um engano (arrastar a foto errada, de 12 MB) não virar um arquivo que viaja no
 `game.zip` de todo jogador para sempre.
+
+**[usar no meu perfil agora]**, no painel, põe o ícone aberto no perfil do
+próprio admin. São **duas** chamadas e não uma: `escolher_icone()` recusa o que
+não é seu, e um ícone recém-cadastrado não é de ninguém — nem de quem o criou.
+Sem o `dar_icone()` antes, o botão devolveria *"você não tem este ícone"* no
+exato momento em que a pessoa quer conferir o próprio trabalho.
+
+#### Ícone como prêmio de vitória (migration 0038)
+
+Cada deck de NPC pode largar um **ícone**, configurado na aba DROPS ao lado do
+pool de cartas: uma lista de ícones e uma **chance própria** em % por vitória.
+
+> **Por que fora das gavetas de raridade.** Três razões: carta **repete** e
+> ícone não (a segunda cópia de uma rara é o jogo funcionando, o mesmo ícone
+> duas vezes é um prêmio vazio); as gavetas já significam a % que a tela promete
+> (`chancesDe`), e um ícone dentro da UR mudaria essa conta **sem mudar o
+> texto** — a tela passaria a mentir sem ninguém mexer nela; e um ícone é um
+> evento raro, que merece uma chance dita em número redondo em vez de diluída
+> entre trinta cartas.
+
+O sorteio só olha os que o jogador **ainda não tem** — quem completou a coleção
+não "ganha" nada com 5% de chance, e a tela de fim de duelo não precisa explicar
+um prêmio que não existe. Ícone **gratuito** fica de fora nas duas pontas (o
+servidor nunca o sortearia, e o editor não o oferece: seria prometer o
+impossível).
+
+> O ícone volta num campo **`icone`** do `premiar_vitoria`, e não como uma
+> entrada em `drops`: cada `drops[i].id` é desenhado como código de CARTA, e um
+> id de texto ali viraria uma arte quebrada em quem ainda não atualizou. Campo
+> novo, o cliente antigo ignora.
+
+Na tela de fim de duelo ele aparece **aberto**, e não virado como as cartas: é
+um só e é raro, e a virada existe para dar ritmo a três ou quatro cartas.
 
 > **A Loja ainda não vende ícone.** O catálogo já tem `preco`, `na_loja` e
 > `raridade`, e `dar_icone()` (admin) é a porta de serviço enquanto a compra não

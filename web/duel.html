@@ -652,6 +652,17 @@
      o servidor. A virada é só o teatro de descobrir o que veio, e por isso ela
      nunca pode ser o que decide alguma coisa: o [pular] revela tudo de uma vez
      e o duelo segue igual. */
+  /* O ícone ganho. Moldura dourada e aberto de cara: ele é o prêmio raro, e
+     precisa ser lido antes das cartas, não depois de quatro cliques. */
+  #end-icone { display: flex; align-items: center; gap: 12px; justify-content: center;
+               margin: 4px auto 14px; padding: 10px 14px; max-width: 320px;
+               border: 2px solid var(--gold); background: var(--panel); }
+  #end-icone img { width: 52px; height: 52px; border-radius: 50%; flex: none;
+                   border: 2px solid var(--gold); }
+  #end-icone .txt { text-align: left; display: flex; flex-direction: column; gap: 2px; }
+  #end-icone b { font-size: 10px; letter-spacing: 2px; color: var(--gold); }
+  #end-icone .nome { font-size: 14px; color: var(--ink); }
+  #end-icone .onde { font-size: 9px; color: var(--dim); }
   #end-drops { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 4px 0 16px; }
   .drop {
     width: 96px; aspect-ratio: 59/86; perspective: 700px; cursor: pointer;
@@ -852,6 +863,16 @@
     <div id="end-sub"></div>
     <!-- As cartas que você tirou do duelo, viradas. Clique em cada uma para
          revelar — ou pule e veja todas de uma vez. -->
+    <!-- O ícone de perfil ganho, quando houve. Vem ABERTO: é um só e é raro,
+         e a virada existe para dar ritmo a várias cartas. -->
+    <div id="end-icone" hidden>
+      <img alt="">
+      <div class="txt">
+        <b>ÍCONE NOVO</b>
+        <span class="nome"></span>
+        <span class="onde">escolha-o no seu perfil, na home</span>
+      </div>
+    </div>
     <div id="end-drops"></div>
     <button id="end-pular" hidden>pular e revelar tudo</button>
     <div class="end-acts">
@@ -3745,7 +3766,13 @@ async function concederRecompensa(venci, empate = false) {
   for (const d of drops) {
     log(`🃏 drop: ${nameOf(d.id)}${d.raridade ? ` [${d.raridade}]` : ''}${d.nova ? ' — NOVA' : ''}`, true);
   }
-  return { dp: r.premio, cartas, drops };
+  // O ÍCONE é um campo à parte de `drops`, e não uma entrada dentro dele: cada
+  // `drops[i].id` é desenhado como código de CARTA, e um id de texto ali viraria
+  // uma arte quebrada. Servidor sem a 0038 devolve `undefined` e a tela não
+  // mostra ícone nenhum, como antes.
+  const icone = r.icone && r.icone.id ? r.icone : null;
+  if (icone) log(`🎭 icone novo: ${icone.nome}`, true);
+  return { dp: r.premio, cartas, drops, icone };
 }
 
 /**
@@ -3864,9 +3891,35 @@ function mostrarFimDuelo(venci, empate, premio) {
   }
   $('end-sub').innerHTML = sub;
   renderDrops(drops);
+  mostrarIconeGanho(premio?.icone ?? null);
   $('end-overlay').hidden = false;
 }
 function fecharFimDuelo() { $('end-overlay').hidden = true; }
+
+/**
+ * **O ícone de perfil que a vitória deu.**
+ *
+ * Aparece SEMPRE aberto, e não virado como as cartas: ele é raro, é um só, e
+ * a virada existe para dar ritmo a três ou quatro cartas — num prêmio único
+ * ela só atrasaria a notícia.
+ *
+ * A posse já está gravada quando esta tela aparece (`premiar_vitoria` insere
+ * em `icones_do_jogador`); escolher usá-lo é decisão de outra hora, na home.
+ * Por isso aqui não há botão: é aviso, não formulário.
+ */
+function mostrarIconeGanho(icone) {
+  const caixa = $('end-icone');
+  if (!caixa) return;
+  if (!icone) { caixa.hidden = true; return; }
+
+  caixa.hidden = false;
+  const img = caixa.querySelector('img');
+  img.src = `/web/img/icones/${icone.arquivo}`;
+  // A arte pode não ter viajado no Release (o ícone mora no banco, a imagem no
+  // game.zip). Melhor o ícone do jogo que um quadrado quebrado.
+  img.onerror = () => { img.src = '/web/img/icone.png'; };
+  caixa.querySelector('.nome').textContent = icone.nome;
+}
 
 
 /**

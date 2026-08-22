@@ -142,6 +142,20 @@
   .drop-ajuda { font-size: 10px; color: var(--dim); margin: 0 0 10px; line-height: 1.6; }
   .drop-ajuda b { color: var(--ink); }
 
+  /* Os ícones que este deck pode largar. Os NÃO escolhidos ficam apagados e
+     visíveis: ver o catálogo inteiro é o que deixa escolher o prêmio à luz
+     do que existe, e não de memória. */
+  .icone-ops { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+  .icone-op { padding: 5px; background: var(--panel2); border: 1px solid var(--line);
+              display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .icone-op:hover { border-color: var(--gold); }
+  .icone-op img { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--line2); }
+  .icone-op .rot { font-size: 8px; letter-spacing: 1px; color: var(--dim);
+                   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icone-op.on { border-color: var(--gold); background: var(--panel); }
+  .icone-op.on img { border-color: var(--gold); }
+  .icone-op:not(.on) { opacity: .42; }
+
   .quadro {
     border: 1px solid var(--line); background: var(--panel); margin-bottom: 8px;
     transition: background .12s, outline-color .12s;
@@ -416,6 +430,31 @@
         </p>
         <div id="drop-buckets"></div>
         <div id="drop-resumo" class="drop-ajuda" style="margin:10px 0 0"></div>
+
+        <!-- O ÍCONE é um prêmio à parte do pool de cartas: carta repete e
+             ícone não, e as gavetas já significam a % que a tela promete.
+             Por isso ele tem chance própria, dita em número redondo. -->
+        <section class="quadro" id="quadro-icones" style="margin-top:12px">
+          <div class="quadro-head" style="cursor:default">
+            <b style="color:var(--gold)">ÍCONE DE PERFIL</b>
+            <span class="qtd" id="icone-conta">nenhum</span>
+            <span class="spacer" style="flex:1"></span>
+            <label style="display:flex;gap:5px;align-items:center;font-size:11px;color:var(--dim)"
+                   title="a chance de a vitória dar UM ícone que o jogador ainda não tem">
+              chance:
+              <input type="number" id="npc-drop-chance-icone" min="0" max="100" step="1"
+                     placeholder="0" style="width:56px;font-size:11px">%
+            </label>
+          </div>
+          <div class="quadro-corpo">
+            <p class="drop-ajuda" style="margin:0 0 8px">
+              Clique num ícone para incluí-lo ou tirá-lo. A vitória sorteia
+              <b>um só</b>, entre os que o jogador <i>ainda não tem</i> — quem já
+              tem todos não ganha nada, e a chance não se acumula.
+            </p>
+            <div id="icone-escolha"></div>
+          </div>
+        </section>
       </div>
     </div>
   </div>

@@ -6,6 +6,15 @@ arquivo**.
 
 ## Para acrescentar um ícone
 
+**Pelo painel** (o caminho normal): Área de Teste → Ícones de perfil → *subir*.
+Escolha a foto, arraste para posicionar, use a roda para o zoom e clique em
+"usar esta imagem". Rodando o `npm run dev`, o PNG de 128×128 é gravado aqui e o
+`index.json` se atualiza sozinho. Pelo jogo instalado ele é **baixado** — mova-o
+para cá e rode `node tools/icones.mjs`, porque de lá não dá para escrever no
+repositório, que é de onde o Release sai.
+
+**À mão**, se preferir:
+
 ```bash
 # 1. ponha o PNG aqui (128x128, fundo transparente ou circular)
 # 2. regere o manifesto

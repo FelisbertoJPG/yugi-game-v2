@@ -120,6 +120,16 @@ node web/js/notificacoes.test.mjs # 21 testes das notificações da home e do
                              # contador mente); e um campo do Phoenix lido do
                              # lugar errado devolve `undefined`, o aviso não
                              # aparece e não há erro nem no console
+node web/js/recorte.test.mjs # 23 testes do ENQUADRAMENTO do recorte circular
+                             # (subir uma foto e ajustar no círculo, estilo
+                             # rede social). A conta inteira erra CALADA: um
+                             # limite frouxo deixa a imagem descolar e o ícone
+                             # sai com faixa vazia na borda; a área de origem
+                             # calculada sem desfazer a escala parece certa em
+                             # zoom 1 e escorrega em qualquer outro; e o zoom
+                             # sem ponto fixo faz a foto fugir do centro a cada
+                             # rolada da roda. Nada disso dá erro — o admin
+                             # recorta, salva, publica, e o ícone só fica torto
 node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # escolha são decididas no SERVIDOR, então o que
                              # se prova aqui é o que erra CALADO no cliente: um
@@ -943,6 +953,40 @@ solto no repositório não tem — ninguém sabe refazê-lo maior dois meses dep
 A lista de amigos recebe o `icone_id` de cada um (`meus_amigos`), nunca o
 arquivo — a policy de `perfis` não deixaria. Quem cruza o id com a arte é o
 catálogo, que é de leitura aberta, carregado uma vez no boot da home.
+
+**Subir uma arte pelo painel.** O admin escolhe um arquivo, **arrasta para
+posicionar e usa a roda para o zoom** dentro de um círculo — o mesmo arranjo de
+uma foto de perfil de rede social —, e o que fica dentro vira um PNG de 128×128.
+A conta do enquadramento mora em `web/js/recorte.js`, sem DOM e com teste,
+porque ela erra calada: um limite frouxo deixa a imagem descolar e o ícone sai
+com uma faixa vazia na borda.
+
+> O recorte é desenhado num **canvas**, e não posicionado por CSS: o que sai no
+> arquivo tem de ser exatamente o que está à vista, e com CSS haveria duas
+> contas de enquadramento (a da tela e a da exportação) divergindo no primeiro
+> arredondamento. E o corte é **circular**, não quadrado — o ícone é redondo em
+> toda tela onde aparece, e um quadrado com os cantos escondidos por CSS
+> mostraria as pontas em qualquer lugar que esquecesse o `border-radius`.
+
+Onde o PNG cai depende de **quem está servindo**, e a assimetria é deliberada:
+
+| ambiente | o que acontece |
+|---|---|
+| `npm run dev` | grava direto em `web/img/icones/` (rota `/__icones/save`, só localhost) e regera o `index.json` |
+| jogo instalado | **baixa** o PNG e diz para movê-lo — não grava |
+
+> A rota existe **só no `tools/serve.mjs`**, e não no `StaticServer.cs`. O
+> dev-server serve o REPOSITÓRIO, que é de onde o Release sai; o jogo instalado
+> serve `%LOCALAPPDATA%ClassicDuelsgame`, então gravar por lá poria o PNG
+> numa pasta que nenhum Release lê — e pior, `web` é raiz gerenciada com
+> `removeMode: backup`, então a próxima atualização levaria o arquivo para o
+> backup como órfão. Seria uma armadilha, não uma conveniência: por isso o
+> painel cai no download e **diz** que caiu.
+
+A rota recusa nome com `..`, subpasta, extensão que não é de imagem, `dataUrl`
+que não é imagem, e arquivo acima de 512 KB — o teto não é sobre disco, é para
+um engano (arrastar a foto errada, de 12 MB) não virar um arquivo que viaja no
+`game.zip` de todo jogador para sempre.
 
 > **A Loja ainda não vende ícone.** O catálogo já tem `preco`, `na_loja` e
 > `raridade`, e `dar_icone()` (admin) é a porta de serviço enquanto a compra não

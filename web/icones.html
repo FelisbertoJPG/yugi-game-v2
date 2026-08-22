@@ -37,6 +37,36 @@
   .previa .pequeno { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line2); }
   .previa .txt { font-size: 10px; color: var(--dim); line-height: 1.5; }
 
+  /* ------------------------------------------------------ recorte da foto
+     O quadro é quadrado e a máscara é redonda — o mesmo arranjo de qualquer
+     rede social. A imagem é desenhada num canvas, e não posicionada por CSS,
+     porque o que sai no arquivo tem de ser exatamente o que está à vista: com
+     CSS haveria duas contas de enquadramento (a da tela e a da exportação) e
+     elas divergiriam no primeiro arredondamento. */
+  .recorte { display: none; margin: 12px 0; }
+  .recorte.aberto { display: block; }
+  .quadro {
+    position: relative; width: 240px; height: 240px; margin: 0 auto;
+    background: var(--bg); border: 1px solid var(--line);
+    cursor: grab; touch-action: none; overflow: hidden;
+  }
+  .quadro:active { cursor: grabbing; }
+  .quadro canvas { display: block; width: 100%; height: 100%; }
+  /* A máscara é um anel opaco por cima do canvas: o que fica de fora do círculo
+     é o que vai ser cortado. Desenhá-la no próprio canvas misturaria a máscara
+     com a imagem na hora de exportar. */
+  .quadro .mascara {
+    position: absolute; inset: 0; pointer-events: none;
+    box-shadow: 0 0 0 999px rgba(12, 15, 22, .82) inset;
+    border-radius: 50%;
+  }
+  .quadro .aro { position: absolute; inset: 0; pointer-events: none;
+                 border-radius: 50%; border: 2px solid var(--gold); opacity: .55; }
+
+  .zoom { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 10px; color: var(--dim); }
+  .zoom input[type="range"] { flex: 1; }
+  .dica { font-size: 10px; color: var(--dim); line-height: 1.6; margin: 0 0 10px; }
+
   .botoes { display: flex; gap: 8px; margin-top: 12px; }
   .botoes button { flex: 1; padding: 8px; }
   .secundario { background: var(--panel2); color: var(--dim); }
@@ -73,9 +103,10 @@
   <div class="topo">
     <h1>ÍCONES</h1>
     <p class="sub">
-      O catálogo de ícones de perfil. A <b>imagem</b> mora em
-      <code>web/img/icones/</code> e viaja no <code>game.zip</code> — este painel
-      cadastra o resto (id, preço, raridade). Arte nova exige publicar um Release.
+      O catálogo de ícones de perfil. Suba uma foto, enquadre no círculo e
+      cadastre. A <b>imagem</b> mora em <code>web/img/icones/</code> e viaja no
+      <code>game.zip</code>: mesmo depois de gravada, ela só chega em quem joga
+      quando você <b>publicar um Release</b>.
     </p>
   </div>
 
@@ -84,14 +115,44 @@
     <div class="painel">
       <h2>CADASTRAR</h2>
       <p class="ajuda">
-        Escolha a <b>arte</b> entre as que já estão no repositório. Para acrescentar
-        uma: ponha o PNG em <code>web/img/icones/</code>, rode
-        <code>node tools/icones.mjs</code> e publique.
+        Escolha uma <b>arte</b> já no repositório, ou <b>suba</b> uma foto e
+        enquadre-a no círculo. Subindo pelo <code>npm run dev</code>, o PNG é
+        gravado direto em <code>web/img/icones/</code>; pelo jogo instalado ele
+        é <b>baixado</b> e você o move — de lá não dá para escrever no
+        repositório, que é de onde o Release sai.
       </p>
 
       <div class="campo">
         <label for="f-arquivo">arte</label>
         <select id="f-arquivo"></select>
+      </div>
+
+      <!-- Subir uma foto. O recorte abre logo abaixo; enquanto ele está aberto,
+           o seletor de arte acima fica esperando o resultado. -->
+      <div class="campo">
+        <label for="f-foto">subir</label>
+        <input type="file" id="f-foto" accept="image/*" style="font-size:10px">
+      </div>
+
+      <div class="recorte" id="recorte">
+        <p class="dica">
+          Arraste para posicionar · roda do mouse ou a barra para o zoom.
+          O que estiver <b>dentro do círculo</b> vira o ícone, em 128×128.
+        </p>
+        <div class="quadro" id="quadro">
+          <canvas id="tela" width="240" height="240"></canvas>
+          <div class="mascara"></div>
+          <div class="aro"></div>
+        </div>
+        <div class="zoom">
+          <span>zoom</span>
+          <input type="range" id="f-zoom" min="1" max="800" value="100">
+          <button id="btn-recentrar" class="secundario" style="padding:3px 8px;font-size:10px">centralizar</button>
+        </div>
+        <div class="botoes">
+          <button id="btn-usar-foto">usar esta imagem</button>
+          <button id="btn-cancelar-foto" class="secundario">cancelar</button>
+        </div>
       </div>
 
       <div class="previa">
@@ -161,6 +222,12 @@ import {
   catalogo, salvarIcone, apagarIcone, arquivosDoRepo,
   caminhoDoIcone, slug, semImagem, PADRAO,
 } from '/web/js/icones.js';
+// A conta do enquadramento mora fora do HTML e se prova em Node
+// (node web/js/recorte.test.mjs): ela erra calada.
+import {
+  escalaMinima, limitarOffset, areaDeOrigem, prenderEscala, zoomNoCentro,
+  enquadrarInicial, TETO_DE_ZOOM,
+} from '/web/js/recorte.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -279,6 +346,184 @@ $('btn-apagar').onclick = async () => {
 const avisar = (t, classe = '') => {
   $('aviso').className = `aviso ${classe}`;
   $('aviso').textContent = t ?? '';
+};
+
+// --------------------------------------------------------- recorte da foto
+// A conta do enquadramento mora em `recorte.js`, sem DOM e com teste: ela erra
+// CALADA (uma faixa vazia na borda, a foto escorregando com o zoom) e não há
+// como um teste de lógica pegar isso depois que virou arquivo.
+//
+// Aqui fica só o que é da tela: os gestos, o desenho no canvas e a exportação.
+const LADO = 240;          // o quadro na tela
+const SAIDA = 128;         // o PNG gravado — o mesmo tamanho das artes-semente
+
+let foto = null;           // a Image carregada
+let enq = { escala: 1, x: 0, y: 0 };
+let escalaMin = 1;
+let arrastando = null;
+
+const tela = $('tela');
+const ctx = tela.getContext('2d');
+
+function desenhar() {
+  ctx.clearRect(0, 0, LADO, LADO);
+  if (!foto) return;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(foto, enq.x, enq.y, foto.naturalWidth * enq.escala, foto.naturalHeight * enq.escala);
+}
+
+function ajustar(novo) {
+  enq = { escala: novo.escala, ...limitarOffset(novo, foto.naturalWidth, foto.naturalHeight, novo.escala, LADO) };
+  // A barra anda em relação ao MÍNIMO, ×100: assim o começo dela é sempre
+  // "cobrindo" e o fim é o teto, qualquer que seja o tamanho da foto.
+  $('f-zoom').value = String(Math.round((enq.escala / escalaMin) * 100));
+  desenhar();
+}
+
+function abrirFoto(arquivo) {
+  const url = URL.createObjectURL(arquivo);
+  const img = new Image();
+  img.onload = () => {
+    // A URL do blob não é mais necessária depois de decodificada; segurá-la
+    // vazaria memória a cada foto aberta.
+    URL.revokeObjectURL(url);
+    foto = img;
+    escalaMin = escalaMinima(img.naturalWidth, img.naturalHeight, LADO);
+    $('f-zoom').min = '100';
+    $('f-zoom').max = String(TETO_DE_ZOOM * 100);
+    ajustar(enquadrarInicial(img.naturalWidth, img.naturalHeight, LADO));
+    $('recorte').classList.add('aberto');
+    avisar('');
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    avisar('não consegui ler essa imagem', 'erro');
+  };
+  img.src = url;
+}
+
+$('f-foto').onchange = (e) => {
+  const arquivo = e.target.files?.[0];
+  if (arquivo) abrirFoto(arquivo);
+};
+
+// --- arrastar
+$('quadro').addEventListener('pointerdown', (e) => {
+  if (!foto) return;
+  arrastando = { px: e.clientX, py: e.clientY, x: enq.x, y: enq.y };
+  $('quadro').setPointerCapture(e.pointerId);
+});
+$('quadro').addEventListener('pointermove', (e) => {
+  if (!arrastando) return;
+  ajustar({
+    escala: enq.escala,
+    x: arrastando.x + (e.clientX - arrastando.px),
+    y: arrastando.y + (e.clientY - arrastando.py),
+  });
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  $('quadro').addEventListener(ev, () => { arrastando = null; });
+}
+
+// --- zoom
+$('quadro').addEventListener('wheel', (e) => {
+  if (!foto) return;
+  e.preventDefault();
+  const nova = prenderEscala(enq.escala * (e.deltaY < 0 ? 1.12 : 1 / 1.12), escalaMin);
+  ajustar({ escala: nova, ...zoomNoCentro(enq, enq.escala, nova, LADO) });
+}, { passive: false });
+
+$('f-zoom').oninput = () => {
+  if (!foto) return;
+  const nova = prenderEscala(escalaMin * (Number($('f-zoom').value) / 100), escalaMin);
+  ajustar({ escala: nova, ...zoomNoCentro(enq, enq.escala, nova, LADO) });
+};
+
+$('btn-recentrar').onclick = () => {
+  if (foto) ajustar(enquadrarInicial(foto.naturalWidth, foto.naturalHeight, LADO));
+};
+
+function fecharRecorte() {
+  foto = null;
+  $('recorte').classList.remove('aberto');
+  $('f-foto').value = '';
+  ctx.clearRect(0, 0, LADO, LADO);
+}
+$('btn-cancelar-foto').onclick = fecharRecorte;
+
+/** O PNG final: o círculo recortado da imagem original, em SAIDA x SAIDA. */
+function exportar() {
+  const c = document.createElement('canvas');
+  c.width = SAIDA; c.height = SAIDA;
+  const g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+
+  // Recorta em CÍRCULO, e não em quadrado: o ícone é redondo em toda tela onde
+  // aparece, e um quadrado com os cantos escondidos por CSS mostraria as
+  // pontas em qualquer lugar que esquecesse o border-radius.
+  g.save();
+  g.beginPath();
+  g.arc(SAIDA / 2, SAIDA / 2, SAIDA / 2, 0, Math.PI * 2);
+  g.clip();
+
+  // A área da imagem ORIGINAL que está no quadro — a mesma conta que a tela
+  // usa, e é por isso que ela mora num módulo só.
+  const a = areaDeOrigem(enq, enq.escala, LADO);
+  g.drawImage(foto, a.sx, a.sy, a.sw, a.sh, 0, 0, SAIDA, SAIDA);
+  g.restore();
+
+  return c.toDataURL('image/png');
+}
+
+$('btn-usar-foto').onclick = async () => {
+  if (!foto) return;
+  const nome = slug($('f-id').value || $('f-nome').value);
+  if (!nome) return void avisar('escreva o nome (ou o id) antes — é ele que dá o nome do arquivo', 'erro');
+
+  const arquivo = nome + '.png';
+  const dataUrl = exportar();
+
+  // Primeiro tenta gravar no REPOSITÓRIO, pelo dev-server. Só ele pode: o jogo
+  // instalado serve %LOCALAPPDATA%, e um PNG gravado lá não entraria em Release
+  // nenhum — a próxima atualização ainda o levaria para o backup como órfão.
+  let gravou = false;
+  try {
+    const r = await fetch('/__icones/save', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ arquivo, dataUrl }),
+    });
+    const j = await r.json();
+    if (j?.ok) {
+      gravou = true;
+      arquivos = j.arquivos ?? arquivos;
+      $('f-arquivo').replaceChildren(...arquivos.map((x) => new Option(x, x)));
+      $('f-arquivo').disabled = false;
+      $('btn-salvar').disabled = !perfil?.admin;
+    }
+  } catch { /* sem dev-server: cai no download, logo abaixo */ }
+
+  if (!gravou) {
+    // O caminho que sempre funciona. O arquivo desce para a pasta de downloads
+    // e o admin o move — dizer ISSO é obrigatório: um download silencioso
+    // pareceria "salvo", e o ícone quebraria na publicação.
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = arquivo;
+    link.click();
+    avisar('"' + arquivo + '" foi BAIXADO. Mova-o para web/img/icones/ no repositório '
+         + 'e rode: node tools/icones.mjs — daqui não dá para gravar no repositório.', 'erro');
+    // O arquivo ainda não existe na pasta, então não dá para selecioná-lo no
+    // seletor. O cadastro espera.
+    fecharRecorte();
+    return;
+  }
+
+  $('f-arquivo').value = arquivo;
+  pintarPrevia();
+  fecharRecorte();
+  avisar('"' + arquivo + '" gravado em web/img/icones/ — publique um Release para '
+       + 'ele chegar em quem joga.', 'ok');
 };
 
 // ------------------------------------------------------------------ lista

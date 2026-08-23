@@ -145,6 +145,20 @@ node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # torto (vazio, texto, `data:text/html`) vira um
                              # `src` que o navegador busca, não acha e desenha
                              # como quadrado vazio
+node web/js/esconder.test.mjs # varre TODA página de web/ perguntando uma coisa
+                             # só: o atributo `hidden` realmente esconde? Ele
+                             # não é mágica — é um `[hidden] { display:none }`
+                             # na folha do NAVEGADOR, a especificidade mais
+                             # baixa que existe, e qualquer `#foo { display: }`
+                             # nosso ganha dela. O JS marca o atributo, o DOM
+                             # fica certo, `el.hidden` é `true`, e o elemento
+                             # continua na tela: sem erro, sem console, e quem
+                             # olhou só viu o caso em que ele DEVE aparecer.
+                             # Foi assim que "ÍCONE NOVO — escolha-o no seu
+                             # perfil" ficou aparecendo em TODO fim de duelo,
+                             # com a arte vazia, inclusive para quem perdeu.
+                             # Prova também que a varredura reconhece o caso
+                             # ruim — senão "nenhum culpado" não provaria nada
 npm run icones:check         # todo ícone do catálogo tem arte? A imagem mora na
                              # coluna `imagem` (0039) e a coluna é nullable de
                              # propósito, então o banco aceita a linha sem ela —
@@ -1063,6 +1077,16 @@ impossível).
 
 Na tela de fim de duelo ele aparece **aberto**, e não virado como as cartas: é
 um só e é raro, e a virada existe para dar ritmo a três ou quatro cartas.
+
+> **E some quando não houve ícone — o que exigiu um `#end-icone[hidden]`.** O
+> `mostrarIconeGanho(null)` sempre fez `caixa.hidden = true`, e isso não fazia
+> nada: o `hidden` do HTML é uma regra da folha do NAVEGADOR, e o
+> `#end-icone { display: flex }` de `duel.html` ganhava dela. O aviso "ÍCONE
+> NOVO — escolha-o no seu perfil" ficava na tela em todo fim de duelo, com a
+> arte vazia e o nome em branco, **inclusive para quem perdeu**. Todos os outros
+> overlays da tela (`#end-overlay`, `#sel-overlay`, `#chain-overlay`, `#reveal`,
+> `#coin-overlay`, `#atk-seta`…) já tinham o seu guarda; este foi o único
+> esquecido. `node web/js/esconder.test.mjs` varre isso em toda página.
 
 > **A Loja ainda não vende ícone.** O catálogo já tem `preco`, `na_loja` e
 > `raridade`, e `dar_icone()` (admin) é a porta de serviço enquanto a compra não

@@ -657,6 +657,13 @@
   #end-icone { display: flex; align-items: center; gap: 12px; justify-content: center;
                margin: 4px auto 14px; padding: 10px 14px; max-width: 320px;
                border: 2px solid var(--gold); background: var(--panel); }
+  /* Sem este guarda, `caixa.hidden = true` nao faz NADA: o [hidden] do
+     navegador e um `display:none` de folha de usuario, e a regra de ID acima
+     ganha dele. O aviso ficava na tela em TODO fim de duelo, com a arte vazia
+     e o nome em branco, dizendo ICONE NOVO para quem nao ganhou nada — e
+     para quem perdeu. Mesma armadilha da seta de ataque publicada invisivel.
+     Todo overlay desta tela tem o seu; este foi o unico esquecido. */
+  #end-icone[hidden] { display: none; }
   #end-icone img { width: 52px; height: 52px; border-radius: 50%; flex: none;
                    border: 2px solid var(--gold); }
   #end-icone .txt { text-align: left; display: flex; flex-direction: column; gap: 2px; }

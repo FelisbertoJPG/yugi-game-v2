@@ -19,7 +19,7 @@
 
 import {
   cadastrar, entrar, sair, sessao, req,
-  recuperarSenha, sessaoDoHash, trocarSenha, contaAtual,
+  recuperarSenha, sessaoDoHash, trocarSenha, contaAtual, perfilAtual,
 } from '/web/js/supabase.js';
 
 /** Cria a conta. `usuario` é o nome no jogo; o e-mail é a credencial. */
@@ -119,5 +119,38 @@ export async function requireLogin() {
   const username = await me();
   if (username) return username;
   location.href = '/web/login.html';
+  return null;
+}
+
+/**
+ * Chame no boot de toda página da **Área de Teste** — as ferramentas de quem
+ * administra o jogo (banlist, listas, boosters, NPCs, tabuleiros, trilha,
+ * ícones, estruturais). Sem sessão manda para o login; com sessão de jogador
+ * comum manda para a home. Devolve o perfil (`{usuario, admin}`) quando passa.
+ *
+ * **Isto é a PORTA, não a fechadura.** Quem barra de verdade é a RLS no
+ * servidor: `conteudo`, `decks_npc`, `tabuleiros`, `icones` e `creditar_dp`
+ * exigem `eh_admin()`, e nada do que se faça no navegador contorna isso. O
+ * guarda daqui existe porque uma ferramenta de administração aberta na cara do
+ * jogador é uma promessa que o servidor não cumpre: ele monta a banlist inteira,
+ * clica em publicar e leva um 403 — pior que não ter visto o botão.
+ *
+ * Por isso a resposta vem do SERVIDOR a cada abertura, e não de um `admin`
+ * guardado no `localStorage`: o cache pouparia uma consulta e transformaria a
+ * porta numa linha de texto que qualquer um edita. Sem conseguir perguntar
+ * (rede caída), o desfecho é o mesmo de "não é admin" — a Área de Teste não é
+ * onde se joga offline, e supor que sim seria supor a favor de quem não devia
+ * entrar.
+ */
+export async function requireAdmin() {
+  const username = await requireLogin();
+  if (!username) return null;
+
+  const perfil = await perfilAtual().catch(() => null);
+  if (perfil?.admin) return perfil;
+
+  // `replace`, e não `href`: quem foi barrado não pode voltar para cá com o
+  // botão de voltar do navegador e encontrar a página já montada atrás.
+  location.replace('/web/index.html');
   return null;
 }

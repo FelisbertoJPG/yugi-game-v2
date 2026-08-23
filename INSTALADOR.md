@@ -321,7 +321,7 @@ a troca do próprio exe, e a trava do duelo.
 `npm run update:test` roda as quatro que não precisam de rede
 (`--test-update`, `--test-offline`, `--test-selfupdate`, `--test-update-duelo`).
 
-### `--test-update` — a engine (35 asserções, sem rede)
+### `--test-update` — a engine (63 asserções, sem rede)
 
 Monta um "Release falso" no `%TEMP%` e roda `Carregar` → `Montar` → `Aplicar` → re-scan pelo
 mesmo caminho de código do GitHub. Os casos:
@@ -338,6 +338,7 @@ mesmo caminho de código do GitHub. Os casos:
 | volatilidade | ajuste no front pede só `game`, e o pacote de cartas não é tocado |
 | raízes sobrepostas | regressão do bug do §2 — os dois pacotes convivem em `ygo-data/data` |
 | payload embutido | instalação nova nasce **em dia** (§11); e sem o `payload.markers` o fantasma reaparece |
+| exe velho, conteúdo em dia | o boot AINDA oferece atualização — era aqui que o cliente congelava (§12) |
 
 ### `--test-casca` — a troca do motor em disco (25 asserções, sem rede)
 
@@ -513,3 +514,58 @@ nova não peça nada, e que **sem** eles ela volte a pedir os dois pacotes.
 > recurso do `duel-server.dll` — está literalmente dentro do binário compilado. Por isso
 > `duel-server/bin/` entrou no `.gitignore`: um `git add -A` de rotina publicaria o segredo,
 > e nada acusaria, porque o arquivo é binário e o diff não mostra nada legível.
+
+---
+
+## 12. O exe congelado — a segunda metade da atualização fantasma
+
+**O sintoma, palavras do jogador:** *"atualizou umas 2 vezes e mesmo assim está com um
+cliente bem antigo"*.
+
+**A cadeia.** Quem baixa e troca o executável é `UpdateService.TrocarExecutavel()`, e ele
+só é chamado de dentro de `UpdateService.Rodar()` — ou seja, **dentro do `Aplicar`**. O
+`Aplicar` só roda quando o boot decidiu que há atualização, e essa decisão é uma linha só:
+
+```csharp
+_plano = _engine.Montar(_manifesto, BuildConfig.InstallerVersion);
+if (_plano.NadaAFazer) return false;   // -> abre web/index.html, nao a tela de update
+```
+
+E o `NadaAFazer` era:
+
+```csharp
+public bool NadaAFazer =>
+    !ABaixar.Any() && !PayloadsPendentes.Any() && Orfaos.Count == 0;
+```
+
+O `InstaladorDesatualizado` — calculado logo ali, no passo 4 do `Montar` — **não entrava na
+conta**. Então bastava o conteúdo ficar em dia (o que acontece no primeiro update que dá
+certo) para todo boot seguinte responder "tudo em dia" com um exe de duas versões atrás.
+Nunca mais havia uma janela em que a troca pudesse ser oferecida.
+
+**Por que isso congela o MOTOR junto.** Desde 19/08/2026 o `engine.zip` cai em
+`.staged/engine` e quem o aplica é a casca (`duel-server/host/Estagio.cs`), que só existe a
+partir da 0.15.0. Um exe anterior baixa o pacote, grava o marcador, e roda para sempre o
+motor embutido nele. Front novo todo dia, motor parado, sem um erro em lugar nenhum — o
+mesmo desfecho do `installer: null` (§0.1 das pendências), por um caminho diferente e
+sobrevivente à correção daquele.
+
+**A correção (23/08/2026).**
+
+```csharp
+public bool SemConteudo => !ABaixar.Any() && !PayloadsPendentes.Any() && Orfaos.Count == 0;
+public bool NadaAFazer  => SemConteudo && !InstaladorDesatualizado;
+```
+
+Três ajustes vêm junto, e cada um evita um efeito colateral:
+
+- **`AplicarAsync` sai por `SemConteudo`**, não por `NadaAFazer`. Sair por `NadaAFazer`
+  deixaria de sair (o plano tem o exe pendente) e abriria uma pasta de backup vazia a cada
+  boot; entrar de vez também não serve, porque não há arquivo nenhum a trocar ali.
+- **`BytesTotais` conta o exe**, e o denominador do progresso do conteúdo virou
+  `BytesConteudo`. Sem isso a tela prometia "0,8 MB" e baixava setenta.
+- **`Resumo()` diz "o proprio Classic Duels (x.y.z)"** — antes a tela abriria dizendo
+  "tudo em dia" no exato boot em que havia algo a fazer.
+
+**Coberto por** `ExeVelhoNaoFicaCongelado` (`--test-update`), com o par CONTROLE: com o exe
+em dia e o conteúdo em dia, `NadaAFazer` continua verdadeiro e nenhuma tela abre.

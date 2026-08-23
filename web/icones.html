@@ -202,8 +202,8 @@
 </div>
 
 <script type="module">
-import { requireLogin } from '/web/js/auth.js';
-import { perfilAtual, contaAtual } from '/web/js/supabase.js';
+import { requireAdmin } from '/web/js/auth.js';
+import { contaAtual } from '/web/js/supabase.js';
 import {
   catalogo, salvarIcone, apagarIcone, darIcone, escolherIcone,
   caminhoDoIcone, slug, semImagem, PADRAO,
@@ -217,18 +217,11 @@ import {
 
 const $ = (id) => document.getElementById(id);
 
-const username = await requireLogin();
-if (!username) throw new Error('redirecionando para login');
-
-// A recusa de verdade é da RLS (`eh_admin()`), como em toda a Área de Teste.
-// Isto aqui só evita oferecer o que seria negado — e dizer por quê, em vez de
-// deixar o admin descobrir com uma mensagem do Postgres depois de digitar tudo.
-const perfil = await perfilAtual().catch(() => null);
-if (!perfil?.admin) {
-  $('aviso').className = 'aviso erro';
-  $('aviso').textContent = 'só um admin cadastra ícones — você pode ver, não salvar.';
-  for (const id of ['btn-salvar', 'btn-apagar']) $(id).disabled = true;
-}
+// Ferramenta de ADMIN (Área de Teste): quem não é admin volta para a home.
+// Antes daqui a tela ABRIA para o jogador comum, só com os botões
+// desligados — um catálogo de administração à mostra e inútil.
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Área de Teste: só admin');
 
 let lista = [];
 let editando = null;    // id do ícone aberto no formulário, ou null
@@ -410,7 +403,7 @@ function abrir(i) {
   $('f-raridade').value = i.raridade ?? 'N';
   $('f-gratuito').checked = !!i.gratuito;
   $('f-loja').checked = !!i.na_loja;
-  $('btn-apagar').hidden = !perfil?.admin;
+  $('btn-apagar').hidden = false;
   $('btn-usar').hidden = false;
   avisar('');
   desenhar();

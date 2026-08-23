@@ -21,7 +21,7 @@ import { TILE, buildGround, getProp, rnd } from '/web/js/tileset.js';
 import { makeActor, coresPara, CORES_JOGADOR, ACTOR_W, ACTOR_H, QUADROS } from '/web/js/actors.js';
 import { buildMap } from '/web/js/citymap.js';
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { requireLogin } from '/web/js/auth.js';
+import { requireAdmin } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards/${id}.jpg`;
@@ -51,8 +51,11 @@ let db = null;
 const nameOf = (id) => db?.brief(id)?.name ?? String(id);
 
 // ---------------------------------------------------------------- boot
-const username = await requireLogin();
-if (!username) throw new Error('redirecionando para login');
+// Ferramenta de ADMIN (Área de Teste): quem não é admin volta para a home.
+// A trava de verdade é a RLS do servidor — isto é só não abrir a ferramenta
+// para quem levaria 403 ao publicar. Ver requireAdmin() em auth.js.
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Área de Teste: só admin');
 
 $('title').textContent = `▚ ${scenario.name.toUpperCase()}`;
 document.title = `${scenario.name} — Classic Duels`;

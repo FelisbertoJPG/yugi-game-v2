@@ -146,18 +146,21 @@
 
 <script type="module">
 import { getDP, hydrateWallet, creditarDP } from '/web/js/wallet.js';
-import { perfilAtual } from '/web/js/supabase.js';
+import { requireAdmin } from '/web/js/auth.js';
 import { listarDecksNoBanco, apagarDeckNoBanco, playerDeckPath } from '/web/js/projectdecks.js';
 import { esquecerDeckLocal } from '/web/js/storage.js';
 const $ = (id) => document.getElementById(id);
+
+// A Área de Teste inteira é de admin: as ferramentas daqui publicam conteúdo
+// do jogo, e a RLS (`eh_admin()`) recusa o resto. Quem não é admin volta
+// para a home antes de a tela montar.
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Área de Teste: só admin');
 
 await hydrateWallet();
 const renderDP = () => { $('dp').textContent = `${getDP()} DP`; };
 renderDP();
 
-// O controle de DP é só do admin. A trava de verdade é a RLS no servidor; isto
-// aqui é só não mostrar um botão que ia recusar.
-const perfil = await perfilAtual().catch(() => null);
 if (perfil?.admin) {
   $('admin-dp').hidden = false;
   $('admin-decks').hidden = false;

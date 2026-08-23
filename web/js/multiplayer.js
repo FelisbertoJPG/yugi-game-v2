@@ -26,8 +26,12 @@ export const logado = () => !!sessao();
 // ------------------------------------------------------------------ perfil
 
 /**
- * Seu nome, sua etiqueta (o `[22502]` que os outros usam para te achar) e o
- * icone escolhido.
+ * Seu nome, sua etiqueta (o `[22502]` que os outros usam para te achar), o
+ * ícone escolhido e se você é admin.
+ *
+ * O `admin` vem junto porque a home precisa dele para decidir se mostra o botão
+ * da Área de Teste, e pedi-lo numa segunda consulta seria a mesma linha da
+ * mesma tabela, duas vezes, no mesmo boot.
  *
  * **Filtra pelo SEU id, e isso não é redundância.** A policy de `perfis` é
  * `id = auth.uid() OR eh_admin()`: para uma conta comum o `select` já devolve
@@ -43,7 +47,7 @@ export const logado = () => !!sessao();
 export async function meuPerfil() {
   const conta = await contaAtual();
   if (!conta?.id) return null;
-  const r = await req(`perfis?select=usuario,etiqueta,icone_id&id=eq.${encodeURIComponent(conta.id)}`);
+  const r = await req(`perfis?select=usuario,etiqueta,icone_id,admin&id=eq.${encodeURIComponent(conta.id)}`);
   return r.ok && r.dados?.[0] ? r.dados[0] : null;
 }
 

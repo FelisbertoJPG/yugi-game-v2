@@ -49,8 +49,21 @@ namespace DuelServer.Update
         public IEnumerable<ItemPlano> ABaixar => Arquivos.Where(a => a.Acao == Acao.Baixar);
         public IEnumerable<PayloadPlano> PayloadsPendentes => Payloads.Where(p => p.Precisa);
 
-        public long BytesTotais =>
+        /// <summary>
+        /// Só o CONTEÚDO: arquivos avulsos e pacotes. É o denominador do
+        /// progresso do <c>AplicarAsync</c>, que baixa só isto — o executável tem
+        /// etapa própria depois, com barra própria.
+        /// </summary>
+        public long BytesConteudo =>
             ABaixar.Sum(a => a.Bytes) + PayloadsPendentes.Sum(p => p.Fonte.Size);
+
+        /// <summary>
+        /// Tudo o que vai descer pela rede, o executável INCLUSO — é o número que
+        /// a tela mostra ao jogador. Omitir os ~67 MB do exe faria a tela
+        /// prometer "0,8 MB" e baixar setenta.
+        /// </summary>
+        public long BytesTotais =>
+            BytesConteudo + (InstaladorDesatualizado ? (Manifesto?.Installer?.Size ?? 0) : 0);
 
         /// <summary>
         /// Algum pacote pendente e' de motor (cai em `.staged/`)? Quem pergunta e'
@@ -60,8 +73,29 @@ namespace DuelServer.Update
         /// </summary>
         public bool TrocaMotor => PayloadsPendentes.Any(p => p.Fonte != null && p.Fonte.EmEstagio);
 
-        public bool NadaAFazer =>
+        /// <summary>
+        /// Não há CONTEÚDO a mexer. É o que o <c>AplicarAsync</c> pergunta: com
+        /// isto verdadeiro ele não tem arquivo nenhum para trocar e sai na hora,
+        /// sem abrir uma pasta de backup vazia.
+        /// </summary>
+        public bool SemConteudo =>
             !ABaixar.Any() && !PayloadsPendentes.Any() && Orfaos.Count == 0;
+
+        /// <summary>
+        /// Nada a fazer DE VERDADE — o próprio executável incluído.
+        ///
+        /// O exe estava de fora, e isso congelava o jogador para sempre: assim que
+        /// os arquivos e os pacotes ficavam em dia, o plano dizia "tudo em dia", o
+        /// boot não abria a tela de atualização e a troca do exe — que só acontece
+        /// dentro do <c>Aplicar</c> — nunca era chamada. Um exe anterior a 0.15.0
+        /// não aplica o pacote `engine` (ele cai em `.staged/` e quem o aplica é a
+        /// casca), então o motor ficava parado no que veio embutido no exe: front
+        /// novo todo dia, motor congelado, e nenhuma tela dizendo nada.
+        ///
+        /// Aconteceu de verdade. O sintoma, do lado de quem joga, é "atualizei
+        /// duas vezes e continuo com o cliente velho".
+        /// </summary>
+        public bool NadaAFazer => SemConteudo && !InstaladorDesatualizado;
 
         public string Resumo()
         {
@@ -71,6 +105,8 @@ namespace DuelServer.Update
             if (n > 0) partes.Add($"{n} arquivo(s)");
             foreach (var p in PayloadsPendentes) partes.Add($"pacote '{p.Fonte.Id}'");
             if (Orfaos.Count > 0) partes.Add($"{Orfaos.Count} orfao(s)");
+            if (InstaladorDesatualizado)
+                partes.Add($"o proprio Classic Duels ({Manifesto?.Installer?.Version})");
             return string.Join(" + ", partes) + $" — {BytesTotais / 1048576.0:0.#} MB";
         }
     }
@@ -298,10 +334,15 @@ namespace DuelServer.Update
 
         public async Task<bool> AplicarAsync(Plano plano, CancellationToken ct = default)
         {
-            if (plano.NadaAFazer) { Prog("pronto", "nada a fazer", 1); return true; }
+            // `SemConteudo`, e nao `NadaAFazer`: o plano pode ter APENAS o exe
+            // desatualizado, e ai nao ha' arquivo nenhum para trocar aqui — quem
+            // troca o exe e' o `UpdateService`, depois desta chamada devolver
+            // `true`. Sair por `NadaAFazer` deixaria de sair; entrar de vez
+            // abriria uma pasta de backup vazia a cada boot.
+            if (plano.SemConteudo) { Prog("pronto", "nada a fazer", 1); return true; }
 
             string backup = Path.Combine(_pastaBackups, DateTime.Now.ToString("yyyy-MM-dd-HHmmss"));
-            long feitos = 0, total = Math.Max(1, plano.BytesTotais);
+            long feitos = 0, total = Math.Max(1, plano.BytesConteudo);
 
             // Os marcadores/inventários de ANTES vão para o backup junto com os
             // arquivos. Sem eles, restaurar devolveria o conteúdo antigo deixando

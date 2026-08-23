@@ -5,7 +5,7 @@
  */
 import { SCENARIOS, isUnlocked } from '/web/js/world.js';
 import { getDP, hydrateWallet } from '/web/js/wallet.js';
-import { requireLogin } from '/web/js/auth.js';
+import { requireAdmin } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -72,8 +72,11 @@ function render() {
 $('btn-home').onclick = () => (location.href = '/web/teste.html');
 
 // ---------------------------------------------------------------- boot
-const username = await requireLogin();
-if (!username) throw new Error('redirecionando para login');
+// Ferramenta de ADMIN (Área de Teste): quem não é admin volta para a home.
+// A trava de verdade é a RLS do servidor — isto é só não abrir a ferramenta
+// para quem levaria 403 ao publicar. Ver requireAdmin() em auth.js.
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Área de Teste: só admin');
 
 await hydrateWallet();
 $('dp').textContent = `${getDP()} DP`;

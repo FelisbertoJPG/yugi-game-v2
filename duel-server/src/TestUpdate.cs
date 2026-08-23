@@ -52,6 +52,7 @@ namespace DuelServer
                 InstalacaoNovaNaoOfereceAtualizacaoFantasma(Sub(bancada, "9-fantasma"));
                 InstalacaoComNomeAntigoEMigrada(Sub(bancada, "10-renomeacao"));
                 MotorNovoFicaEmEstagio(Sub(bancada, "11-motor"));
+                ExeVelhoNaoFicaCongelado(Sub(bancada, "12-exe-velho"));
             }
             finally
             {
@@ -527,6 +528,66 @@ namespace DuelServer
                   "atualizacao so' de front NAO pede para reabrir o jogo");
         }
 
+        /// <summary>
+        /// O EXECUTAVEL velho nao pode ficar congelado para sempre.
+        ///
+        /// Quem troca o exe e' o `UpdateService`, e ele so' e' chamado DENTRO do
+        /// `Aplicar` — que so' roda quando o boot decide que ha' atualizacao, isto
+        /// e', quando o plano nao diz `NadaAFazer`. Enquanto `NadaAFazer` olhava
+        /// so' arquivos, pacotes e orfaos, bastava o CONTEUDO ficar em dia para o
+        /// jogo dizer "tudo em dia" com um exe de duas versoes atras — e nunca
+        /// mais oferecer a troca.
+        ///
+        /// Isso e' pior do que parece: um exe anterior a 0.15.0 nao aplica o
+        /// pacote `engine` (ele cai em `.staged/`, e quem aplica e' a casca).
+        /// Entao o motor congelava junto, para sempre, enquanto o front continuava
+        /// chegando todo dia. Do lado de quem joga: "atualizei duas vezes e
+        /// continuo com o cliente velho", sem nenhum erro em lugar nenhum.
+        ///
+        /// O par CONTROLE e' a outra metade: com o exe EM DIA e o conteudo em dia,
+        /// `NadaAFazer` tem de continuar verdadeiro — senao a tela de atualizacao
+        /// abriria a cada boot para nao fazer nada.
+        /// </summary>
+        static void ExeVelhoNaoFicaCongelado(string dir)
+        {
+            var (raiz, fonte) = Cenario(dir, comMotor: true);
+            var eng = NovaEngine(raiz, fonte);
+            var m = eng.CarregarManifestoAsync().GetAwaiter().GetResult();
+
+            // Primeiro boot: instala o conteudo todo, com um exe VELHO (0.0.5).
+            eng.AplicarAsync(eng.Montar(m, "0.0.5")).GetAwaiter().GetResult();
+
+            // Segundo boot: o conteudo esta' em dia, o exe continua velho.
+            var plano = eng.Montar(m, "0.0.5");
+            Checa(plano.SemConteudo, "o conteudo ficou em dia (nao ha' arquivo a trocar)",
+                  plano.Resumo());
+            Checa(plano.InstaladorDesatualizado, "o plano ve' que o exe esta' velho");
+            Checa(!plano.NadaAFazer,
+                  "com o exe velho, o boot AINDA oferece atualizacao (era aqui que congelava)",
+                  plano.Resumo());
+            Checa(plano.Resumo().Contains("Classic Duels"),
+                  "e a tela diz que o que falta e' o proprio executavel", plano.Resumo());
+            Checa(plano.BytesTotais >= 66_000_000,
+                  "o total prometido inclui os bytes do exe", $"{plano.BytesTotais} bytes");
+
+            // Aplicar um plano so'-exe nao pode mexer em arquivo nenhum — nem
+            // abrir uma pasta de backup vazia a cada boot. Quem baixa o exe e' o
+            // UpdateService, DEPOIS desta chamada devolver true.
+            string backups = Path.Combine(dir, "backups");
+            bool tinhaBackup = Directory.Exists(backups);
+            int antes = tinhaBackup ? Directory.GetDirectories(backups).Length : 0;
+
+            Checa(eng.AplicarAsync(plano).GetAwaiter().GetResult(),
+                  "aplicar um plano so'-exe termina bem");
+            int depois = Directory.Exists(backups) ? Directory.GetDirectories(backups).Length : 0;
+            Checa(depois == antes, "e nao criou pasta de backup nenhuma", $"{antes} -> {depois}");
+
+            // CONTROLE: exe em dia, conteudo em dia. Nada a fazer de verdade.
+            var emDia = eng.Montar(m, "0.1.0");
+            Checa(emDia.NadaAFazer, "com o exe EM DIA, o boot nao oferece nada", emDia.Resumo());
+            Checa(emDia.Resumo() == "tudo em dia", "e o resumo diz 'tudo em dia'", emDia.Resumo());
+        }
+
         static void MontarPayload(string destino, string release, Manifest m, bool comMarcadores)
         {
             using var fs = File.Create(destino);
@@ -852,7 +913,12 @@ namespace DuelServer
             {
                 GameVersion = "teste-1",
                 DisplayName = "Classic Duels",
-                Installer = new InstaladorInfo { Version = "0.1.0", Asset = "ClassicDuels.exe" },
+                // O `Size` importa: e' ele que faz o exe aparecer no total que a
+                // tela promete ao jogador (ver ExeVelhoNaoFicaCongelado).
+                Installer = new InstaladorInfo
+                {
+                    Version = "0.1.0", Asset = "ClassicDuels.exe", Size = 66_000_000
+                },
                 ManagedRoots = new List<RaizGerenciada>
                 {
                     new() { Path = "web", RemoveMode = "backup" },

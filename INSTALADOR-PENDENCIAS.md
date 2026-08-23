@@ -63,6 +63,33 @@ preso — o binário deles é o de antes.
 
 ---
 
+## §0.2 — E ainda assim o exe congelava: o `NadaAFazer` (23/08/2026)
+
+Preencher o `installer` (§0.1) resolveu *avisar*. Não resolveu *oferecer*. Um segundo
+relato, um dia depois: *"atualizou umas 2 vezes e mesmo assim está com um cliente bem
+antigo"*.
+
+Quem troca o exe é o `UpdateService`, chamado de dentro do `Aplicar`; o `Aplicar` só roda
+quando o boot decide que há atualização; e essa decisão é o `Plano.NadaAFazer`, que olhava
+**só arquivos, pacotes e órfãos**. O `InstaladorDesatualizado` era calculado no mesmo
+`Montar`, duas linhas acima, e ficava de fora da conta.
+
+Consequência: bastava o conteúdo ficar em dia — o que acontece no primeiro update que dá
+certo — para todo boot seguinte dizer "tudo em dia" com um exe de duas versões atrás. A
+janela em que a troca podia ser oferecida nunca mais existia. E como um exe < 0.15.0 não
+aplica o pacote `engine`, o motor congelava junto, exatamente como no §0.1, agora
+**sobrevivendo à correção do §0.1**.
+
+Correção em `UpdateEngine.cs`: `NadaAFazer = SemConteudo && !InstaladorDesatualizado`, com
+`AplicarAsync` saindo por `SemConteudo` (para não abrir backup vazio), `BytesTotais`
+contando os bytes do exe e o `Resumo()` dizendo que o que falta é o próprio Classic Duels.
+Coberto por `ExeVelhoNaoFicaCongelado` em `--test-update`, com par CONTROLE.
+
+**A lição das duas metades juntas:** o caminho do auto-update do exe nunca tinha sido
+exercitado de ponta a ponta contra um cliente ATRASADO. Cada teste cobria um elo
+(`--test-selfupdate` prova a troca do arquivo; `--test-update` provava o diff do conteúdo),
+e o buraco estava na junta entre eles — na pergunta "o boot chega a oferecer?".
+
 ## §0 — O motor virou conteúdo (19/08/2026)
 
 Era a pendência mais cara e não estava nesta lista, porque parecia "o jeito que as coisas

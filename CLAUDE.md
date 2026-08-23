@@ -187,12 +187,17 @@ npm run atalho               # poe "Classic Duels" na area de trabalho apontando
                              # é feito dos MESMOS game.zip/cards.zip do Release, senão a
                              # instalação nova oferece uma atualização do que ela já tem
 
-npm run update:test          # 126 asserções do instalador/auto-updater (sem rede):
+npm run update:test          # 142 asserções do instalador/auto-updater (sem rede):
                              # --test-casca + --test-update + --test-offline
                              #   + --test-selfupdate + --test-update-duelo
                              # (--test-casca é a troca do MOTOR em disco: o pacote
                              #  que ficou em .staged/, a quarentena de um motor que
                              #  não sobe, e o motor anterior voltando)
+                             # --test-update cobre também o EXE que ficou para
+                             # trás com o conteúdo em dia: `NadaAFazer` olhava
+                             # só arquivos/pacotes/órfãos, então o boot dizia
+                             # "tudo em dia" e a troca do exe — que só roda
+                             # dentro do Aplicar — nunca era chamada
 npm run release:build        # DRY-RUN: gera dist/release/ (game.zip, cards.zip, manifest.json)
                              # o cards.zip (21 mil .lua) é CACHEADO em dist/.cache por
                              # impressão digital das entradas: ~4s quando o banco não
@@ -458,6 +463,26 @@ mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
 > publicar um exe empacotado antes da última mexida na casca (compara
 > `dist/.cache/casca.digital`), que entregaria uma casca velha carregando um motor
 > novo, em silêncio.
+
+> **A SEGUNDA metade do mesmo congelamento (23/08/2026).** Preencher o
+> `installer` no manifesto não bastava: quem troca o exe é o `UpdateService`, e
+> ele só é chamado DENTRO do `Aplicar` — que só roda quando o boot decide que há
+> atualização, isto é, quando o plano não diz `NadaAFazer`. E `NadaAFazer` olhava
+> só arquivos, pacotes e órfãos. Bastava o CONTEÚDO ficar em dia (o que acontece
+> no primeiro update bem-sucedido) para todo boot seguinte responder "tudo em
+> dia" com um exe de duas versões atrás — e nunca mais oferecer a troca.
+>
+> O desfecho era o mesmo de antes, por um caminho diferente: exe < 0.15.0 não
+> aplica o pacote `engine` (ele fica em `.staged/`), então o motor congelava
+> junto, **para sempre**, enquanto o front continuava chegando. O relato do
+> jogador foi literalmente *"atualizou umas 2 vezes e mesmo assim está com um
+> cliente bem antigo"*.
+>
+> Hoje `NadaAFazer = SemConteudo && !InstaladorDesatualizado`, e o `AplicarAsync`
+> sai por `SemConteudo` (senão abriria uma pasta de backup vazia a cada boot). O
+> `Resumo()` e o `BytesTotais` passaram a contar o exe — a tela prometia "0,8 MB"
+> e baixava setenta. Coberto por `ExeVelhoNaoFicaCongelado` em `--test-update`,
+> com o par CONTROLE de que o exe EM DIA continua não abrindo tela nenhuma.
 
 > **Compile sempre com o servidor parado.** O `.exe` fica travado enquanto roda,
 > o `dotnet build` falha *e o teste seguinte roda o binário antigo* — parece que a
@@ -1206,11 +1231,33 @@ um dos dois back-ends). Sessão por cookie httpOnly (`store/sessions.json`);
 como o front sempre fala com o mesmo origin da API, `fetch` já manda o
 cookie sozinho, sem precisar mexer em nenhuma chamada existente.
 
-`requireLogin()` no boot de `index/loja/deck/inventario/adversario/duel.html`
-redireciona pra `web/login.html` sem sessão. `deck.html` só exige login FORA
-do modo NPC (`?npc=<id>` edita o deck do ADVERSÁRIO, não mexe em nada seu);
-`npcs.html`/`campo.html`/`banlist.html` (Área de Teste) não pedem login —
-são ferramenta de configuração do jogo, não progresso de ninguém.
+`requireLogin()` no boot de `index/loja/deck/inventario/duel.html` redireciona
+pra `web/login.html` sem sessão.
+
+**A Área de Teste inteira é de ADMIN** (23/08/2026), por `requireAdmin()`
+(`web/js/auth.js`): sem sessão vai pro login, com sessão de jogador comum volta
+pra home. Vale para o `teste.html` e para CADA ferramenta dele —
+`banlist`, `listas`, `npcs`, `campo`, `ordenar`, `icones`, `estrutural`,
+`booster` (Booster Builder), `adversario`, `mundo`/`cidade`, e o
+`deck.html?npc=<id>` (que edita o deck e o pool de drop de um ADVERSÁRIO). O
+botão "⚙ Área de Teste" da home nasce `hidden` e só aparece com
+`meuPerfil().admin` — ao contrário, ele piscaria na tela de todo jogador no
+intervalo entre o boot e a resposta do perfil.
+
+> **Isto é a PORTA, não a fechadura.** Quem barra de verdade é a RLS: `conteudo`,
+> `decks_npc`, `tabuleiros`, `icones` e `creditar_dp` exigem `eh_admin()`, e o
+> campo `perfis.admin` não é auto-atribuível (gatilho `travar_admin`). O guarda
+> do cliente existe porque uma ferramenta de administração aberta na cara do
+> jogador é uma promessa que o servidor não cumpre: ele monta a banlist inteira,
+> clica em publicar e leva 403 — pior que não ter visto o botão. Por isso a
+> resposta vem do SERVIDOR a cada abertura, e não de um `admin` guardado no
+> `localStorage`, que viraria uma linha de texto que qualquer um edita.
+
+Antes disto só `deck.html` fora do modo NPC pedia login, e as ferramentas não
+pediam nada — "são ferramenta de configuração, não progresso de ninguém". O que
+essa conta esquecia é que `adversario.html` e `cidade.html` **furam a Trilha**:
+são a grade sem cadeado, e qualquer jogador que soubesse o endereço enfrentava
+qualquer adversário sem ter destrancado nada.
 
 **Admin gravando deck na Área de Teste.** O Deck Builder sem `?owned=1` mostra
 o banco inteiro, mas `salvar_deck` confere POSSE carta a carta — então o deck

@@ -276,7 +276,7 @@
         <span class="vivo"></span> <b id="online-n">—</b> online
       </span>
       <button class="test-link" id="btn-logout">sair</button>
-      <button class="test-link" id="btn-test">⚙ Área de Teste</button>
+      <button class="test-link" id="btn-test" hidden>⚙ Área de Teste</button>
     </div>
 
     <div class="title">
@@ -788,6 +788,16 @@ if (meuPerfilAgora?.usuario) {
   $('eu-nome').textContent = meuPerfilAgora.usuario;
   $('user-tag').textContent = meuPerfilAgora.usuario;
 }
+
+// A Área de Teste é das ferramentas de quem administra o jogo, e todas elas
+// publicam conteúdo — a RLS (`eh_admin()`) recusa o resto. O botão NASCE
+// escondido no HTML e só aparece aqui: ao contrário, ele piscaria na tela de
+// todo jogador no intervalo entre o boot e a resposta do perfil.
+//
+// Isto é a porta; a fechadura continua no servidor, e cada página da Área de
+// Teste tem o seu próprio `requireAdmin()` — quem digitar o endereço na barra
+// volta para cá.
+$('btn-test').hidden = !meuPerfilAgora?.admin;
 
 try {
   const amigosAgora = await listarAmigos();

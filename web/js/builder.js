@@ -36,7 +36,7 @@ import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 // O ícone como prêmio de vitória: a lista sai do catálogo publicado, e quem
 // sorteia é o servidor (`premiar_vitoria`, migration 0038).
 import { catalogo as catalogoDeIcones, caminhoDoIcone } from '/web/js/icones.js';
-import { requireLogin } from '/web/js/auth.js';
+import { requireLogin, requireAdmin } from '/web/js/auth.js';
 import { perfilAtual } from '/web/js/supabase.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
@@ -1649,12 +1649,19 @@ configureCardDetail({
 });
 
 // modo NPC (?npc=<id>) é ferramenta da Área de Teste, não tela de progresso
-// do jogador — não exige login, e por isso também não toca wallet/decks DO
-// JOGADOR (que agora são dado de conta). Lido cedo, antes do gate.
+// do jogador — exige sessão de ADMIN, e por isso também não toca
+// wallet/decks DO JOGADOR (que agora são dado de conta). Lido cedo, antes
+// do gate.
 const params = new URLSearchParams(location.search);
 const npcId = params.get('npc');
 
-if (!npcId) {
+// O modo NPC é ferramenta da Área de Teste: ele edita o deck e o pool de
+// drop de um ADVERSÁRIO, conteúdo publicado para todo mundo, e a RLS de
+// `decks_npc`/`conteudo` exige `eh_admin()`. Sem o guarda, um jogador que
+// digitasse ?npc= montava o baralho inteiro e levava 403 ao salvar.
+if (npcId) {
+  if (!(await requireAdmin())) throw new Error('Área de Teste: só admin');
+} else {
   const username = await requireLogin();
   if (!username) throw new Error('redirecionando para login');
 }

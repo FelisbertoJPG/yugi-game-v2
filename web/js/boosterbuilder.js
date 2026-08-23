@@ -18,6 +18,12 @@ import { hydrateCardLists } from '/web/js/cardlists.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 
+import { requireAdmin } from '/web/js/auth.js';
+// Ferramenta de ADMIN (Área de Teste): quem não é admin volta para a home.
+// A trava de verdade é a RLS do servidor — isto é só não abrir a ferramenta
+// para quem levaria 403 ao publicar. Ver requireAdmin() em auth.js.
+if (!(await requireAdmin())) throw new Error('Área de Teste: só admin');
+
 const $ = (id) => document.getElementById(id);
 const MAX_RENDER = 240;
 

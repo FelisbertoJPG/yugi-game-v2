@@ -19,7 +19,7 @@
 import { NPCS, hydrateCustomNpcs, loadNpcDecks, getNpcActiveDeck, listCampaignNames } from '/web/js/npcs.js';
 import { ordenarCampanha } from '/web/js/trilhaordem.js';
 import { pullFile, pushFile, aoGravar } from '/web/js/projectstore.js';
-import { requireLogin } from '/web/js/auth.js';
+import { requireAdmin } from '/web/js/auth.js';
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -175,7 +175,9 @@ function trocarCampanha(passo) {
 }
 
 // ------------------------------------------------------------------ boot
-if (!(await requireLogin())) throw new Error('sem sessão');
+// Ferramenta de ADMIN (Área de Teste): quem não é admin volta para a home.
+// A trava de verdade é a RLS do servidor. Ver requireAdmin() em auth.js.
+if (!(await requireAdmin())) throw new Error('Área de Teste: só admin');
 
 $('btn-voltar').onclick = () => { location.href = '/web/teste.html'; };
 $('camp-ant').onclick = () => trocarCampanha(-1);

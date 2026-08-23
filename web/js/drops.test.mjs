@@ -13,6 +13,7 @@ import {
   MAX_DROPS, DROP_ODDS, RARIDADES, planoRapido, chanceDoIcone,
 } from './drops.js';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
 const t = (nome, fn) => {
@@ -404,5 +405,52 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
     assert.ok(d);
   });
 }
+// ------------------------------------------- o quadro do icone e' VISIVEL
+
+/**
+ * A escolha de icones e' desenhada dentro de `#icone-escolha`, que mora num
+ * `.quadro-corpo` — e o CSS do Deck Builder tem
+ * `.quadro:not(.aberto) .quadro-corpo { display: none }`.
+ *
+ * Os quadros de RARIDADE sao gerados pelo `renderDropPool` e ganham/perdem o
+ * `aberto` sozinhos (um por vez). O do icone NAO e' uma gaveta: e' markup fixo,
+ * com o cabecalho sem onclick. Sem a classe `aberto` escrita ali, ele nunca a
+ * recebe de ninguem — e o `renderIcones` roda certo, enche o DOM, e a tela
+ * mostra so' o cabecalho. Foi exatamente o que aconteceu: "nao ta' deixando
+ * escolher entre os icones", sem um erro no console.
+ *
+ * A regra vale para QUALQUER `.quadro-corpo` escrito a mao no HTML, e nao so'
+ * para este: markup fixo nao passa pelo codigo que abre e fecha.
+ */
+{
+  const html = readFileSync(new URL('../deck.html', import.meta.url), 'utf8');
+
+  // Compara por TOKEN da lista de classes, e nao por /\bquadro\b/: em JS o
+  // traco conta como fronteira de palavra, entao aquele regex casaria tambem
+  // com `quadro-head` e `quadro-corpo` — e o teste acusaria o cabecalho, que
+  // nao tem corpo nenhum para esconder.
+  const quadros = [...html.matchAll(/<(?:section|div)\b[^>]*class="([^"]*)"[^>]*>/g)]
+    .map((m) => [m[0], m[1].trim().split(/\s+/)])
+    .filter(([, classes]) => classes.includes('quadro'));
+
+  t('o HTML ainda tem o quadro fixo do icone', () => {
+    assert.ok(quadros.length >= 1, 'nenhum .quadro escrito a mao no deck.html');
+    assert.ok(html.includes('id="icone-escolha"'), 'o container da escolha sumiu do HTML');
+  });
+
+  t('todo .quadro escrito a mao nasce ABERTO (senao o corpo fica display:none)', () => {
+    for (const [tag, classes] of quadros) {
+      assert.ok(classes.includes('aberto'),
+        'quadro fixo sem a classe `aberto` — o .quadro-corpo dele fica invisivel:\n        ' + tag);
+    }
+  });
+
+  t('a regra que esconde continua existindo (o teste morre junto com ela)', () => {
+    // Se um dia o CSS deixar de esconder, este teste passa a nao provar nada —
+    // melhor falhar e ser reescrito do que virar enfeite verde.
+    assert.match(html, /\.quadro:not\(\.aberto\)\s*\.quadro-corpo\s*\{[^}]*display:\s*none/);
+  });
+}
+
 console.log(`\n  ${pass} passaram, ${fail} falharam`);
 process.exit(fail === 0 ? 0 : 1);

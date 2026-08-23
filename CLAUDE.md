@@ -18,11 +18,19 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 52 testes do drop por DECK (pool por raridade, a % de cada
+node web/js/drops.test.mjs   # 55 testes do drop por DECK (pool por raridade, a % de cada
                              # uma, o descarte de quem tem carta mas quantidade zero, a
                              # reserva por NPC de quem ainda não tem pool próprio, e o
                              # [definir rápido] — que só leva carta COM raridade e nunca
-                             # remexe a que já está num quadro)
+                             # remexe a que já está num quadro). As três últimas são de
+                             # MARKUP, não de lógica: o quadro do ÍCONE é escrito à mão
+                             # no `deck.html` e o CSS tem
+                             # `.quadro:not(.aberto) .quadro-corpo { display:none }` —
+                             # sem a classe `aberto` ali, ele nunca a recebe de ninguém
+                             # (o cabeçalho dele não abre nada), e a escolha de ícones
+                             # era desenhada dentro de um container invisível. O
+                             # `renderIcones` rodava certo, o DOM enchia, e a tela
+                             # mostrava só o cabeçalho — sem um erro no console
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 10 testes do rascunho do Deck Estrutural: ele salva
                              # o trabalho, mas NUNCA é carregado de volta — ao abrir a
@@ -1022,6 +1030,17 @@ gravada no mesmo `upsert` que o resto do cadastro.
 
 Cada deck de NPC pode largar um **ícone**, configurado na aba DROPS ao lado do
 pool de cartas: uma lista de ícones e uma **chance própria** em % por vitória.
+
+> **O quadro do ícone precisa da classe `aberto` escrita no HTML.** Ele reusa a
+> moldura `.quadro` das gavetas de raridade, e junto com o visual vem a regra
+> `.quadro:not(.aberto) .quadro-corpo { display: none }`. As gavetas ganham e
+> perdem o `aberto` sozinhas (`renderDropPool`, uma aberta por vez); o do ícone é
+> markup fixo, com o cabeçalho sem `onclick` — então ele nunca receberia a classe
+> de ninguém. Sem ela, `renderIcones()` roda certo, enche o DOM e a tela mostra
+> só o cabeçalho: *"não está deixando escolher entre os ícones"*, sem um erro no
+> console. Guardado pelas três últimas asserções de `drops.test.mjs`, que valem
+> para **qualquer** `.quadro` escrito à mão — markup fixo não passa pelo código
+> que abre e fecha.
 
 > **Por que fora das gavetas de raridade.** Três razões: carta **repete** e
 > ícone não (a segunda cópia de uma rara é o jogo funcionando, o mesmo ícone

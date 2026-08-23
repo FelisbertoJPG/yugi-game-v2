@@ -154,7 +154,10 @@
                    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .icone-op.on { border-color: var(--gold); background: var(--panel); }
   .icone-op.on img { border-color: var(--gold); }
-  .icone-op:not(.on) { opacity: .42; }
+  /* Nao-escolhido fica so mais apagado, nao DESLIGADO: .42 e a opacidade que
+     a home usa para o icone que voce nao tem, e aqui nao ha nada desligado —
+     com nenhum escolhido ainda, a grade inteira parecia fora de alcance. */
+  .icone-op:not(.on) { opacity: .72; }
 
   .quadro {
     border: 1px solid var(--line); background: var(--panel); margin-bottom: 8px;
@@ -434,7 +437,12 @@
         <!-- O ÍCONE é um prêmio à parte do pool de cartas: carta repete e
              ícone não, e as gavetas já significam a % que a tela promete.
              Por isso ele tem chance própria, dita em número redondo. -->
-        <section class="quadro" id="quadro-icones" style="margin-top:12px">
+        <!-- `aberto` NAO e' decoracao: `.quadro:not(.aberto) .quadro-corpo` tem
+             `display:none`, e este quadro nao e' uma gaveta (o cabecalho dele nao
+             abre nada — `cursor:default`, sem onclick). Sem a classe, a escolha de
+             icones era desenhada dentro de um container invisivel: o `renderIcones`
+             rodava certo, o DOM enchia, e a tela mostrava so' o cabecalho. -->
+        <section class="quadro aberto" id="quadro-icones" style="margin-top:12px">
           <div class="quadro-head" style="cursor:default">
             <b style="color:var(--gold)">ÍCONE DE PERFIL</b>
             <span class="qtd" id="icone-conta">nenhum</span>

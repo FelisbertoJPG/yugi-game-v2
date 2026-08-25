@@ -65,6 +65,11 @@ export function montarRevelacao(alvo, itens, {
   nomeDe = (id) => String(id),
   arte = (id) => `https://images.ygoprodeck.com/images/cards/${id}.jpg`,
   colunas = 7,
+  // HTML de selo extra na face da frente — hoje a banlist (`selobanlist.js`).
+  // Vem como funcao, e nao como dado em cada item, porque quem sabe a regra e' a
+  // tela: a Loja aplica a lista publicada, o fim de duelo tambem, e um teste
+  // que monte cartas de mentira nao aplica nenhuma.
+  selos = null,
   aoAmpliar = null,
   aoAbrir = null,
   aoTerminar = null,
@@ -129,6 +134,11 @@ export function montarRevelacao(alvo, itens, {
       +   `<img src="${arte(item.id)}" alt="">`
       +   (rar ? `<span class="rev-rar">${escapeHtml(item.selo ?? '')}${rar}</span>` : '')
       +   (item.nova ? '<span class="rev-nova">NEW!!</span>' : '')
+      // O selo da banlist entra DENTRO da face da frente: assim ele vira junto
+      // com a carta, em vez de aparecer sobre o verso e entregar antes da hora
+      // que aquela carta e' limitada. Os cantos ja' ocupados sao a raridade (a
+      // direita) e o NEW!! — dai' o `hasTopRight` de quem chama.
+      +   (selos ? selos(item.id) : '')
       + '</span></span>';
 
     const nome = document.createElement('div');

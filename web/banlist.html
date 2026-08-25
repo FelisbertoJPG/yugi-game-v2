@@ -143,6 +143,10 @@
       </select>
       <input type="number" id="new-rule-value" min="1" step="1" placeholder="valor">
       <select id="new-rule-limit-value" hidden>
+        <!-- O ZERO é a carta BANIDA. O servidor sempre a cobrou (`salvar_deck`
+             resolve o teto como `least(3, cardLimits[id])`, que dá 0 e recusa);
+             o que faltava era poder criá-la aqui. -->
+        <option value="0">0 — Banida</option>
         <option value="1">1 — Limitada</option>
         <option value="2">2 — Semilimitada</option>
       </select>

@@ -9,6 +9,8 @@ import {
   chancesDoPacote, DEFAULT_PRICE, PACK_SIZE, PITY_EVERY, UR_PITY_PACKS,
 } from '/web/js/boosters.js';
 import { renderGavetas, fraseDaColecao } from '/web/js/gavetas.js';
+import { hydrateBanlist, getBanlist } from '/web/js/banlist.js';
+import { selosDaBanlist, textoDaBanlist } from '/web/js/selobanlist.js';
 import { montarRevelacao } from '/web/js/revelacao.js';
 import { listCustom } from '/web/js/customcards.js';
 import {
@@ -51,6 +53,20 @@ function renderDP() {
 }
 
 let lastBought = null;   // último booster aberto (para "abrir outro")
+
+/**
+ * **A banlist em vigor, para o selo das cartas.**
+ *
+ * Ao contrário do Deck Builder — onde a banlist só vale com a Lista 1 marcada —
+ * aqui ela vale SEMPRE: a lista publicada é a que `salvar_deck` usa no
+ * servidor, então uma carta Limitada é limitada para quem está comprando,
+ * marcada ou não.
+ *
+ * É `null` até a hidratação terminar, e `selobanlist.js` trata `null` como
+ * "sem regra": sem rede, as cartas aparecem como apareciam antes. Prometer um
+ * selo que não veio seria pior que não mostrar nenhum.
+ */
+let banlist = null;
 
 function renderShop() {
   const list = listShopBoosters();
@@ -159,9 +175,14 @@ async function buy(booster, quantos = 1) {
   const tinha = new Set(ownedIds().map(Number));
   const r = await abrirPacote(booster.name, quantos);
   if (!r.ok) {
-    return void toast(r.error === 'DP insuficiente'
+    toast(r.error === 'DP insuficiente'
       ? 'DP insuficiente — vença Adversários para ganhar mais'
       : r.error);
+    // **Devolve `false`, e isso importa.** Quem chamou desligou os botões antes
+    // de comprar, e quem os religa é o `showReveal` seguinte — que não vai
+    // acontecer. Sem esta resposta, uma compra recusada deixava o jogador
+    // olhando dois botões mortos, com o saldo intacto.
+    return false;
   }
 
   // QUEM DIZ o que veio por garantia é o SERVIDOR (campo `guaranteed`,
@@ -192,6 +213,7 @@ async function buy(booster, quantos = 1) {
   renderDP();
   renderShop();          // atualiza os botões (DP e o progresso do pity)
   showReveal(booster, pulls);
+  return true;
 }
 
 /**
@@ -262,7 +284,15 @@ async function renderEstruturais() {
 function abrirConteudo(titulo, sub, pool, { chances = null, copias = null } = {}) {
   $('conteudo-titulo').textContent = titulo;
   const resumo = renderGavetas($('conteudo-corpo'), pool, {
-    nomeDe: nameOf, arte: (id) => ART(id, true), chances, copias,
+    // O nome carrega a regra junto: aqui a miniatura é pequena e o `title` é
+    // onde cabe "Limitada" por extenso, ao lado de quantas cópias já se tem.
+    nomeDe: (id) => nameOf(id) + textoDaBanlist(banlist, id),
+    arte: (id) => ART(id, true),
+    chances,
+    copias,
+    // O canto direito da gaveta é do `×N` de cópias; o esquerdo, do ✔ de
+    // "você tem". Os dois selos descem uma linha para não cair por cima.
+    selos: (id) => selosDaBanlist(banlist, id, { hasTopLeft: true, hasTopRight: true }),
   });
   $('conteudo-sub').innerHTML = `${sub} `
     + '<b style="color:var(--green,#3fd68a)">✔</b> = já está na sua Coleção — '
@@ -342,10 +372,16 @@ function showReveal(booster, pulls) {
 
   const price = priceOf(booster);
   const pular = $('reveal-pular');
+  const dez = $('reveal-again10');
   const liberar = () => {
     pular.hidden = true;
     $('reveal-again').disabled = getDP() < price;
+    dez.disabled = getDP() < price * 10;
   };
+
+  // O canto DIREITO da carta revelada já tem a raridade, então os pontos da
+  // banlist descem uma linha; o esquerdo está livre e recebe o [L1]/[L2].
+  const selos = (id) => selosDaBanlist(banlist, id, { hasTopRight: true });
 
   const rev = montarRevelacao($('reveal-cards'), pulls.map((p) => ({
     id: p.id,
@@ -359,11 +395,19 @@ function showReveal(booster, pulls) {
     // SETE por linha. Um [abrir 10] traz 50 cartas: numa fileira que só quebra
     // quando não cabe mais, elas ficavam do tamanho de um selo.
     colunas: 7,
+    selos,
     aoTerminar: liberar,
   });
 
   $('reveal-again').textContent = `abrir outro (${price} DP)`;
   $('reveal-again').disabled = true;
+  // **[abrir +10] ao lado do [abrir outro].** Quem acabou de abrir dez quase
+  // nunca quer voltar à vitrine para abrir mais dez — e o caminho até aqui era
+  // fechar a caixa, achar o booster na lista e clicar de novo. Ele segue a
+  // mesma regra do vizinho: desligado enquanto sobrar carta virada (ele
+  // redesenha esta caixa por cima) e desligado por falta de DP.
+  dez.textContent = `abrir +10 (${price * 10} DP)`;
+  dez.disabled = true;
   pular.hidden = false;
   pular.onclick = () => rev.revelarTudo();
 
@@ -402,7 +446,28 @@ $('reveal-close').onclick = () => $('reveal-back').classList.remove('show');
 $('reveal-back').addEventListener('click', (e) => {
   if (e.target === $('reveal-back')) $('reveal-back').classList.remove('show');
 });
-$('reveal-again').onclick = (e) => { if (!lastBought) return; e.currentTarget.disabled = true; buy(lastBought).finally(() => { e.target.disabled = false; }); };
+/**
+ * Abrir de novo sem sair da caixa. Os dois botões desligam **o par** enquanto a
+ * compra roda: são transações de verdade, e um clique no vizinho enquanto a
+ * primeira está no ar cobraria outro lote. Quem os religa é o `showReveal`
+ * seguinte (pelo `liberar`, quando a última carta abre) — por isso o `finally`
+ * só devolve os botões quando a compra FALHA e nenhuma caixa nova é desenhada.
+ */
+async function abrirDeNovo(quantos) {
+  if (!lastBought) return;
+  const um = $('reveal-again'), dez = $('reveal-again10');
+  um.disabled = true; dez.disabled = true;
+  // Deu certo? O `showReveal` desenhou uma caixa nova e é ELE quem religa os
+  // botões, quando a última carta abrir. Deu errado? Não veio caixa nenhuma, e
+  // religar aqui é a diferença entre "tente de novo" e uma tela morta.
+  const comprou = await buy(lastBought, quantos).catch(() => false);
+  if (comprou) return;
+  const price = priceOf(lastBought);
+  um.disabled = getDP() < price;
+  dez.disabled = getDP() < price * 10;
+}
+$('reveal-again').onclick = () => abrirDeNovo(1);
+$('reveal-again10').onclick = () => abrirDeNovo(10);
 
 // ---------------------------------------------------------------- boot
 const username = await requireLogin();
@@ -411,6 +476,15 @@ if (!username) throw new Error('redirecionando para login');
 // Traz boosters + carteira do projeto (store/*.json) antes de desenhar.
 await hydrateBoosters();
 await hydrateWallet();
+
+// A banlist publicada, para o selo das cartas. `hydrateBanlist` é cache com
+// fallback (cópia local nunca vence a nuvem), então sem rede ela devolve o
+// último estado conhecido — e, na primeira visita de uma máquina, o padrão
+// vazio, que `selobanlist.js` desenha como nenhum selo.
+try {
+  await hydrateBanlist();
+  banlist = getBanlist();
+} catch { /* sem banlist a Loja fica como era antes: sem selo nenhum */ }
 
 try {
   db = await YgoDB.load('/ygo-data/data', { full: false });

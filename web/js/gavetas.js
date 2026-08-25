@@ -39,7 +39,10 @@ export const gavetasVazias = () => ({ UR: [], SR: [], R: [], N: [] });
  *   • `chances` — `{ UR: %, … }`, ou `null` quando não há sorteio;
  *   • `copias(id)` — quantas cópias o conteúdo traz. Um Deck Estrutural leva 3
  *     da mesma carta, e "3 cartas" contadas como uma esconderia metade do que
- *     se está comprando.
+ *     se está comprando;
+ *   • `selos(id)` — HTML de selo extra na miniatura. Hoje é a banlist, e é a
+ *     resposta para *"de quantas cópias desta eu preciso?"* na hora em que a
+ *     pergunta importa: antes de gastar DP atrás da terceira.
  *
  * "Você tem" é lido da COLEÇÃO inteira, não do que veio DESTE conteúdo: uma
  * carta que você tem pode ter vindo de um booster ou de um drop, e ainda assim
@@ -50,6 +53,9 @@ export function renderGavetas(alvo, pool, {
   arte = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`,
   chances = null,
   copias = null,
+  // HTML de selo extra na miniatura — hoje a banlist (`selobanlist.js`). Quem
+  // sabe se ela se aplica e' a tela que chama, nao esta.
+  selos = null,
 } = {}) {
   alvo.replaceChildren();
   let tem = 0, total = 0;
@@ -79,6 +85,7 @@ export function renderGavetas(alvo, pool, {
       c.innerHTML = `<img src="${arte(id)}" alt="" loading="lazy">`
         + (n > 1 ? `<span class="qtd">×${n}</span>` : '')
         + (possuo ? '<span class="marca">✔</span>' : '')
+        + (selos ? selos(id) : '')
         + `<div class="nm">${escapar(nomeDe(id))}</div>`;
       cartas.append(c);
     }

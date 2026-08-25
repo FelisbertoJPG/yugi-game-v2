@@ -201,6 +201,32 @@ node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # torto (vazio, texto, `data:text/html`) vira um
                              # `src` que o navegador busca, não acha e desenha
                              # como quadrado vazio
+node web/js/selobanlist.test.mjs # 26 testes do SELO da banlist ([L1]/[L2]/BAN) e da
+                             # LISTA permitida. O selo e a validacao dependiam
+                             # do checkbox "Lista 1" do Deck Builder — que e' um
+                             # FILTRO DO POOL e nasce DESMARCADO. Com ele
+                             # desligado o builder dizia "deck valido" para tres
+                             # copias de uma Limitada, deixava salvar, e o banco
+                             # recusava: o deck ficava so' naquele navegador. A
+                             # banlist nunca esteve desligada — quem a cobra e'
+                             # `salvar_deck` pela lista ativa (0020), marcado ou
+                             # nao; o checkbox so' escondia a regra de quem
+                             # precisava dela. Hoje as duas valem sempre, e o
+                             # selo aparece tambem na LOJA (a carta revelada e o
+                             # "ver as cartas"): saber que a carta e' Limitada
+                             # importa ANTES de gastar DP atras da terceira
+                             # copia.
+                             # Cobre ainda a carta BANIDA, que era uma
+                             # divergencia CALADA entre as duas pontas: o
+                             # servidor sempre a cobrou (o teto sai de
+                             # `least(3, coalesce(cardLimits[id], 3))`, que da'
+                             # 0 e recusa), e o cliente nao sabia express -la
+                             # (`addRule` exigia valor > 0) nem confer -la
+                             # (`validateBanlist` fazia `lim > 0 && n > lim`,
+                             # entao o teto 0 passava batido). O selo dela e'
+                             # BAN com fundo cheio, e nao um "L0" — banida nao
+                             # e' o degrau seguinte de L1/L2, e' a unica que
+                             # proibe a carta inteira
 node web/js/poolordem.test.mjs # 15 testes da ORDENAÇÃO do pool de cartas — uma
                              # regra, CINCO telas (Deck Builder, Booster
                              # Builder, Banlist, Listas e Deck Estrutural). Ela

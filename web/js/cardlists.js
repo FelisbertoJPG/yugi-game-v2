@@ -132,6 +132,31 @@ export async function hydrateCardLists() {
   return true;
 }
 
+/**
+ * **As cartas do deck que a lista ativa NÃO aceita** — os ids, sem repetição.
+ *
+ * Esta é a mesma pergunta que `salvar_deck` faz no servidor ("está no pool
+ * permitido?"), e ela precisava existir também aqui: sem ela o Deck Builder
+ * deixava montar e salvar um deck fora da lista, o banco recusava, e o deck
+ * ficava **só naquele navegador** — com o jogador achando que tinha um deck.
+ * O aviso existia, mas chegava depois de o trabalho estar feito.
+ *
+ * `briefDe(id)` devolve a entrada do índice (o `db.brief` do builder). Carta
+ * que o índice não conhece é dada como FORA: é o caso de uma carta customizada
+ * (id ≥ 900000000, sem Lua) e de um id digitado errado, e os dois o servidor
+ * recusa igual. Sem lista nenhuma (`null`), devolve vazio — "não sei qual é a
+ * lista" nunca pode virar "o seu deck está errado".
+ */
+export function foraDaLista(ids, lista, briefDe) {
+  if (!lista || typeof lista.filter !== 'function') return [];
+  const fora = new Set();
+  for (const id of ids ?? []) {
+    const card = briefDe?.(id) ?? null;
+    if (!card || !lista.filter(card)) fora.add(Number(id));
+  }
+  return [...fora];
+}
+
 /** O array plano de ids que o servidor confere, resolvido contra o índice. */
 export function resolverLista(lista, cartas) {
   const f = construirFiltro(normalizarLista(lista));

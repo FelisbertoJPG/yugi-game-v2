@@ -243,16 +243,9 @@
     background: #04121fcc; color: var(--green); font-weight: bold;
   }
 
-  /* selos da banlist (web/banlist.html) — mesma linguagem visual de lá.
-     `top` vem inline (builder.js empurra pra 2ª linha se CST/raridade já
-     ocuparem o canto), aqui só a cor/posição horizontal de cada tipo. */
-  .thumb .bl-badge {
-    position: absolute; z-index: 2; font-size: 8px; line-height: 1;
-    padding: 1px 3px; border-radius: 2px; font-weight: bold; background: #04121fd0;
-  }
-  .thumb .bl-badge.bl-limit  { left: 2px; color: var(--red); }
-  .thumb .bl-badge.bl-group  { left: 2px; color: var(--gold); }
-  .thumb .bl-badge.bl-points { right: 2px; color: var(--blue); }
+  /* Os selos da banlist saíram daqui para `web/css/ui.css` (23 -> 25/08/2026):
+     a Loja passou a desenhá-los também, e a cor de "Limitada" tem de ser a
+     mesma nas duas telas. A regra é `.bl-badge`, sem o `.thumb` na frente. */
   .thumb.full .avail { color: var(--dim); }
 
   /* ---------- modal de importar carta ---------- */

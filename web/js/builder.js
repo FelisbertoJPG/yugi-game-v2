@@ -20,13 +20,14 @@ import {
   hydrateCustomNpcs,
 } from '/web/js/npcs.js';
 import { inLista1 } from '/web/js/lista1.js';
-import { hydrateCardLists } from '/web/js/cardlists.js';
+import { hydrateCardLists, getCardList, foraDaLista } from '/web/js/cardlists.js';
 // A raridade tambem vem dos Decks Estruturais, nao so' dos boosters — a mesma
 // ordem do servidor (`raridade_da_carta`, migration 0019).
 import { listarEstruturaisEx } from '/web/js/estruturais.js';
 import { raridadesDosEstruturais } from '/web/js/ydk.js';
 import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
+import { selosDaBanlist, textoDaBanlist } from '/web/js/selobanlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ordenarPool } from '/web/js/poolordem.js';
 import {
@@ -167,55 +168,26 @@ function markDirty(v = true) {
 }
 
 /**
- * Linha extra pro tooltip da miniatura com a regra de banlist da carta (só
- * quando a Lista 1 está marcada — fora dela a banlist nem se aplica).
- */
-function banlistTooltip(id) {
-  if (!$('f-lista1').checked || !banlist) return '';
-  const pts = banlist.cardPoints[String(id)];
-  const lim = banlist.cardLimits[String(id)];
-  const grp = banlist.cardGroups[String(id)];
-  if (!pts && !lim && !grp) return '';
-  const limLabel = lim === 1 ? 'Limitada' : lim === 2 ? 'Semilimitada' : lim ? `máx ${lim}` : '';
-  return '\nbanlist:' +
-    (pts ? ` ${pts} pontos` : '') +
-    (limLabel ? ` · ${limLabel}` : '') +
-    (grp ? ` · grupo ${grp}` : '');
-}
-
-/**
- * Selos visuais da banlist na miniatura (mesma linguagem visual de
- * `web/banlist.html`): [L1]/[L2] em vermelho pro teto individual, pontos em
- * azul, e o número do grupo em AMARELO quando a carta está numa lista
- * compartilhada. Só aparece com a Lista 1 marcada — fora dela a banlist nem
- * se aplica.
+ * **O selo da banlist aparece SEMPRE.**
  *
- * As miniaturas já têm CST (topo-esquerda) e raridade (topo-direita) — em
- * vez de arriscar sobrepor, `hasTopLeft`/`hasTopRight` empurram o selo da
- * banlist pra uma segunda linha quando o canto já está ocupado.
+ * Ele dependia do checkbox "Lista 1" — e esse checkbox é um FILTRO DO POOL
+ * ("só as cartas jogáveis nesta fase"), não um interruptor da banlist. Ele
+ * nasce desmarcado, então na prática o jogador montava o deck inteiro sem ver
+ * um [L1] sequer, e só descobria o limite quando o servidor recusava.
+ *
+ * A banlist está EM VIGOR: quem a aplica é `salvar_deck` no Postgres, pela
+ * lista ativa (`lista_ativa()`, migration 0020), marcado ou não. Esconder o
+ * selo não desligava regra nenhuma — só escondia a regra de quem precisava
+ * dela.
+ *
+ * O selo continua aparecendo até no modo NPC com "ignorar banlist" ligado: ali
+ * ele é informação ("esta carta é Limitada"), e o checkbox ao lado já diz que
+ * aquele deck está dispensado dela. Um selo é um rótulo, não uma trava.
  */
-function banlistBadges(id, { hasTopLeft = false, hasTopRight = false } = {}) {
-  if (!$('f-lista1').checked || !banlist) return '';
-  const pts = banlist.cardPoints[String(id)];
-  const lim = banlist.cardLimits[String(id)];
-  const grp = banlist.cardGroups[String(id)];
-  if (!pts && !lim && !grp) return '';
+const banlistTooltip = (id) => textoDaBanlist(banlist, id);
 
-  let html = '';
-  let leftRow = hasTopLeft ? 1 : 0;   // canto esquerdo: limite, depois grupo (empilhados se os dois existirem)
-  if (lim) {
-    html += `<span class="bl-badge bl-limit" style="top:${2 + leftRow * 11}px">L${lim}</span>`;
-    leftRow++;
-  }
-  if (grp) {
-    html += `<span class="bl-badge bl-group" style="top:${2 + leftRow * 11}px">${grp}</span>`;
-  }
-  if (pts) {
-    const rightRow = hasTopRight ? 1 : 0;
-    html += `<span class="bl-badge bl-points" style="top:${2 + rightRow * 11}px">${pts}p</span>`;
-  }
-  return html;
-}
+/** Os selos visuais da banlist na miniatura — ver `selobanlist.js`. */
+const banlistBadges = (id, cantos) => selosDaBanlist(banlist, id, cantos);
 
 /** O índice traz só id/nome/stats; para nome de carta no deck usamos o cache. */
 const briefCache = new Map();
@@ -225,23 +197,52 @@ function brief(id) {
 }
 
 /**
- * Estado de validade do deck: regras oficiais (`deck.js`, sempre) + banlist
- * (`web/js/banlist.js`, só quando a Lista 1 está marcada). Uma função só,
- * reaproveitada tanto pelo status visual (`renderDeck`) quanto pelo bloqueio
- * de salvar (`podeSalvar`) — o mesmo texto que aparece na tela é o motivo
- * que impede o "salvar", nunca dois cálculos divergentes.
+ * Estado de validade do deck: regras oficiais (`deck.js`, sempre) + a LISTA
+ * ativa + a banlist. Uma função só, reaproveitada tanto pelo status visual
+ * (`renderDeck`) quanto pelo bloqueio de salvar — o mesmo texto que aparece na
+ * tela é o motivo que impede o "salvar", nunca dois cálculos divergentes.
  *
- * `ignoreBanlist` é a liberdade do modo NPC (checkbox "ignorar banlist") —
- * as regras de CONSTRUÇÃO (min/max, 3 cópias) nunca são puladas, nem lá.
+ * **As duas conferências deixaram de depender do checkbox "Lista 1"**, e essa
+ * era a falha: aquele checkbox filtra o POOL, e nasce desmarcado. Com ele
+ * desligado o builder dizia "deck válido" para um deck com três cópias de uma
+ * carta Limitada, deixava salvar, e o banco recusava — o deck ficava só naquele
+ * navegador e sumia no primeiro duelo online. Quem cobra a regra é o servidor
+ * (`salvar_deck` + `lista_ativa()`), marcado ou não; o builder só estava
+ * deixando de avisar.
+ *
+ * A ORDEM das mensagens é a do prejuízo: primeiro o tamanho do deck (sem ele
+ * nada mais importa), depois a carta que não é do jogo desta fase, e por último
+ * quantas cópias dela cabem.
+ *
+ * `ignoreBanlist` é a liberdade do modo NPC (checkbox "ignorar banlist") — as
+ * regras de CONSTRUÇÃO (min/max, 3 cópias) nunca são puladas, nem lá. A lista
+ * ativa também não é cobrada do NPC: o adversário é conteúdo de admin, e
+ * `salvar_deck` já o trata assim (`p_livre`).
  */
 function deckStatus({ ignoreBanlist = false } = {}) {
   const v = deck.validate();
-  const bl = ($('f-lista1').checked && !ignoreBanlist)
-    ? validateBanlist(deck, banlist) : { ok: true, problems: [] };
+  const bl = ignoreBanlist ? { ok: true, problems: [] } : validateBanlist(deck, banlist);
 
   if (!v.valid) {
     return { ok: false, message: v.errors[0], color: 'var(--dim)' };
   }
+
+  // A LISTA ATIVA — a mesma pergunta que `salvar_deck` faz. Só para o deck do
+  // JOGADOR: o deck de adversário é conteúdo de admin e vai pelo caminho livre.
+  if (!npcMode) {
+    const fora = foraDaLista([...deck.main, ...deck.extra],
+                             getCardList(banlist?.listId), brief);
+    if (fora.length) {
+      const nome = brief(fora[0])?.name ?? fora[0];
+      return {
+        ok: false,
+        color: 'var(--red)',
+        message: `fora da lista permitida: ${nome}`
+               + (fora.length > 1 ? ` (e mais ${fora.length - 1})` : ''),
+      };
+    }
+  }
+
   if (!bl.ok) {
     const p = bl.problems[0];
     const message = p.type === 'points'
@@ -718,7 +719,8 @@ function renderIcones() {
                         : `${ic.nome} — clique para incluir no prêmio`;
     const img = document.createElement('img');
     img.src = caminhoDoIcone(ic);
-    img.alt = '';
+    img.alt = '';
+
     const rot = document.createElement('span');
     rot.className = 'rot';
     rot.textContent = ic.nome;

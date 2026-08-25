@@ -96,6 +96,28 @@ input:focus, select:focus { outline: 1px solid var(--blue); }
   text-align: center; font-size: 9px; color: var(--red);
 }
 
+/* ---------- selos da banlist ----------
+   Desenhados por `web/js/selobanlist.js` e usados em TRÊS telas: o Deck
+   Builder (a miniatura do pool), a Loja (a carta revelada e o "ver as cartas")
+   e a lista de drops da Trilha. Moram aqui, e não na folha de uma delas, pelo
+   mesmo motivo do módulo: a cor de "Limitada" tem de ser a mesma em todo lugar
+   onde a regra aparece.
+
+   O `top` vem INLINE de quem desenha — ele é quem sabe se o canto já está
+   ocupado (CST, raridade, o NEW!! da revelação) e empurra o selo para uma
+   segunda linha. Aqui fica só a cor e de que lado cada tipo encosta. */
+.bl-badge {
+  position: absolute; z-index: 3; font-size: 8px; line-height: 1;
+  padding: 1px 3px; border-radius: 2px; font-weight: bold; background: #04121fd0;
+  pointer-events: none;   /* o selo nunca rouba o clique da carta */
+}
+.bl-badge.bl-limit  { left: 2px;  color: var(--red); }
+/* A BANIDA é a única que proíbe a carta inteira: fundo cheio em vez de só a
+   letra colorida, para não se confundir com um L1/L2 de relance. */
+.bl-badge.bl-ban    { background: var(--red); color: #1a0508; }
+.bl-badge.bl-group  { left: 2px;  color: var(--gold); }
+.bl-badge.bl-points { right: 2px; color: var(--blue); }
+
 /* ---------- avisos ---------- */
 .banner {
   padding: 7px 12px; font-size: 11px;

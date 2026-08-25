@@ -63,7 +63,10 @@ function normalize(raw) {
   const seen = new Set();
   const addRuleEntry = (type, value) => {
     const v = Math.floor(Number(value));
-    if (!(v > 0)) return;
+    // ZERO só faz sentido no eixo `limit`, e ali ele é a **carta BANIDA**:
+    // nenhuma cópia. Nos outros dois é ausência de regra — 0 pontos não cobra
+    // nada, e "grupo 0" não é grupo nenhum.
+    if (!(type === 'limit' ? v >= 0 : v > 0)) return;
     const id = ruleId(type, v);
     if (seen.has(id)) return;
     seen.add(id);
@@ -138,7 +141,9 @@ export function saveBanlist(banlist) { return write(banlist); }
  */
 export function addRule(banlist, type, value) {
   const v = Math.floor(Number(value));
-  if (!(v > 0) || !AXES.includes(type)) return banlist;
+  // Ver `addRuleEntry`: no eixo `limit`, zero é a carta BANIDA.
+  if (!AXES.includes(type)) return banlist;
+  if (!(type === 'limit' ? v >= 0 : v > 0)) return banlist;
   const id = ruleId(type, v);
   if (!banlist.rules.some((r) => r.id === id)) {
     banlist.rules.push({ id, type, value: v });
@@ -208,9 +213,22 @@ export function validateBanlist(deck, banlist) {
   }
 
   // 2. Banlist — teto INDIVIDUAL, cada carta por si (sem dividir com ninguém).
+  //
+  // **O teto ZERO é a carta BANIDA**, e ele passava batido: a conta era
+  // `lim > 0 && n > lim`, então uma carta proibida não era problema nenhum
+  // aqui. O servidor sempre a cobrou — `teto := least(3, coalesce(…, 3))` na
+  // `salvar_deck` (migration 0008 e seguintes) dá 0 e recusa —, então as duas
+  // pontas discordavam em silêncio: o builder dizia "deck válido", o banco
+  // recusava, e o deck ficava só no navegador.
+  //
+  // `?? 3` e não `|| 0`: com `||`, um teto de 0 virava 3 antes mesmo da
+  // comparação, que é como o zero se perdia já na leitura do mapa.
   for (const [id, n] of countOf) {
-    const lim = Number(b.cardLimits[String(id)]) || 0;
-    if (lim > 0 && n > lim) {
+    const bruto = b.cardLimits[String(id)];
+    if (bruto === undefined || bruto === null || bruto === '') continue;
+    const lim = Math.floor(Number(bruto));
+    if (!Number.isFinite(lim) || lim < 0) continue;
+    if (n > lim) {
       problems.push({ type: 'limit', card: id, count: n, limit: lim });
     }
   }

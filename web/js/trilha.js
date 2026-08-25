@@ -261,10 +261,19 @@ function porLinha() {
 }
 
 /**
- * Quantas colunas a trilha na tela foi desenhada com. É o que impede o
- * `ResizeObserver` de redesenhar a cada pixel de arrasto da janela — e, mais
- * importante, o que impede o LAÇO: redesenhar mexe no conteúdo da trilha, o
- * observador acorda de novo, e sem esta comparação ele se chamaria para sempre.
+ * Quantas colunas a trilha na tela foi desenhada com. Impede o
+ * `ResizeObserver` de redesenhar a cada pixel de arrasto da janela, e impede a
+ * RECURSÃO: redesenhar mexe no conteúdo da trilha, o observador acorda de novo,
+ * e sem esta comparação ele se chamaria para sempre.
+ *
+ * **O que ela NÃO impede é o aviso do navegador** — e essa distinção custou uma
+ * tela travada. Mexer no layout DENTRO da entrega de um `ResizeObserver` deixa
+ * notificações pendentes no fim do quadro, e o navegador dispara
+ * *"ResizeObserver loop completed with undelivered notifications"*. Ele é
+ * benigno (a segunda volta simplesmente não acontece, por causa desta variável),
+ * mas chega como um `ErrorEvent` na `window` — e o `bootguard` o lia como uma
+ * falha de boot e punha a faixa vermelha por cima do jogo. Por isso o redesenho
+ * saiu de dentro da entrega: ver `agendarRedesenho`.
  */
 let colsDesenhadas = 0;
 
@@ -361,21 +370,33 @@ $('palco').onclick = (e) => { if (e.target === $('palco')) { fixado = null; limp
  * barra de rolagem aparecendo quando a trilha cresce. Um `resize` de `window`
  * pega só o primeiro; o `ResizeObserver` olha o elemento e pega os três.
  *
+ * **O redesenho acontece FORA da entrega do observador**, num
+ * `requestAnimationFrame`. Não é otimização: mexer no layout dentro da entrega
+ * deixa notificações pendentes no fim do quadro, e o navegador dispara
+ * *"ResizeObserver loop completed with undelivered notifications"* — que chega
+ * como erro de `window` e fazia o `bootguard` cobrir o jogo com a faixa
+ * vermelha de "esta tela nao terminou de abrir". O quadro seguinte é fora da
+ * entrega, e aí não sobra notificação nenhuma.
+ *
  * Só redesenha quando o NÚMERO DE COLUNAS muda — arrastar a borda da janela
  * dispara dezenas de eventos por segundo, e refazer a trilha em todos custaria
- * caro para nada. É essa mesma comparação que fecha o laço do observador (ver
- * `colsDesenhadas`).
+ * caro para nada.
  *
  * O painel PRESO sobrevive ao redesenho. Sem isto, quem estivesse lendo o deck
  * de um adversário perderia o painel ao encostar na borda da janela — e ele não
  * volta sozinho, porque quem o abre é o mouse entrando no quadro.
  */
-new ResizeObserver(() => {
-  if (porLinha() === colsDesenhadas) return;
-  const preso = fixado;
-  render();
-  if (preso) { fixado = preso; mostrarPainel(preso); }
-}).observe($('trilha'));
+let redesenhoAgendado = 0;
+function agendarRedesenho() {
+  if (redesenhoAgendado) return;          // já há um quadro a caminho
+  redesenhoAgendado = requestAnimationFrame(() => {
+    redesenhoAgendado = 0;
+    if (porLinha() === colsDesenhadas) return;
+    const preso = fixado;
+    render();
+    if (preso) { fixado = preso; mostrarPainel(preso); }
+  });
+}
 
 try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch { /* sem arte/nome */ }
 
@@ -437,6 +458,17 @@ async function carregar() {
 
 try {
   await carregar();
+  /**
+   * O observador entra **aqui**, e não lá em cima com os outros ouvintes: ele
+   * dispara uma vez sozinha ao começar a observar, e naquele instante
+   * `campanhas` ainda está vazia — o `render()` escreveria "Esta campanha ainda
+   * não tem adversário" na tela, que é justamente a frase que o carregamento
+   * bem-sucedido existe para nunca mostrar.
+   *
+   * E não vai no `catch`: com a trilha em estado de erro, um redimensionamento
+   * apagaria a mensagem que diz onde o carregamento parou.
+   */
+  new ResizeObserver(agendarRedesenho).observe($('trilha'));
 } catch (e) {
   console.error('[trilha] o carregamento falhou:', e);
   $('trilha').innerHTML =

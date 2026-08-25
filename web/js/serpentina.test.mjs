@@ -136,7 +136,33 @@ t('e a trilha se refaz sozinha quando o espaco muda', () => {
   assert.ok(js.includes('ResizeObserver'),
             'sem observador, mudar o tamanho da janela deixa a serpentina como estava');
   assert.ok(/porLinha\(\)\s*===\s*colsDesenhadas/.test(js),
-            'sem a comparacao, redesenhar acorda o observador de novo — laco fechado');
+            'sem a comparacao, redesenhar acorda o observador de novo — recursao');
+});
+
+t('o redesenho acontece FORA da entrega do observador', () => {
+  // O `ResizeObserver` entrega e, no fim do quadro, confere se sobrou
+  // notificacao. Mexer no layout durante a entrega deixa sobrar — e o navegador
+  // dispara "ResizeObserver loop completed with undelivered notifications", que
+  // chega como erro de window. Foi ele que fez o `bootguard` cobrir o jogo com
+  // a faixa vermelha, num jogo que tinha aberto inteiro.
+  assert.ok(/new ResizeObserver\(\s*agendarRedesenho\s*\)/.test(js),
+            'o observador chama render direto: mexer no layout dentro da entrega '
+            + 'faz o navegador avisar do laco, e o bootguard trata isso como falha de boot');
+  assert.ok(/requestAnimationFrame/.test(js),
+            'sem sair para o quadro seguinte, o redesenho continua dentro da entrega');
+});
+
+t('e o observador so comeca DEPOIS de a trilha ter carregado', () => {
+  // Ele dispara uma vez sozinho ao comecar a observar. Registrado no boot cedo,
+  // essa primeira vez pega `campanhas` vazia e escreve "Esta campanha ainda nao
+  // tem adversario" — a frase que o carregamento bem-sucedido existe para nunca
+  // mostrar.
+  const iCarregar = js.indexOf('await carregar();');
+  const iObs = js.indexOf('new ResizeObserver');
+  assert.ok(iCarregar > 0 && iObs > 0, 'nao achei o boot ou o observador');
+  assert.ok(iObs > iCarregar,
+            'o observador e registrado antes do carregamento — a primeira entrega '
+            + 'dele desenha a trilha vazia');
 });
 
 console.log(`\n  ${ok} passaram, 0 falharam`);

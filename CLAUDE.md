@@ -77,6 +77,21 @@ node web/js/serpentina.test.mjs # 13 testes da SERPENTINA da Trilha de Duelos: q
                              # cai um quadro por linha, a trilha fica mais
                              # alta, a barra continua — e o desenho oscila
                              # entre dois estados para sempre.
+                             # Guarda ainda o que o conserto QUEBROU na
+                             # primeira tentativa: mexer no layout DENTRO da
+                             # entrega do ResizeObserver deixa notificacao
+                             # pendente no fim do quadro, o navegador dispara
+                             # "ResizeObserver loop completed with undelivered
+                             # notifications" — que chega como ErrorEvent na
+                             # window — e o `bootguard` cobria o jogo com a
+                             # faixa "esta tela nao terminou de abrir", num
+                             # jogo que tinha aberto inteiro. Hoje o redesenho
+                             # sai para o quadro seguinte
+                             # (`requestAnimationFrame`) e o observador so'
+                             # comeca DEPOIS do carregamento — registrado antes,
+                             # a primeira entrega dele (que e' automatica) pega
+                             # `campanhas` vazia e escreve "esta campanha ainda
+                             # nao tem adversario" na tela.
                              # O que ele NAO prova e' a aparencia: para isso e'
                              # `tools/bancada-trilha.mjs`
 node web/js/decksnpc.test.mjs # 27 testes da trilha de DECKS dentro de um adversário

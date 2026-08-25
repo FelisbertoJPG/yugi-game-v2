@@ -128,13 +128,18 @@ async function comDomFalso(fn) {
   const erros = [];
   global.window = { addEventListener: (n, h) => ouvintes.set(n, h) };
   global.document = { createElement: fake, body: corpo, documentElement: corpo };
-  global.console = { ...console, error: (...a) => erros.push(a.join(' ')) };
+  const avisos = [];
+  global.console = {
+    ...console,
+    error: (...a) => erros.push(a.join(' ')),
+    warn: (...a) => avisos.push(a.join(' ')),
+  };
 
   try {
     // `?v=` força uma instância nova: o módulo tem estado (`mostrado`), e a
     // segunda chamada do teste veria o do primeiro.
     await import(`./bootguard.js?v=${Math.random()}`);
-    return await fn({ ouvintes, corpo, erros });
+    return await fn({ ouvintes, corpo, erros, avisos });
   } finally {
     Object.assign(global, antes);
   }
@@ -185,6 +190,46 @@ await ta('a falha também vai para o console (quem tem o F12 quer a pilha)',
   () => comDomFalso(async ({ ouvintes, erros }) => {
     ouvintes.get('unhandledrejection')({ reason: new Error('boom') });
     assert.ok(erros.some((l) => /boom/.test(l)), 'nada foi para o console');
+  }));
+
+await ta('o aviso do ResizeObserver NAO vira faixa — a tela abriu inteira',
+  () => comDomFalso(async ({ ouvintes, corpo, avisos }) => {
+    // Aconteceu de verdade: a Trilha de Duelos ganhou um `ResizeObserver` para
+    // refazer a serpentina quando a janela muda de tamanho, e o navegador
+    // avisou que sobrou notificacao para o quadro seguinte. O aviso chega como
+    // `ErrorEvent` na window — sem objeto Error, sem pilha —, e a faixa
+    // "esta tela nao terminou de abrir" subiu por cima de um jogo que tinha
+    // aberto inteiro. Um guarda que grita em falso deixa de ser lido.
+    ouvintes.get('error')({
+      target: undefined,
+      message: 'ResizeObserver loop completed with undelivered notifications.',
+    });
+    assert.equal(faixaDe(corpo), null);
+    // Mas nao some calado: quem abrir o F12 tem de ver que aconteceu.
+    assert.ok(avisos.some((l) => /ResizeObserver/.test(l)),
+              'o aviso foi engolido sem ir para o console');
+  }));
+
+await ta('a variante "loop limit exceeded" tambem nao vira faixa',
+  () => comDomFalso(async ({ ouvintes, corpo }) => {
+    // O mesmo aviso tem outra redacao em outros navegadores.
+    ouvintes.get('error')({ target: undefined, message: 'ResizeObserver loop limit exceeded' });
+    assert.equal(faixaDe(corpo), null);
+  }));
+
+await ta('par CONTROLE: o ruido nao gasta o tiro unico — a falha SEGUINTE aparece',
+  () => comDomFalso(async ({ ouvintes, corpo }) => {
+    // O modulo so' mostra o PRIMEIRO erro (`mostrado`). Se o filtro do ruido
+    // ficasse depois dessa trava, um aviso benigno de ResizeObserver deixaria
+    // o guarda mudo para o resto da sessao — e a proxima falha de verdade
+    // voltaria a ser silenciosa, que e' exatamente o que este arquivo existe
+    // para impedir.
+    ouvintes.get('error')({
+      target: undefined,
+      message: 'ResizeObserver loop completed with undelivered notifications.',
+    });
+    ouvintes.get('unhandledrejection')({ reason: new TypeError('a falha de verdade') });
+    assert.match(faixaDe(corpo) ?? '', /a falha de verdade/);
   }));
 
 console.log(`\n  ${pass} passaram, ${fail} falharam`);

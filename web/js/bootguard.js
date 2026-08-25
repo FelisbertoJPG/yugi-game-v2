@@ -46,8 +46,31 @@ let mostrado = false;
  */
 const DE_PROPOSITO = /redirecionando|recuperacao|indo para/i;
 
+/**
+ * **Avisos do navegador que NÃO são falha de boot.**
+ *
+ * `ResizeObserver loop completed with undelivered notifications` (e a variante
+ * `…loop limit exceeded`) é o navegador dizendo que um callback de
+ * `ResizeObserver` mexeu no layout durante a entrega e sobrou notificação para
+ * o quadro seguinte. Ele chega como um `ErrorEvent` na `window` — sem objeto
+ * `Error`, sem pilha, sem nada quebrado — e a página segue funcionando.
+ *
+ * Isto não é hipótese: aconteceu. A Trilha de Duelos ganhou um observador para
+ * refazer a serpentina quando a janela muda de tamanho, e o aviso subiu até
+ * aqui e cobriu o jogo com "esta tela nao terminou de abrir" — o oposto exato
+ * do que este arquivo existe para fazer, porque a tela tinha aberto inteira.
+ *
+ * A causa foi corrigida onde ela mora (o redesenho saiu de dentro da entrega,
+ * ver `agendarRedesenho` em `trilha.js`). Isto aqui é a outra metade: **um
+ * aviso benigno do navegador nunca pode trancar o jogo**, venha ele de um
+ * observador que ainda não existe, de outra tela ou de um navegador que
+ * resolva ser mais barulhento. Um guarda que grita em falso deixa de ser lido.
+ */
+const RUIDO_DO_NAVEGADOR = /ResizeObserver loop/i;
+
 function mostrar(motivo) {
   if (mostrado) return;
+  if (RUIDO_DO_NAVEGADOR.test(motivo)) { console.warn('[boot]', motivo); return; }
   mostrado = true;
 
   const faixa = document.createElement('div');

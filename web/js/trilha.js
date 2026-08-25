@@ -32,6 +32,7 @@ import {
 import { renderGavetas, fraseDaColecao } from '/web/js/gavetas.js';
 import { pullFile } from '/web/js/projectstore.js';
 import { ordenarCampanha, liberados } from '/web/js/trilhaordem.js';
+import { quantosCabem } from '/web/js/serpentina.js';
 import { decksLiberados } from '/web/js/decksnpc.js';
 import { requireLogin } from '/web/js/auth.js';
 
@@ -235,7 +236,37 @@ function abrirDrops(npc, cfg, nomeDoDeck) {
 }
 
 // ------------------------------------------------------------------ trilha
-const POR_LINHA = 4;
+
+/**
+ * **As medidas do desenho, lidas do CSS.**
+ *
+ * `--no` e `--gap` são declarados em `.trilha` (ver `web/trilha.html`) e valem
+ * para o quadro, para o vão entre linhas e para o comprimento dos dois
+ * conectores. Ter uma cópia deles aqui seria um segundo lugar para o mesmo
+ * número — e o dia em que só um mudasse, o traço passaria a parar antes (ou
+ * depois) do quadro seguinte, sem erro nenhum.
+ */
+function medidas() {
+  const cs = getComputedStyle($('trilha'));
+  return {
+    quadro: parseFloat(cs.getPropertyValue('--no')),
+    vao: parseFloat(cs.getPropertyValue('--gap')),
+  };
+}
+
+/** Quantos quadros cabem por linha AGORA (ver `serpentina.js`). */
+function porLinha() {
+  const { quadro, vao } = medidas();
+  return quantosCabem($('trilha').clientWidth, quadro, vao);
+}
+
+/**
+ * Quantas colunas a trilha na tela foi desenhada com. É o que impede o
+ * `ResizeObserver` de redesenhar a cada pixel de arrasto da janela — e, mais
+ * importante, o que impede o LAÇO: redesenhar mexe no conteúdo da trilha, o
+ * observador acorda de novo, e sem esta comparação ele se chamaria para sempre.
+ */
+let colsDesenhadas = 0;
 
 function render() {
   const nome = campanhas[iCampanha] ?? '—';
@@ -258,11 +289,18 @@ function render() {
     return;
   }
 
-  for (let inicio = 0; inicio < lista.length; inicio += POR_LINHA) {
-    const fatia = lista.slice(inicio, inicio + POR_LINHA);
+  // Medido com a trilha JÁ VAZIA (o `replaceChildren` acima): com os quadros
+  // dentro, uma linha que transbordasse entraria na conta da largura e a
+  // medição seguinte devolveria um número menor que o anterior, a cada vez.
+  const cols = porLinha();
+  colsDesenhadas = cols;
+  trilha.style.setProperty('--cols', String(cols));
+
+  for (let inicio = 0; inicio < lista.length; inicio += cols) {
+    const fatia = lista.slice(inicio, inicio + cols);
     const linha = document.createElement('div');
     // Serpentina: as linhas ímpares correm ao contrário, e o caminho fecha.
-    linha.className = 'linha' + ((inicio / POR_LINHA) % 2 ? ' invertida' : '');
+    linha.className = 'linha' + ((inicio / cols) % 2 ? ' invertida' : '');
 
     fatia.forEach((npc, k) => {
       const i = inicio + k;
@@ -314,6 +352,30 @@ $('camp-ant').onclick = () => { iCampanha = (iCampanha - 1 + campanhas.length) %
 $('camp-prox').onclick = () => { iCampanha = (iCampanha + 1) % campanhas.length; render(); };
 // Clicar fora da trilha solta o painel fixado.
 $('palco').onclick = (e) => { if (e.target === $('palco')) { fixado = null; limparPainel(); } };
+
+/**
+ * **A serpentina se refaz sozinha quando o espaço muda.**
+ *
+ * Quantos quadros cabem por linha é uma conta sobre a largura, e a largura muda
+ * por três caminhos: redimensionar a janela, mudar o zoom do navegador e a
+ * barra de rolagem aparecendo quando a trilha cresce. Um `resize` de `window`
+ * pega só o primeiro; o `ResizeObserver` olha o elemento e pega os três.
+ *
+ * Só redesenha quando o NÚMERO DE COLUNAS muda — arrastar a borda da janela
+ * dispara dezenas de eventos por segundo, e refazer a trilha em todos custaria
+ * caro para nada. É essa mesma comparação que fecha o laço do observador (ver
+ * `colsDesenhadas`).
+ *
+ * O painel PRESO sobrevive ao redesenho. Sem isto, quem estivesse lendo o deck
+ * de um adversário perderia o painel ao encostar na borda da janela — e ele não
+ * volta sozinho, porque quem o abre é o mouse entrando no quadro.
+ */
+new ResizeObserver(() => {
+  if (porLinha() === colsDesenhadas) return;
+  const preso = fixado;
+  render();
+  if (preso) { fixado = preso; mostrarPainel(preso); }
+}).observe($('trilha'));
 
 try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch { /* sem arte/nome */ }
 

@@ -23,7 +23,14 @@
   }
   .campanha-bar .conta { font-size: 11px; color: var(--dim); }
 
-  .palco { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: auto; }
+  /* `scrollbar-gutter: stable` NAO e' enfeite: o palco e' quem rola, e a
+     largura util da trilha muda ~15px quando a barra aparece. Como o numero de
+     quadros por linha e' uma conta sobre essa largura, o par
+     "barra aparece -> cabe um quadro a menos -> mais linhas -> fica mais alto"
+     e o seu inverso se alimentam — a trilha piscaria entre dois desenhos para
+     sempre, a 100% de CPU. Reservando o vao sempre, a largura para de depender
+     do que esta' dentro. */
+  .palco { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: auto; scrollbar-gutter: stable; }
 
   /* ---------- o painel do adversário (esquerda) ----------
      Aparece ao passar o mouse por um quadro LIBERADO da trilha. Fora isso,
@@ -90,13 +97,38 @@
 
   /* ---------- a trilha (direita) ----------
      Serpentina: as linhas alternam o sentido, e os conectores saem do próprio
-     quadro (::after horizontal, ::before vertical). Sem SVG e sem medir nada
-     por JS — o layout é o desenho. */
-  .trilha { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 46px; padding: 10px 0; }
-  .linha { display: flex; gap: 46px; }
+     quadro (::after horizontal, ::before vertical). Sem SVG.
+
+     O tamanho do quadro e o vão entre eles moram AQUI, em `--no` e `--gap`, e o
+     JS os lê de volta (`medidas()` em `trilha.js`) em vez de ter os seus. São
+     números que precisam bater exatamente: o conector horizontal tem a largura
+     do vão, o vertical tem a altura dele, e quantos quadros cabem numa linha é
+     uma conta com os dois. Escritos duas vezes, desencontram-se no primeiro
+     ajuste — e o sintoma é o traço parando no meio do caminho.
+
+     `--cols` é escrito pelo JS a cada medição, e é ele que dá às linhas uma
+     LARGURA FIXA. A serpentina inteira depende dela: a linha invertida é
+     `row-reverse`, então ela encosta os quadros na borda DIREITA do que
+     receber. Sem largura própria, isso é a borda direita da TELA — numa janela
+     larga a linha de baixo ia parar do outro lado do monitor e o conector
+     vertical descia para o vazio. Era o relato.
+
+     A largura fixa também é o que faz a ÚLTIMA linha, quase sempre incompleta,
+     começar no lugar certo: invertida, os quadros que ela tem encostam na
+     direita da linha, e não na do último quadro dela. */
+  .trilha {
+    --no: 96px; --gap: 46px; --cols: 4;
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    gap: var(--gap); padding: 10px 0;
+  }
+  .linha {
+    display: flex; gap: var(--gap);
+    /* n quadros e n−1 vãos — a mesma conta que o `quantosCabem` inverte. */
+    width: calc(var(--cols) * var(--no) + (var(--cols) - 1) * var(--gap));
+  }
   .linha.invertida { flex-direction: row-reverse; }
   .no {
-    position: relative; width: 96px; height: 96px; flex: none;
+    position: relative; width: var(--no); height: var(--no); flex: none;
     border: 3px solid var(--line); border-radius: 12px; background: var(--panel2);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     background-size: cover; background-position: center; overflow: visible;
@@ -108,13 +140,13 @@
   /* Conector horizontal: sai pela direita e cruza o `gap`. Nas linhas
      invertidas ele sai pela esquerda — é o mesmo traço, espelhado. */
   .no.liga-lado::after {
-    content: ''; position: absolute; top: 50%; left: 100%; width: 46px;
+    content: ''; position: absolute; top: 50%; left: 100%; width: var(--gap);
     border-top: 3px solid var(--line);
   }
   .linha.invertida .no.liga-lado::after { left: auto; right: 100%; }
   /* Conector vertical: desce do último quadro da linha para o de baixo. */
   .no.liga-baixo::before {
-    content: ''; position: absolute; left: 50%; top: 100%; height: 46px;
+    content: ''; position: absolute; left: 50%; top: 100%; height: var(--gap);
     border-left: 3px solid var(--line);
   }
 

@@ -54,6 +54,31 @@ node web/js/estrutural.test.mjs # 10 testes do rascunho do Deck Estrutural: ele 
 node web/js/trilha.test.mjs  # 19 testes da Trilha de Duelos: a liberação (cada vitória
                              # abre o próximo), a ordem publicada por campanha e o
                              # CHAMADOR — trilha.js passando os vencidos a liberados()
+node web/js/serpentina.test.mjs # 13 testes da SERPENTINA da Trilha de Duelos: quantos
+                             # quadros cabem numa linha, medido, em vez dos
+                             # QUATRO que estavam escritos a mao. O desenho
+                             # antigo nao media nada — o comentario do CSS dizia
+                             # isso com todas as letras ("o layout e' o
+                             # desenho") — e a linha invertida e' `row-reverse`:
+                             # sem largura propria, ela encosta os quadros na
+                             # borda direita da TELA. Numa janela larga a linha
+                             # de cima ficava a' esquerda, a de baixo do outro
+                             # lado do monitor, e o conector vertical descia
+                             # para o vazio.
+                             # A conta erra CALADA nos dois sentidos: para mais
+                             # (esquecer que sao n-1 vaos) a linha transborda e
+                             # a serpentina sai do lugar; para menos sobra um
+                             # buraco que ninguem identifica como defeito. E
+                             # nunca pode dar ZERO — o laco que fatia a lista
+                             # avanca de `cols` em `cols`, entao zero e' a tela
+                             # congelada a 100% de CPU.
+                             # Guarda tambem o `scrollbar-gutter: stable` do
+                             # palco: sem ele a barra de rolagem tira ~15px,
+                             # cai um quadro por linha, a trilha fica mais
+                             # alta, a barra continua — e o desenho oscila
+                             # entre dois estados para sempre.
+                             # O que ele NAO prova e' a aparencia: para isso e'
+                             # `tools/bancada-trilha.mjs`
 node web/js/decksnpc.test.mjs # 27 testes da trilha de DECKS dentro de um adversário
                              # (o `#libera` de cada deck, a dificuldade como rótulo
                              # livre, e a config torta que nunca pode deixar um
@@ -293,6 +318,19 @@ node tools/bancada-revelacao.mjs # gera bancada-revelacao.html na raiz: as carta
                              # LIDOS do jogo, nunca copiados. Existe porque olhar
                              # isso no jogo custava um duelo vencido ou 1000 DP
                              # num [abrir 10]
+
+node tools/bancada-trilha.mjs # gera bancada-trilha.html na raiz: a SERPENTINA da
+                             # Trilha de Duelos com treze adversarios de
+                             # mentira, sem servidor e sem login — dois cliques
+                             # no arquivo, e ARRASTE a borda da janela. O CSS e'
+                             # FATIADO do web/trilha.html e a conta vem do mesmo
+                             # web/js/serpentina.js, nunca copiados. Treze
+                             # adversarios de proposito: e' com a ULTIMA linha
+                             # INCOMPLETA que a serpentina erra, porque e' ela
+                             # que a linha invertida tem de encostar na direita
+                             # da LINHA e nao na do ultimo quadro dela.
+                             # Uma regua no canto diz a largura medida, quantos
+                             # cabem e quantas linhas sairam
 
 node tools/bancada-home.mjs  # gera bancada-home.html na raiz: a HOME com a
                              # lateral social desenhada com dados de mentira,

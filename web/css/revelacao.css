@@ -1,0 +1,130 @@
+/*
+ * **A revelação: cartas viradas que se clica para descobrir.**
+ *
+ * Nasceu no fim de duelo (o drop do NPC, em `web/duel.html`) e hoje serve
+ * também a Loja, na abertura de pacote. Está num arquivo à parte pelo mesmo
+ * motivo do `gavetas.css`: eram duas telas prometendo a mesma cerimônia ao
+ * jogador e desenhando-a duas vezes — a da Loja mostrava as cartas já abertas,
+ * sem selo de novidade e sem virada, e a diferença foi lida como "o pacote vale
+ * menos que o drop". Duas cópias de um visual divergem sem ninguém perceber.
+ *
+ * Quem usa precisa de um container vazio (o `.rev-grade` é posto pelo módulo) e
+ * do `web/js/revelacao.js`, que é quem sabe a regra de "só abre uma vez".
+ *
+ * As cores de raridade são as mesmas de `gavetas.css` e da Loja de propósito:
+ * uma UR de drop tem de parecer a mesma coisa que uma UR de pacote.
+ */
+
+/* A GRADE. O número de colunas vem de quem chama (`--rev-cols`), porque as duas
+   telas têm problemas opostos: o fim de duelo mostra 3 ou 4 cartas e quer todas
+   lado a lado; a Loja mostra 50 de um [abrir 10] e precisa quebrar a linha cedo
+   — em fileira única elas encolhem até virar selo. As colunas são `minmax(0,…)`
+   para que a grade ENCOLHA numa janela estreita em vez de estourar para fora da
+   caixa (que é o que faria a barra de rolagem horizontal aparecer). */
+.rev-grade {
+  display: grid;
+  grid-template-columns: repeat(var(--rev-cols, 7), minmax(0, var(--rev-w, 96px)));
+  justify-content: center;
+  gap: 10px;
+  margin: 4px 0;
+}
+
+.rev-carta {
+  width: 100%; aspect-ratio: 59/86; perspective: 700px; cursor: pointer;
+  background: none; border: 0; padding: 0;
+}
+/* Revelada, a carta NÃO fica `disabled`, e por duas razões: o
+   `button:disabled { opacity: .4 }` de `ui.css` apagava justamente o prêmio
+   recém-ganho (mal dava para enxergar a arte), e navegador nenhum entrega
+   evento de ponteiro a um controle desligado — o "segurar para ampliar"
+   simplesmente não começaria. Quem impede a segunda virada é o `abertas` do
+   módulo, que é onde a regra mora. */
+.rev-carta.aberta { cursor: zoom-in; }
+
+.rev-giro {
+  position: relative; display: block; width: 100%; height: 100%;
+  transform-style: preserve-3d; transition: transform .55s cubic-bezier(.2,.7,.3,1);
+}
+.rev-carta.aberta .rev-giro { transform: rotateY(180deg); }
+
+.rev-face {
+  position: absolute; inset: 0; backface-visibility: hidden;
+  border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
+  background: #0a0f16;
+}
+.rev-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rev-frente {
+  transform: rotateY(180deg); border-color: var(--gold);
+  box-shadow: 0 0 14px #f1c40f55;
+}
+/* A moldura toma a cor da RARIDADE. Sem raridade (servidor antigo) fica o
+   dourado acima. */
+.rev-frente.UR { border-color: #e8c46a; box-shadow: 0 0 20px #e8c46a88; }
+.rev-frente.SR { border-color: #cbb7ff; box-shadow: 0 0 16px #cbb7ff66; }
+.rev-frente.R  { border-color: #7fd0ff; box-shadow: 0 0 14px #7fd0ff55; }
+.rev-frente.N  { border-color: #cfd6de; box-shadow: 0 0 10px #cfd6de33; }
+
+/* O selo de raridade e o de novidade ficam DENTRO da face da frente: viram com
+   a carta, então não aparecem antes da revelação. */
+.rev-rar {
+  position: absolute; top: 3px; right: 3px; font-size: 9px; font-weight: bold;
+  padding: 2px 4px; border-radius: 2px; background: #04121fdd; letter-spacing: .5px;
+}
+.rev-frente.UR .rev-rar { color: #e8c46a; }
+.rev-frente.SR .rev-rar { color: #cbb7ff; }
+.rev-frente.R  .rev-rar { color: #7fd0ff; }
+.rev-frente.N  .rev-rar { color: #cfd6de; }
+
+/* "NEW!!" — a carta que ENTROU na Coleção agora, e não a décima cópia de uma
+   que já estava lá. É a informação que decide se o pacote valeu a pena, e ela
+   não sobrevive ao crédito: quem responde tem de olhar a coleção ANTES. */
+.rev-nova {
+  position: absolute; top: 3px; left: 3px; font-size: 9px; font-weight: 800;
+  padding: 2px 4px; border-radius: 2px; letter-spacing: .5px;
+  background: #c0392b; color: #fff; box-shadow: 0 0 10px #e74c3ccc;
+  animation: rev-novapisca 1.1s ease-in-out infinite;
+}
+@keyframes rev-novapisca {
+  0%, 100% { box-shadow: 0 0 6px #e74c3c88; }
+  50%      { box-shadow: 0 0 14px #e74c3c; }
+}
+
+/* O verso é o mesmo `.back` do tabuleiro — a carta virada do jogo, não um
+   desenho novo só para esta tela. A arte mora em `web/assets/`, que é a pasta
+   que o `pack.ps1` copia inteira para o payload; fora dela o verso quebraria
+   só no jogo empacotado. */
+.rev-back {
+  display: block; width: 100%; height: 100%; box-sizing: border-box;
+  background: #0c141d url('/web/assets/back_card.png') center / cover no-repeat;
+  border: 1px solid #2a1c08;
+}
+.rev-carta:not(.aberta):hover .rev-verso { border-color: var(--gold); }
+
+/* **A aproximação.** Virar e ficar do mesmo tamanho fazia a carta revelada se
+   perder no meio das outras 49 — o gesto não tinha desfecho. Aqui ela avança
+   para a frente enquanto gira e volta sozinha, num movimento só.
+   O `z-index` é metade do efeito: sem ele a carta cresce POR BAIXO das
+   vizinhas da grade, que é pior que não crescer. */
+.rev-carta.rev-zoom {
+  animation: rev-aproxima .85s cubic-bezier(.2,.7,.3,1);
+  position: relative; z-index: 3;
+}
+@keyframes rev-aproxima {
+  0%   { transform: scale(1); }
+  38%  { transform: scale(1.34); }
+  62%  { transform: scale(1.34); }
+  100% { transform: scale(1); }
+}
+
+.rev-nome {
+  font-size: 10px; color: var(--gold); margin-top: 4px; min-height: 13px;
+  line-height: 1.2; text-align: center;
+}
+
+/* Quem pediu ao sistema para não animar nada continua recebendo a informação
+   inteira — a carta abre, com moldura, selo e nome; o que some é o movimento. */
+@media (prefers-reduced-motion: reduce) {
+  .rev-giro { transition: none; }
+  .rev-carta.rev-zoom { animation: none; }
+  .rev-nova { animation: none; }
+}

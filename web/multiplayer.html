@@ -37,6 +37,7 @@
   .vazio { font-size: 11px; color: var(--dim); padding: 10px 2px; }
 
   .codigo { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+  .codigo[hidden] { display: none; }   /* ver esconder.test.mjs */
   .codigo code { flex: 1; background: var(--panel2); border: 1px solid var(--line);
                  padding: 9px 10px; font-size: 15px; letter-spacing: 3px; color: var(--gold);
                  overflow-x: auto; }
@@ -151,6 +152,13 @@
   </p>
 </div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module" src="/web/js/multiplayertela.js"></script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

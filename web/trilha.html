@@ -80,6 +80,11 @@
   }
   .painel .info b { color: var(--ink); }
   .painel .info .aviso { color: var(--gold); }
+  /* O retrospecto contra este adversario. A DERROTA vai em italico e apagada:
+     ela faz parte da conta, mas quem abre o painel esta escolhendo o proximo
+     duelo — o numero que interessa e o de vitorias. */
+  .painel .info .placar { color: var(--green, #3fd68a); }
+  .painel .info .placar i { font-style: italic; color: var(--dim); }
   .painel .acoes { display: flex; flex-direction: column; gap: 6px; }
   .painel .instrucao { font-size: 12px; color: var(--dim); text-align: center; line-height: 1.6; }
 
@@ -173,6 +178,13 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module" src="/web/js/trilha.js"></script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

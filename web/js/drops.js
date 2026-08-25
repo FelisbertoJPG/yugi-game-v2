@@ -266,6 +266,15 @@ export function dropsDoNpc(cfg, npcId) {
  * antes disto não perde nada, e um deck novo nasce dropando.
  *
  * A MESMA resolução roda no servidor (`premiar_vitoria`), que é quem sorteia.
+ *
+ * > **Devolve a configuração INTEIRA, e não uma cópia de dois campos.** Ela era
+ * > remontada campo a campo (`{ quantidade, pool }`), e o ÍCONE ficava para
+ * > trás — invisível, porque o objeto continuava parecendo certo. O estrago era
+ * > no editor: a aba DROPS carrega o que está publicado por aqui, então o ícone
+ * > voltava sempre como "nenhum selecionado", e o SALVAMENTO SEGUINTE apagava do
+ * > banco a configuração que estava lá. Do lado de quem edita: *"tive que salvar
+ * > 2x; voltei ao deck e o ícone não estava selecionado"*. Uma lista de campos
+ * > escrita à mão envelhece toda vez que a configuração ganha um.
  */
 export function dropsDoDeck(cfg, npcId, deckNome) {
   const doNpc = normalizarDrops(cfg)[String(npcId ?? '')] ?? null;
@@ -273,11 +282,13 @@ export function dropsDoDeck(cfg, npcId, deckNome) {
 
   const nome = String(deckNome ?? '').trim();
   const doDeck = nome ? doNpc.decks?.[nome] : null;
-  if (doDeck) return { quantidade: doDeck.quantidade, pool: doDeck.pool };
+  // `decks` fora, e só ele: é a lista dos OUTROS decks, e não faz sentido dentro
+  // da configuração de um. Todo o resto passa — inclusive o que for acrescentado
+  // depois desta linha ser escrita.
+  if (doDeck) return { ...doDeck };
 
-  return Number.isFinite(doNpc.quantidade)
-    ? { quantidade: doNpc.quantidade, pool: doNpc.pool }
-    : null;
+  const { decks: _outros, ...doNpcSemDecks } = doNpc;
+  return Number.isFinite(doNpc.quantidade) ? doNpcSemDecks : null;
 }
 
 /** Lê a configuração publicada (banco, com o disco de reserva). */

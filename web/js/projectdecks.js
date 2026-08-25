@@ -100,13 +100,20 @@ export async function listProjectDecks() {
     const r = await req('decks_npc?select=npc,nome,ydk&order=npc,nome');
     if (r.ok && Array.isArray(r.dados)) {
       for (const { npc, nome, ydk } of r.dados) {
-        const path = `npc/${npc}/${nome}.ydk`;
-        const meta = metaDoYdk(ydk);
-        npcPorCaminho.set(path, {
-          path,
-          meta: { ...meta, name: meta.name || nome },
-          deck: Deck.fromYdk(ydk, meta.name || nome),
-        });
+        // UM deck torto nao pode levar a lista inteira junto. Sem este guarda a
+        // excecao subia por `hydrateDecks` ate' o topo da home e a tela parava
+        // em 'carregando…' — a lista toda perdida por causa de uma linha.
+        try {
+          const path = `npc/${npc}/${nome}.ydk`;
+          const meta = metaDoYdk(ydk);
+          npcPorCaminho.set(path, {
+            path,
+            meta: { ...meta, name: meta.name || nome },
+            deck: Deck.fromYdk(ydk, meta.name || nome),
+          });
+        } catch (e) {
+          console.warn(`[decks] deck de NPC ilegivel: ${npc}/${nome}`, e);
+        }
       }
     }
   }
@@ -118,11 +125,18 @@ export async function listProjectDecks() {
     const r = await req('decks_jogador?select=nome,ydk&order=nome');
     if (r.ok && Array.isArray(r.dados)) {
       for (const { nome, ydk } of r.dados) {
-        out.push({
-          path: caminhoDeDeck(nome),
-          meta: { name: nome },
-          deck: Deck.fromYdk(ydk, nome),
-        });
+        // Idem, e aqui do' mais: e' o deck DO JOGADOR. Perder a lista inteira
+        // (ou a home) porque um .ydk voltou torto do banco seria trocar um
+        // deck ilegivel por nenhum deck.
+        try {
+          out.push({
+            path: caminhoDeDeck(nome),
+            meta: { name: nome },
+            deck: Deck.fromYdk(ydk, nome),
+          });
+        } catch (e) {
+          console.warn(`[decks] deck seu ilegivel: ${nome}`, e);
+        }
       }
     }
   }

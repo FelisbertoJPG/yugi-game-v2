@@ -187,6 +187,7 @@ namespace DuelServer
             // fechamento — X da janela, Ctrl+C, logoff. Sem isto, fechar no X
             // deixava a porta reservada e o proximo boot reclamava de porta
             // ocupada sem haver jogo nenhum aberto.
+            _emEscuta = listener;   // para o `Encerrar()` poder acordar o GetContext
             ArmarFechamentoLimpo(listener);
 
             Log.Info($"Servidor de duelo (treino W2) em {urlAtual}");
@@ -307,8 +308,116 @@ namespace DuelServer
                 }
         }
 
+        /// <summary>
+        /// Quantas requisicoes ja' chegaram nesta sessao. Existe por um motivo so':
+        /// depois de a atualizacao REABRIR o jogo (`--reaberto`), e' assim que o
+        /// boot descobre se a janela do navegador que ja' estava aberta continua
+        /// viva — ela consulta `/__update/status` a cada meio segundo. Havendo
+        /// alguem do outro lado, abrir outra janela daria duas copias do jogo.
+        /// </summary>
+        public static long Atendidas => Interlocked.Read(ref _atendidas);
+        static long _atendidas;
+
+        // ------------------------------------------------- a batida do jogo
+
+        /// <summary>
+        /// Quanto tempo sem NENHUMA batida antes de o jogo se encerrar sozinho.
+        ///
+        /// Este numero e' metade de um par: a pagina bate a cada
+        /// `INTERVALO_MS` de `web/js/vivo.js` (5s), e aqui a janela e' 15s — tres
+        /// batidas por janela. Com uma so', um pacote perdido ou uma navegacao
+        /// entre telas caindo na hora errada encerraria o jogo na cara de quem
+        /// esta' jogando. `web/js/vivo.test.mjs` guarda essa proporcao.
+        /// </summary>
+        public static readonly TimeSpan JANELA_VIVO = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// A janela quando a pagina esta' OCULTA (o jogo minimizado, ou atras de
+        /// outra janela).
+        ///
+        /// Ela existe por uma coisa que o navegador faz e que fecharia o jogo sem
+        /// ninguem entender: `setInterval` e' ESTRANGULADO em pagina oculta — o
+        /// Chrome derruba para cerca de uma batida por minuto. Com os 15s valendo
+        /// ali, minimizar o jogo por um minuto o encerraria, e o jogador voltaria
+        /// para uma janela morta sem nunca ter fechado nada.
+        ///
+        /// Dez minutos cabem de sobra numa batida por minuto, e ainda limitam o
+        /// estrago do caso que ninguem consegue detectar (o navegador MORTO
+        /// enquanto minimizado, sem `pagehide`): um processo invisivel vive no
+        /// maximo esse tempo, em vez de para sempre.
+        /// </summary>
+        public static readonly TimeSpan JANELA_VIVO_OCULTO = TimeSpan.FromMinutes(10);
+
+        static DateTime _ultimaBatida = DateTime.MinValue;
+        static bool _paginaOculta;
+        static Timer _relogioVivo;
+
+        /// <summary>Alguem disse "ainda estou aqui" (a pagina, ou uma jogada).</summary>
+        static void Bateu(bool oculto = false)
+        {
+            _ultimaBatida = DateTime.UtcNow;
+            _paginaOculta = oculto;
+        }
+
+        /// <summary>
+        /// Liga o relogio que encerra o jogo quando a janela do navegador fecha.
+        ///
+        /// SO' NO MODO `--app`: em `npm run dev` quem serve o front e' o Node e o
+        /// duel-server e' outro processo, que ninguem manda fechar — derruba-lo
+        /// porque uma aba fechou seria trocar um incomodo por um bug.
+        ///
+        /// E so' comeca a contar DEPOIS DA PRIMEIRA BATIDA. Entre subir o
+        /// servidor e o navegador terminar de abrir passam segundos (mais a
+        /// checagem de atualizacao), e um relogio armado desde o boot encerraria
+        /// o jogo antes de ele aparecer.
+        /// </summary>
+        public static void VigiarAJanela()
+        {
+            _relogioVivo?.Dispose();
+            _relogioVivo = new Timer(_ =>
+            {
+                var janela = _paginaOculta ? JANELA_VIVO_OCULTO : JANELA_VIVO;
+                if (!DeveEncerrar(_ultimaBatida, DateTime.UtcNow, janela)) return;
+                Log.Info($"a janela do jogo foi fechada ({(int)janela.TotalSeconds}s sem batida" +
+                         $"{(_paginaOculta ? ", com a pagina oculta" : "")}) — encerrando.");
+                Encerrar();
+            }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        }
+
+        /// <summary>
+        /// A decisao, separada do relogio para ter teste — ela erra CALADA nas
+        /// duas direcoes: cedo demais, o jogo se fecha na cara de quem esta'
+        /// jogando; tarde demais (ou nunca), fica um processo invisivel segurando
+        /// a porta, que e' o defeito que tirar o terminal poderia ter criado.
+        ///
+        /// `DateTime.MinValue` = ninguem bateu AINDA. Isso nao e' "faz muito tempo
+        /// que nao batem": e' o boot, entre subir o servidor e o navegador
+        /// terminar de abrir. Tratar os dois igual encerraria o jogo antes de ele
+        /// aparecer na tela.
+        /// </summary>
+        internal static bool DeveEncerrar(DateTime ultimaBatida, DateTime agora, TimeSpan janela) =>
+            ultimaBatida != DateTime.MinValue && agora - ultimaBatida >= janela;
+
+        /// <summary>
+        /// Encerra o servidor de fora do laco de requisicoes.
+        ///
+        /// O `GetContext()` fica BLOQUEADO esperando a proxima chamada, entao
+        /// levantar `_shutdown` sozinho nao acorda ninguem: o laco so' reavalia a
+        /// condicao depois de atender alguma coisa — e a essa altura nao vem mais
+        /// nada, porque a janela fechou. Parar o listener e' o que faz o
+        /// `GetContext` lancar, e o `catch { break; }` do laco ja' trata isso.
+        /// </summary>
+        public static void Encerrar()
+        {
+            _shutdown = true;
+            try { _emEscuta?.Stop(); } catch { }
+        }
+
+        static HttpListener _emEscuta;
+
         static void Handle(HttpListenerContext ctx)
         {
+            Interlocked.Increment(ref _atendidas);
             var req = ctx.Request; var res = ctx.Response;
             res.Headers["Access-Control-Allow-Origin"] = "*";
             res.Headers["Access-Control-Allow-Headers"] = "Content-Type";
@@ -317,6 +426,43 @@ namespace DuelServer
             string path = req.Url?.AbsolutePath ?? "/";
             if (req.HttpMethod == "OPTIONS") { res.StatusCode = 204; res.Close(); return; }
             if (path == "/health") { WriteText(res, "ok"); return; }
+
+            // QUAL VERSAO ESTE CLIENTE E. O front manda isto ao Supabase, que
+            // decide se ele ainda pode jogar (`checar_versao` / `iniciar_duelo`,
+            // migration 0041). A trava mora la e nao aqui de proposito: este
+            // servidor roda na maquina de quem joga, e um cliente velho nao vai
+            // se barrar sozinho — a versao dele foi compilada antes da regra
+            // existir. O que ESTA ponta faz e so dizer a verdade.
+            //
+            // E a verdade e o que esta em DISCO: o marcador do pacote `game` e a
+            // constante compilada dentro deste executavel. Nao o manifesto — ele
+            // diz o que esta OFERECIDO, e o cliente travado e justamente o que
+            // recebeu a oferta e nao conseguiu aplica-la.
+            if (path == "/__versao")
+            {
+                WriteJson(res, new
+                {
+                    exe  = Update.BuildConfig.InstallerVersion,
+                    game = Update.UpdateEngine.MarcadorInstalado(_webRoot, "game") ?? "",
+                    // Em desenvolvimento nao ha instalacao nenhuma e nao ha o que
+                    // barrar: o repositorio E a versao mais nova que existe. O
+                    // front usa isto para nao se auto-bloquear no `npm run dev`.
+                    dev  = !Payload.Exists,
+                });
+                return;
+            }
+
+            // A BATIDA da pagina: "o jogo ainda esta' na tela". Ver `VigiarAJanela`
+            // e o cabecalho de `web/js/vivo.js`. Nao responde nada de util de
+            // proposito — o que importa e' ter chegado.
+            if (path == "/__vivo")
+            {
+                // `?oculto=1`: a pagina esta' minimizada e o navegador vai
+                // estrangular as batidas dela. Ver `JANELA_VIVO_OCULTO`.
+                Bateu(req.Url?.Query?.Contains("oculto=1") == true);
+                WriteText(res, "ok");
+                return;
+            }
 
             // Encerramento a pedido do launcher. Responde primeiro, so' entao sai
             // do laco — assim quem pediu recebe o 200 em vez de uma conexao morta.
@@ -352,14 +498,52 @@ namespace DuelServer
                 return;
             }
 
+            // RAIO-X: a mao do NPC, para diagnosticar o `NpcBrain`.
+            //
+            // Rota a parte, e nao um campo do `/respond`, de proposito: ela e'
+            // LEITURA e nao passa perto do fluxo de eventos do duelo. Enfiada no
+            // `Entregar`, um dia vazaria para a tela de quem nao pediu — que e'
+            // exatamente o que o `Projetar` existe para impedir.
+            //
+            // Duas travas, e so' uma delas e' de verdade:
+            //   • `IsLocal` — com `--lan` a porta 8770 e' alcancavel pela rede
+            //     (o app mobile). Isto continua sendo comando da propria maquina.
+            //   • NPC apenas — quem responde e' o `MaoDoNpc()`, que devolve null
+            //     num duelo entre dois humanos.
+            // O "so' admin" e' guarda de TELA (`web/duel.html` esconde a caixa de
+            // quem nao e' admin): este servidor roda na maquina do jogador e nao
+            // valida token do Supabase, entao chamar isso de fechadura seria
+            // mentira. A fechadura real e' a de cima — contra uma PESSOA, a mao
+            // nao sai daqui de jeito nenhum.
+            if (path == "/espiar" && req.HttpMethod == "POST")
+            {
+                if (!req.IsLocal) { res.StatusCode = 403; WriteText(res, "403"); return; }
+                var body = ReadBody(req);
+                var sala = SalaDe(body);
+                lock (sala.Trava)
+                {
+                    var mao = sala.Duel?.MaoDoNpc();
+                    WriteJson(res, mao == null
+                        ? new { ok = false, erro = "so' vale contra o NPC", mao = Array.Empty<uint>() }
+                        : new { ok = true, erro = (string)null, mao = mao.ToArray() });
+                }
+                return;
+            }
+
+            // Uma JOGADA tambem conta como batida. E' o que sustenta o app mobile
+            // (`--app --lan`), que fala com esta porta e nao carrega a pagina: sem
+            // isto, um duelo no celular com a janela do PC fechada seria encerrado
+            // no meio.
             if (path == "/start" && req.HttpMethod == "POST")
             {
+                Bateu();
                 var body = ReadBody(req);
                 WriteJson(res, StartDuel(body));
                 return;
             }
             if (path == "/respond" && req.HttpMethod == "POST")
             {
+                Bateu();
                 var body = ReadBody(req);
                 WriteJson(res, RespondDuel(body));
                 return;

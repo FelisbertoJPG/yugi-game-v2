@@ -36,6 +36,15 @@ namespace DuelServer.Update
         public PayloadManifesto Fonte;
         public string VersaoLocal;   // null quando nunca foi instalado
         public bool Precisa;
+
+        /// <summary>
+        /// Por que este pacote entrou no plano. Vazio no caso comum (o marcador
+        /// difere, que e' o obvio); preenchido quando a razao NAO se le' dos dois
+        /// marcadores — hoje so' a checagem de integridade, em que eles batem e
+        /// mesmo assim o pacote precisa voltar. Sem isto, um download de 27 MB
+        /// aparece no log sem explicacao nenhuma.
+        /// </summary>
+        public string Motivo;
     }
 
     public sealed class Plano
@@ -164,14 +173,29 @@ namespace DuelServer.Update
         // ------------------------------------------------------------------ carga
 
         /// <summary>
+        /// O último manifesto lido veio do CACHE, e não da rede?
+        ///
+        /// É a mesma distinção do `alcancou` de `pullFileEx` no front, e ela
+        /// decide uma coisa só: um manifesto do cache diz o que era verdade da
+        /// última vez, não o que é verdade agora. Enquanto o jogo entrava offline
+        /// isso não importava; desde que atualizar virou obrigatório (23/08/2026),
+        /// tratar o cache como resposta deixaria passar exatamente o cliente que a
+        /// regra existe para não deixar para trás — o que está velho e não
+        /// consegue perguntar.
+        /// </summary>
+        public bool ManifestoVeioDoCache { get; private set; }
+
+        /// <summary>
         /// Fallback em cadeia: remoto → cache local do último manifesto bom.
-        /// Estar offline NUNCA pode travar o jogo — quem chama trata null caindo
-        /// de volta no payload embutido no exe (o plano B permanente daqui, que o
-        /// instalador do molde original não tinha).
+        /// Devolve `null` quando não há nem um nem outro — nunca lança: uma exceção
+        /// aqui subiria até o boot, e o jogo não abriria por causa do updater.
+        /// Quem chama decide o que fazer com cada caso (ver
+        /// <see cref="ManifestoVeioDoCache"/>).
         /// </summary>
         public async Task<Manifest> CarregarManifestoAsync(CancellationToken ct = default)
         {
             Prog("manifesto", _fonte.Descricao, 0);
+            ManifestoVeioDoCache = false;
             try
             {
                 string json = await _fonte.ManifestoAsync(ct);
@@ -194,6 +218,7 @@ namespace DuelServer.Update
                     {
                         var m = Manifest.Parse(await File.ReadAllTextAsync(_cacheManifesto, ct));
                         Log.Info($"usando o manifesto do cache ({m.GameVersion})");
+                        ManifestoVeioDoCache = true;
                         return m;
                     }
                     catch (Exception e2) { Log.Warn($"cache do manifesto ilegivel: {e2.Message}"); }
@@ -268,6 +293,12 @@ namespace DuelServer.Update
                                                 StringComparer.OrdinalIgnoreCase);
             foreach (var p in m.Payloads) esperados.UnionWith(LerInventario(p.Id));
 
+            // O que a varredura abaixo REALMENTE viu. Serve para a checagem de
+            // integridade logo depois: um arquivo do inventario que nao apareceu
+            // aqui foi apagado por alguem, e o pacote precisa ser reinstalado.
+            var presentes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var varridas = new List<string>();
+
             foreach (var raiz in m.ManagedRoots)
             {
                 string modo = (raiz.RemoveMode ?? "keep").ToLowerInvariant();
@@ -279,10 +310,13 @@ namespace DuelServer.Update
                 }
                 if (!SafePath.TryCombine(_raiz, raiz.Path, out string abs) || !Directory.Exists(abs)) continue;
 
+                varridas.Add(raiz.Path.Replace('\\', '/').TrimEnd('/'));
                 foreach (var arq in Directory.EnumerateFiles(abs, "*", SearchOption.AllDirectories))
                 {
                     string rel = SafePath.Rel(_raiz, arq);
-                    if (rel == null || esperados.Contains(rel)) continue;
+                    if (rel == null) continue;
+                    presentes.Add(rel);
+                    if (esperados.Contains(rel)) continue;
                     if (rel.StartsWith(PastaMarcadores + "/", StringComparison.OrdinalIgnoreCase)) continue;
 
                     plano.Orfaos.Add(new ItemPlano
@@ -292,6 +326,50 @@ namespace DuelServer.Update
                         Motivo = modo,
                         Bytes = new FileInfo(arq).Length
                     });
+                }
+            }
+
+            // 3.5. INTEGRIDADE: o marcador diz "instalado", mas os arquivos estão lá?
+            //
+            // O diff dos pacotes é por MARCADOR, e só por ele — é o que evita
+            // hashear 47 MB por boot. O preço é que marcador em dia com arquivo
+            // faltando no disco é um estado que NADA reinstala: o plano diz "em
+            // dia" para sempre, e o jogo roda com um módulo a menos.
+            //
+            // Não é hipótese. Em 24/08/2026 o próprio updater produziu esse
+            // estado: os órfãos são calculados no PLANO, contra o inventário de
+            // ANTES, e apagados DEPOIS de o pacote novo ter instalado. Todo
+            // arquivo que o pacote novo trazia e o inventário velho não conhecia
+            // era instalado e apagado segundos depois — `bootguard.js`,
+            // `versao.js`, `chatdoca.js` e mais sete. Como `index.html` importa
+            // três deles e um `import` que dá 404 mata o módulo inteiro, o
+            // desfecho era a home desenhando só o casco estático: *"trava numa
+            // home sem interação e sem informações da conta"*. E o `bootguard.js`,
+            // que existe justamente para denunciar isso na tela, era um dos
+            // apagados.
+            //
+            // O laço acima (que apagava) está fechado no `AplicarAsync`. Esta
+            // metade é a que CURA quem já perdeu os arquivos — sem ela o marcador
+            // continuaria batendo e ninguém traria o que sumiu.
+            //
+            // Custo ZERO de I/O: só pergunta pelos arquivos que a varredura de
+            // órfãos já enumerou. E não é por acaso que basta — o apagador é
+            // exatamente essa varredura, então nenhum arquivo fora dela corre
+            // esse risco.
+            if (varridas.Count > 0)
+            {
+                foreach (var pp in plano.Payloads)
+                {
+                    if (pp.Precisa) continue;
+                    string sumido = LerInventario(pp.Fonte.Id).FirstOrDefault(
+                        rel => varridas.Any(r => rel.StartsWith(r + "/", StringComparison.OrdinalIgnoreCase))
+                               && !presentes.Contains(rel));
+                    if (sumido == null) continue;
+
+                    Log.Warn($"pacote '{pp.Fonte.Id}': o marcador diz instalado, mas {sumido} " +
+                             "nao esta no disco — reinstalando");
+                    pp.Precisa = true;
+                    pp.Motivo = "arquivo do inventario sumiu do disco";
                 }
             }
 
@@ -392,8 +470,33 @@ namespace DuelServer.Update
             }
 
             // --- órfãos
+            //
+            // A lista foi montada no PLANO, contra o inventário de ANTES — e os
+            // pacotes acabaram de ser reinstalados logo acima, reescrevendo esses
+            // inventários. Um arquivo que o pacote NOVO traz e o inventário VELHO
+            // não conhecia entra na lista como órfão e seria apagado segundos
+            // depois de ter sido instalado.
+            //
+            // Foi o que aconteceu em 24/08/2026, e o estrago não pareceu um erro
+            // de instalador: sumiram `bootguard.js`, `versao.js`, `chatdoca.js` e
+            // mais sete. `index.html` importa três deles, um `import` que dá 404
+            // mata o `<script type="module">` inteiro, e a home passou a desenhar
+            // só o casco estático — *"trava numa home sem interação e sem
+            // informações da conta"*. Sem erro em lugar nenhum, porque o módulo
+            // que serve para mostrar o erro (`bootguard.js`) era um dos apagados.
+            //
+            // A releitura é do inventário RECÉM-ESCRITO, e não da lista do plano:
+            // é a única fonte que já sabe o que o pacote novo trouxe.
+            var reivindicados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in plano.Manifesto.Payloads) reivindicados.UnionWith(LerInventario(p.Id));
+
             foreach (var o in plano.Orfaos)
             {
+                if (reivindicados.Contains(o.Path))
+                {
+                    Log.Info($"orfao cancelado: {o.Path} — o pacote novo o traz");
+                    continue;
+                }
                 string abs = SafePath.Combine(_raiz, o.Path);
                 if (!File.Exists(abs)) continue;
                 try
@@ -695,6 +798,29 @@ namespace DuelServer.Update
 
         string CaminhoMarcador(string id) =>
             Path.Combine(_raiz, PastaMarcadores, $"{id}.version");
+
+        /// <summary>
+        /// O marcador de um pacote, lido de FORA (sem instanciar o engine).
+        ///
+        /// Existe para a rota <c>/__versao</c>: o front precisa dizer ao servidor
+        /// QUAL versao ele esta rodando, e a resposta honesta e o que esta
+        /// INSTALADO em disco — nao a que o manifesto oferece, nem uma constante
+        /// carimbada no build. As duas mentiriam exatamente no caso que importa:
+        /// o cliente que baixou a atualizacao e nao conseguiu aplica-la.
+        ///
+        /// <c>null</c> quando nao ha marcador (instalacao nova, ou o repositorio
+        /// em desenvolvimento). Quem chama trata isso como "nao sei", que do lado
+        /// do servidor NAO alcanca piso nenhum.
+        /// </summary>
+        public static string MarcadorInstalado(string raiz, string id)
+        {
+            try
+            {
+                string f = Path.Combine(raiz ?? "", PastaMarcadores, $"{id}.version");
+                return File.Exists(f) ? File.ReadAllText(f).Trim() : null;
+            }
+            catch { return null; }
+        }
 
         public string LerMarcador(string id)
         {

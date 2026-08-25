@@ -41,6 +41,15 @@
     letter-spacing: 1px; padding: 4px; cursor: pointer; text-decoration: underline;
   }
   .linkish:hover { color: var(--gold); }
+
+  /* `display:flex` aqui APAGA o `[hidden]` do navegador (a regra dele tem a
+     menor especificidade que existe), entao o guarda tem de vir junto — e' a
+     mesma armadilha que deixou o aviso de icone novo aparecendo em todo fim de
+     duelo. Ver `node web/js/esconder.test.mjs`. */
+  .lembrar { display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 2px 0 4px; }
+  .lembrar[hidden] { display: none; }
+  .lembrar input { width: auto; margin: 0; }
+  .lembrar span { font-size: 11px; color: var(--dim); letter-spacing: 1px; }
 </style>
 </head>
 <body>
@@ -69,6 +78,15 @@
         <label for="password">senha</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required>
       </div>
+      <!-- "Manter login nesta maquina". Sem ela, a sessao vive so' enquanto a
+           janela do jogo estiver aberta: fechar e abrir pede a senha de novo.
+           So' aparece no modo ENTRAR — quem esta' criando conta ainda nem sabe
+           se vai jogar nesta maquina, e a escolha continua disponivel no
+           proximo login. -->
+      <label class="lembrar" id="campo-lembrar">
+        <input id="lembrar" type="checkbox">
+        <span>manter login nesta maquina</span>
+      </label>
       <div class="hint" id="hint" hidden>nome no jogo: 3-32 caracteres · senha com pelo menos 8</div>
       <div class="error" id="error"></div>
       <div class="aviso" id="aviso" hidden></div>
@@ -78,8 +96,11 @@
   </div>
 </div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module">
-import { login, register, recuperarSenha, desviarParaRecuperacao } from '/web/js/auth.js';
+import {
+  login, register, recuperarSenha, desviarParaRecuperacao, manterLogin,
+} from '/web/js/auth.js';
 
 // Antes de tudo: se o link de recuperação caiu aqui (o Supabase ignora o
 // `redirect_to` que não está na lista de URLs permitidas e usa a Site URL),
@@ -102,6 +123,7 @@ function render() {
   $('username').required = mode === 'register';
   $('hint').hidden = mode !== 'register';
   $('esqueci').hidden = mode !== 'login';
+  $('campo-lembrar').hidden = mode !== 'login';
   $('error').textContent = '';
   $('aviso').hidden = true;
 }
@@ -120,7 +142,7 @@ $('form').onsubmit = async (e) => {
   const usuario = $('username').value.trim();
 
   const r = mode === 'login'
-    ? await login(email, password)
+    ? await login(email, password, $('lembrar').checked)
     : await register(email, password, usuario);
 
   $('submit').disabled = false;
@@ -154,7 +176,18 @@ $('esqueci').onclick = async () => {
   $('aviso').textContent = `se essa conta existir, o link de redefinicao chegou em ${email}.`;
 };
 
+// A caixa comeca como a pessoa a deixou da ultima vez. Guardar a ESCOLHA (e
+// nao a sessao) e' o que faz "eu sempre marco isto" nao virar um clique a mais
+// por dia — sem manter ninguem entrado contra a propria escolha.
+$('lembrar').checked = manterLogin();
+
 render();
 </script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

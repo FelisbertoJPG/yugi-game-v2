@@ -13,6 +13,7 @@ import {
   allBoosterTags, hydrateBoosters, salvarNoProjeto, reprintsOf,
 } from '/web/js/boosters.js';
 import { listCustom } from '/web/js/customcards.js';
+import { ordenarPool } from '/web/js/poolordem.js';
 import { inLista1 } from '/web/js/lista1.js';
 import { hydrateCardLists } from '/web/js/cardlists.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
@@ -375,18 +376,6 @@ function matchesSub(c, cardType, sub) {
 }
 
 /** Ordena por maior ATK/DEF/nível (desc.); nulos por último. */
-function sortPool(list, key) {
-  if (!key) return list;
-  const val = (c) => (key === 'atk' ? c.atk : key === 'def' ? c.def : c.lv);
-  return [...list].sort((a, b) => {
-    const va = val(a), vb = val(b);
-    if (va == null && vb == null) return 0;
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    return vb - va;
-  });
-}
-
 function applyFilters() {
   const num = (id) => ($(id).value === '' ? null : Number($(id).value));
   const { cardType, sub } = activeTypeFilter();
@@ -408,7 +397,7 @@ function applyFilters() {
   const tag = $('f-tag').value;
   if (tag) poolResults = poolResults.filter((c) => (c.tags ?? []).includes(tag));
   if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
-  poolResults = sortPool(poolResults, $('f-sort').value);
+  poolResults = ordenarPool(poolResults, $('f-sort').value);
   renderPool();
 }
 

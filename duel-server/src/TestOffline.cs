@@ -17,11 +17,16 @@ namespace DuelServer
     /// notar, porque o sintoma é o jogo funcionar normalmente até o dia em que não
     /// funciona.
     ///
-    /// A regra que estes casos protegem é uma só, e é a mais importante do
-    /// instalador inteiro: **offline nunca trava o jogo**. Um updater que impede de
-    /// jogar quando o GitHub está fora do ar é pior que nenhum updater. Toda falha
-    /// de rede tem que virar "sem atualização" — nunca uma exceção que sobe até o
-    /// boot, nunca uma instalação pela metade.
+    /// A regra que estes casos protegem: **toda falha de rede vira um ESTADO, nunca
+    /// uma exceção** — nunca algo que suba até o boot, nunca uma instalação pela
+    /// metade, nunca um jogo que não abre sem dizer por quê.
+    ///
+    /// Até 23/08/2026 a regra ia mais longe ("offline nunca trava o jogo": o
+    /// jogador entrava com o que tinha). Isso mudou — ver o cabeçalho de
+    /// `UpdateService` —, e a metade nova está aqui dentro, no
+    /// `CacheSalvaOBootDepoisDaPrimeiraVez`: o cache do manifesto continua
+    /// respondendo, mas agora se ANUNCIA como cache, e é essa bandeira que impede
+    /// um cliente velho de concluir que está em dia sem ter conseguido perguntar.
     /// </summary>
     public static class TestOffline
     {
@@ -74,7 +79,9 @@ namespace DuelServer
             catch (Exception e) { Falha("fonte inexistente nao lanca", e.GetType().Name + ": " + e.Message); return; }
 
             Ok("fonte inexistente nao lanca");
-            Checa(m == null, "fonte inexistente devolve null (= 'sem atualizacao')");
+            Checa(m == null, "fonte inexistente devolve null (= 'nao consegui perguntar')");
+            Checa(!eng.ManifestoVeioDoCache,
+                  "e nao mente dizendo que veio do cache (nao havia cache nenhum)");
         }
 
         /// <summary>
@@ -107,8 +114,20 @@ namespace DuelServer
                   $"veio {m2.GameVersion}");
 
             var plano = eng2.Montar(m2);
-            Checa(plano.NadaAFazer, "offline com tudo instalado: nada a fazer (o jogo abre direto)",
+            Checa(plano.NadaAFazer, "offline com tudo instalado: o plano nao pede nada",
                   plano.Resumo());
+
+            // A METADE QUE MUDOU EM 23/08/2026. O cache continua existindo e
+            // continua respondendo — o que mudou e' que ele se ANUNCIA como cache.
+            // `UpdateService.Checar` para o jogo na tela de atualizacao quando esta
+            // bandeira esta' levantada: um manifesto do cache diz o que era verdade
+            // da ultima vez, e aceita-lo como resposta deixaria passar exatamente o
+            // cliente velho que nao consegue perguntar se esta' velho — que e' o
+            // caso que este projeto ja' pagou caro (o motor congelado de 19/08).
+            Checa(eng2.ManifestoVeioDoCache,
+                  "e ele se ANUNCIA como cache (o boot recusa jogar sem falar com o servidor)");
+            Checa(!eng.ManifestoVeioDoCache,
+                  "par CONTROLE: o da rede nao levanta a bandeira");
         }
 
         /// <summary>

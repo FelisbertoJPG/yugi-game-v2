@@ -5,7 +5,8 @@ using System.Text.Json;
 //
 // Fluxo: confere o ambiente; para o servidor; compila; roda as 5 suites do
 // instalador (offline, ~6s); gera dist\release\ em DRY-RUN; mostra o que mudou
-// desde a ultima geracao; publica o Release.
+// desde a ultima geracao; **reempacota o exe se ele ficou para tras**; publica o
+// Release.
 //
 // **Nao pergunta nada.** Dois cliques = publicar, que e' o que este exe existe
 // para ser; pedido do usuario em 20/08/2026. Quem quiser a trava de volta usa
@@ -53,6 +54,27 @@ internal static class Program
             if (_root == null) { Console.Error.WriteLine("raiz nao encontrada"); return 2; }
             Console.WriteLine(DigitalDaCasca(Path.Combine(_root, "duel-server", "host")));
             return 0;
+        }
+
+        // Diagnostico: o exe em dist\ embute o conteudo do ultimo dry-run? So'
+        // RESPONDE — nao empacota e nao publica. Existe para dar de conferir a
+        // comparacao que decide o passo 9 sem disparar um pack de tres minutos
+        // (e sem publicar um Release para descobrir).
+        if (Has(args, "--exe-em-dia"))
+        {
+            _root = AcharRaiz();
+            if (_root == null) { Console.Error.WriteLine("raiz nao encontrada"); return 2; }
+            var rel = LerVersoes();
+            var emb = LerMarcadoresDoPack();
+            if (rel.Count == 0 || emb.Count == 0)
+            {
+                Console.WriteLine("nao sei: falta manifest.json (npm run release:build) ou payload.markers (npm run pack).");
+                return 2;
+            }
+            var d = Defasados(emb, rel);
+            foreach (var f in d) Console.WriteLine(f);
+            Console.WriteLine(d.Count == 0 ? "em dia" : "defasado — o passo 9 rodaria o pack");
+            return d.Count == 0 ? 0 : 1;
         }
 
         bool comExe = Has(args, "--com-exe");
@@ -164,8 +186,29 @@ internal static class Program
             return Segurar(0);
         }
 
-        // ---- 9. publicar ----------------------------------------------------
-        Step(9, "publicando o Release");
+        // ---- 9. o exe embute ESTE conteudo? ---------------------------------
+        // A trava mora no publish-release.ps1 (dist\.cache\payload.markers x o
+        // manifesto que acabou de ser escrito) e existe por um congelamento real
+        // em producao: um exe que embute um game.zip mais velho que o do PROPRIO
+        // Release rebaixa toda INSTALACAO NOVA, que nasce sem marcador e por
+        // isso confia na semente embutida.
+        //
+        // Ela morde no `-Publish`, que e' o ULTIMO passo — e por isso, ate' aqui,
+        // toda mudanca de front terminava em "rode npm run pack de novo e
+        // publique" DEPOIS de todo o preparo. Como o front muda em praticamente
+        // todo Release, o "dois cliques = publicar" era falso no caso comum:
+        // sobrava um ritual de tres comandos na mao, que e' exatamente o tipo de
+        // coisa que este exe existe para nao ter — e que ja' foi esquecido em
+        // producao antes.
+        //
+        // Rodar o `pack` aqui nao afrouxa nada: a trava continua no ps1 e
+        // continua sendo a palavra final. O que muda e' QUEM executa a
+        // consequencia mecanica do dry-run — este exe, e nao a pessoa.
+        Step(9, "o exe embute o conteudo deste Release?");
+        if (!GarantirExeEmDia()) return Segurar(9);
+
+        // ---- 10. publicar ---------------------------------------------------
+        Step(10, "publicando o Release");
         string argsPub = "-NoProfile -ExecutionPolicy Bypass -File tools\\publish-release.ps1 -Publish";
         if (comExe) argsPub += " -ComExe";
         if (!string.IsNullOrWhiteSpace(tag)) argsPub += " -Tag " + tag;
@@ -367,6 +410,97 @@ internal static class Program
     // -------------------------------------------------------------- comparacao
 
     static string Manifesto => Path.Combine(_root, "dist", "release", "manifest.json");
+
+    /// <summary>
+    /// Garante que o `dist\ClassicDuels.exe` embute os MESMOS pacotes que este
+    /// Release vai publicar, rodando o `npm run pack` quando nao embute.
+    ///
+    /// A sequencia certa e' release:build -> pack -> publish, e ela e' essa por
+    /// um ovo-e-galinha: o pack CONSOME o dist\release\ que o release:build
+    /// acabou de gerar. E' por isso que a trava do ps1 so' morde no ultimo
+    /// passo, e por isso que este metodo roda entre os dois.
+    /// </summary>
+    static bool GarantirExeEmDia()
+    {
+        string exe = Path.Combine(_root, "dist", "ClassicDuels.exe");
+        if (!File.Exists(exe))
+        {
+            // Sem exe o Release sai sem `installer` e a trava nem existe — nao
+            // ha' o que empacotar. (`--com-exe` ja' teria barrado no passo 2.)
+            Info(@"sem dist\ClassicDuels.exe — nada a empacotar.");
+            return true;
+        }
+
+        var doRelease = LerVersoes();               // o manifesto do dry-run
+        var doExe = LerMarcadoresDoPack();          // o que o exe embutiu
+
+        // NAO CHUTAR: faltando uma das duas listas a resposta e' "nao sei", e um
+        // pack de tres minutos disparado por engano e' tao ruim quanto a trava
+        // que ele deveria evitar. O ps1 continua com a palavra final no -Publish.
+        if (doRelease.Count == 0 || doExe.Count == 0)
+        {
+            Warn(@"nao da' para comparar (falta manifest.json ou dist\.cache\payload.markers) — seguindo.");
+            return true;
+        }
+
+        var fora = Defasados(doExe, doRelease);
+        if (fora.Count == 0) { Ok("o exe ja' embute exatamente este conteudo"); return true; }
+
+        foreach (var f in fora) Info(f);
+        Info("reempacotando (npm run pack) — leva alguns minutos.");
+        if (Rodar("powershell", @"-NoProfile -ExecutionPolicy Bypass -File tools\pack.ps1") != 0)
+        {
+            Fail("o `npm run pack` falhou — nada foi publicado.");
+            return false;
+        }
+
+        // Conferir DE NOVO: um pack que rodou e nao resolveu (o dist\release\
+        // mexido no meio, um zip regravado) mataria a publicacao la' na frente,
+        // com o preparo todo refeito a' toa — e a mensagem de la' mandaria fazer
+        // justamente o que acabou de ser feito.
+        if (Defasados(LerMarcadoresDoPack(), doRelease).Count > 0)
+        {
+            Fail("mesmo depois do pack o exe segue defasado — nada foi publicado.");
+            Console.WriteLine(@"       Confira dist\release\ e rode `npm run release:build` antes de tentar de novo.");
+            return false;
+        }
+        Ok("exe reempacotado com o conteudo deste Release");
+        return true;
+    }
+
+    /// <summary>Os pacotes em que o exe e o Release discordam, ja' em texto.</summary>
+    static List<string> Defasados(Dictionary<string, string> doExe, Dictionary<string, string> doRelease)
+    {
+        var fora = new List<string>();
+        foreach (var kv in doExe)
+            if (doRelease.TryGetValue(kv.Key, out string agora) &&
+                !string.Equals(agora, kv.Value, StringComparison.OrdinalIgnoreCase))
+                fora.Add($"{kv.Key}: o exe embute {kv.Value}, este Release publica {agora}");
+        return fora;
+    }
+
+    /// <summary>
+    /// O que o ultimo `npm run pack` embutiu — `dist\.cache\payload.markers`,
+    /// uma linha `id=marcador` por pacote. E' o MESMO arquivo que o
+    /// publish-release.ps1 le' para decidir se deixa publicar.
+    /// </summary>
+    static Dictionary<string, string> LerMarcadoresDoPack()
+    {
+        var mapa = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            string arq = Path.Combine(_root, "dist", ".cache", "payload.markers");
+            if (!File.Exists(arq)) return mapa;
+            foreach (var linha in File.ReadAllLines(arq))
+            {
+                int i = linha.IndexOf('=');
+                if (i <= 0) continue;
+                mapa[linha.Substring(0, i).Trim()] = linha.Substring(i + 1).Trim();
+            }
+        }
+        catch { }
+        return mapa;
+    }
 
     /// <summary>Marcadores de cada pacote no manifesto local, ou vazio se nao ha'.</summary>
     static Dictionary<string, string> LerVersoes()
@@ -641,6 +775,9 @@ internal static class Program
         Console.WriteLine("    --sim           aceito e ignorado (a confirmacao ja' nao existe)");
         Console.WriteLine("    --tag <nome>    nome da tag do Release (padrao: carimbo de data/hora)");
         Console.WriteLine("    --podar <n>     apaga os Releases antigos, mantendo os n mais recentes");
+        Console.WriteLine("    --exe-em-dia    so' RESPONDE se o exe embute o conteudo do ultimo dry-run");
+        Console.WriteLine("                    (nao empacota e nao publica) — 0 em dia, 1 defasado");
+        Console.WriteLine("    --digital       imprime a digital da casca e sai");
         Console.WriteLine();
         return 0;
     }

@@ -6,12 +6,13 @@
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import {
   listShopBoosters, boosterSize, hydrateBoosters, rarityIndex,
-  chancesDoPacote, DEFAULT_PRICE, PACK_SIZE, PITY_EVERY, UR_PITY_DP,
+  chancesDoPacote, DEFAULT_PRICE, PACK_SIZE, PITY_EVERY, UR_PITY_PACKS,
 } from '/web/js/boosters.js';
 import { renderGavetas, fraseDaColecao } from '/web/js/gavetas.js';
+import { montarRevelacao } from '/web/js/revelacao.js';
 import { listCustom } from '/web/js/customcards.js';
 import {
-  getDP, getPity, hydrateWallet, abrirPacote, getUrSpend,
+  getDP, getPity, hydrateWallet, abrirPacote, getUrPity, ownedIds,
 } from '/web/js/wallet.js';
 import { requireLogin } from '/web/js/auth.js';
 import {
@@ -64,22 +65,47 @@ function renderShop() {
     const canBuy = dp >= price;
     const temSR = (b.cards?.SR?.length ?? 0) > 0;
     const opens = getPity(pityKey(b));
-    const faltam = PITY_EVERY - (opens % PITY_EVERY);   // pacotes até a SR garantida
-    const proxSR = temSR && (opens % PITY_EVERY) === PITY_EVERY - 1;
+    // Quantos pacotes deste booster já contam para a próxima garantia. É o
+    // RESTO, e não o total: o contador nunca zera na carteira (ele só cresce),
+    // e o que interessa na tela é a volta atual.
+    const passos = opens % PITY_EVERY;
+    const faltam = PITY_EVERY - passos;
+    const proxSR = temSR && faltam === 1;
+
+    // A BARRA existe porque o texto sozinho parecia um bug. Com 0, 20 ou 40
+    // pacotes abertos a frase era a MESMA ("faltam 20"), numa linha `.meta`
+    // igual à do preço — então abrir pacote não mudava nada visível e a
+    // sensação era a de um contador que esquece. O relato foi exatamente
+    // esse: "não lembra quantos pacotes pro pool das garantidas".
+    //
+    // O dado sempre esteve certo no banco (`carteira.pity`, por booster); o
+    // que faltava era ele APARECER progredindo.
     const pityLinha = temSR
-      ? (proxSR
-          ? `<span class="meta" style="color:var(--gold)">★ próximo pacote: SR garantida!</span>`
-          : `<span class="meta">a cada ${PITY_EVERY} pacotes: 1 SR garantida deste booster (faltam ${faltam})</span>`)
+      ? `<div class="pity ${proxSR ? 'pronta' : ''}">`
+        +   `<div class="pity-topo">`
+        +     `<span class="pity-rot">${proxSR ? '★ SR GARANTIDA NO PRÓXIMO!' : 'SR garantida'}</span>`
+        +     `<span class="pity-n">${passos}<i>/${PITY_EVERY}</i></span>`
+        +   `</div>`
+        +   `<div class="pity-trilho"><div class="pity-fill" style="width:${(passos / PITY_EVERY) * 100}%"></div></div>`
+        + `</div>`
       : '';
 
     // Progresso da UR garantida: é global (vale para todos os boosters), então
     // a linha mostra o mesmo número em todos os cards — de propósito.
     const temUR = (b.cards?.UR?.length ?? 0) > 0;
-    const faltamDP = Math.max(0, UR_PITY_DP - getUrSpend());
+    // Pacotes deste booster desde a última UR. O teto é o piso da garantia: o
+    // contador do banco pode passar de 20 (ele só zera quando uma UR sai), e
+    // sem o `min` a barra passaria de 100% de largura.
+    const semUr = Math.min(UR_PITY_PACKS, getUrPity(pityKey(b)));
+    const urPronta = temUR && semUr >= UR_PITY_PACKS - 1;
     const urLinha = temUR
-      ? (faltamDP === 0
-          ? `<span class="meta" style="color:var(--gold)">★★ próximo pacote: UR garantida!</span>`
-          : `<span class="meta">a cada ${UR_PITY_DP} DP gastos: 1 UR garantida (faltam ${faltamDP} DP)</span>`)
+      ? `<div class="pity ur ${urPronta ? 'pronta' : ''}">`
+        +   `<div class="pity-topo">`
+        +     `<span class="pity-rot">${urPronta ? '★★ UR GARANTIDA NO PRÓXIMO!' : 'UR garantida'}</span>`
+        +     `<span class="pity-n">${semUr}<i>/${UR_PITY_PACKS}</i></span>`
+        +   `</div>`
+        +   `<div class="pity-trilho"><div class="pity-fill" style="width:${(semUr / UR_PITY_PACKS) * 100}%"></div></div>`
+        + `</div>`
       : '';
     el.innerHTML =
       `<div class="art" style="background-image:${b.coverId ? `url('${ART(b.coverId)}')` : 'none'}"></div>` +
@@ -88,10 +114,20 @@ function renderShop() {
         `<span class="meta">${boosterSize(b)} cartas · ${price} DP</span>` +
         pityLinha +
         urLinha +
-        `<button class="buy btn-primary" ${canBuy ? '' : 'disabled'}>abrir pacote (${price} DP)</button>` +
+        `<div class="compra">` +
+          `<button class="buy btn-primary" ${canBuy ? '' : 'disabled'}>abrir (${price} DP)</button>` +
+          `<button class="buy10" ${dp >= price * 10 ? '' : 'disabled'}>abrir 10 <b>(${price * 10} DP)</b></button>` +
+        `</div>` +
         `<button class="ver">ver as cartas</button>` +
       `</div>`;
-    el.querySelector('.buy').onclick = (e) => { e.currentTarget.disabled = true; buy(b); };
+    el.querySelector('.buy').onclick = (e) => { e.currentTarget.disabled = true; buy(b, 1); };
+    // O [abrir 10] desliga os DOIS botões: são 10 pacotes numa transação só, e
+    // um segundo clique enquanto ela roda cobraria outro lote.
+    el.querySelector('.buy10').onclick = (e) => {
+      e.currentTarget.disabled = true;
+      el.querySelector('.buy').disabled = true;
+      buy(b, 10);
+    };
     el.querySelector('.ver').onclick = () => verBooster(b);
     frag.append(el);
   }
@@ -109,22 +145,48 @@ function renderShop() {
  * chamasse a API na mão podia pular o `spendDP` e creditar as cartas do mesmo
  * jeito — o cliente era a única autoridade sobre o próprio saldo.
  */
-async function buy(booster) {
-  const r = await abrirPacote(booster.name);
+async function buy(booster, quantos = 1) {
+  // **O que era NOVO tem de ser lido ANTES da compra.** `abrirPacote` já grava
+  // a carteira de volta no cache, então depois dela toda carta do lote "já está
+  // na Coleção" — a pergunta deixa de ter resposta. É a mesma razão pela qual o
+  // drop do NPC responde isso no SERVIDOR, antes de creditar (migration 0029).
+  //
+  // O `?? ` mais abaixo mantém a preferência pelo servidor: no dia em que
+  // `abrir_pacote()` devolver o campo `nova`, ele vence este palpite — que erra
+  // só quando o cache local está atrás do banco (a compra feita em outra
+  // máquina desde o boot desta tela), e erra para o lado inofensivo de um selo
+  // a mais.
+  const tinha = new Set(ownedIds().map(Number));
+  const r = await abrirPacote(booster.name, quantos);
   if (!r.ok) {
     return void toast(r.error === 'DP insuficiente'
       ? 'DP insuficiente — vença Adversários para ganhar mais'
       : r.error);
   }
 
-  // O servidor devolve `{id, rarity}`; a tela também quer saber o que veio por
-  // garantia, e isso é dedutível: a primeira carta com raridade acima do comum
-  // num pacote que bateu o contador é a garantida.
-  const pulls = r.cartas.map((c, i) => ({
-    id: Number(c.id),
-    rarity: c.rarity,
-    guaranteed: i === 0 && (c.rarity === 'SR' || c.rarity === 'UR'),
-  }));
+  // QUEM DIZ o que veio por garantia é o SERVIDOR (campo `guaranteed`,
+  // migration 0044). A tela ADIVINHAVA — "a primeira carta acima de comum" —,
+  // e isso errava sempre que a primeira saía rara por sorte: a carta ganhava um
+  // ★ que ela não merecia. Com 50 cartas de um [abrir 10] na tela, o palpite
+  // erraria em quase todo lote.
+  //
+  // O `??` mantém o palpite antigo para um servidor sem a 0044 — ali ele é a
+  // melhor resposta disponível, e some sozinho quando o campo chega.
+  // As cartas do PRÓPRIO lote também contam: a segunda cópia da mesma carta
+  // dentro dos dez pacotes não é nova, mesmo que a primeira tenha sido.
+  const vistas = new Set();
+  const pulls = r.cartas.map((c, i) => {
+    const id = Number(c.id);
+    const inedita = !tinha.has(id) && !vistas.has(id);
+    vistas.add(id);
+    return {
+      id,
+      rarity: c.rarity,
+      pacote: c.pacote ?? 1,
+      guaranteed: c.guaranteed ?? (i === 0 && (c.rarity === 'SR' || c.rarity === 'UR')),
+      nova: c.nova ?? inedita,
+    };
+  });
 
   lastBought = booster;
   renderDP();
@@ -250,22 +312,80 @@ function verEstrutural(d) {
   );
 }
 
+/**
+ * **O pacote aberto: as cartas viradas, para virar uma a uma.**
+ *
+ * A cerimônia é a MESMA do drop de NPC no fim de duelo, e literalmente o mesmo
+ * código (`montarRevelacao`): antes disto a Loja despejava as cartas já
+ * abertas, sem virada e sem dizer quais eram inéditas, e o mesmo prêmio parecia
+ * valer menos vindo do pacote.
+ *
+ * **[abrir outro] fica desligado enquanto sobrar carta virada**, pelo mesmo
+ * motivo dos botões de saída do fim de duelo: ele redesenha esta caixa por
+ * cima, e um clique apressado apagaria o pacote antes de alguém ter visto o que
+ * veio nele. O [fechar] NÃO é desligado — com 50 cartas de um [abrir 10] isso
+ * prenderia o jogador numa tela até ele clicar 50 vezes, e o [revelar rápido]
+ * está bem ali para quem não quer a cerimônia.
+ */
 function showReveal(booster, pulls) {
   $('reveal-title').textContent = `${booster.name} — pacote aberto!`;
-  $('reveal-sub').textContent = `${pulls.length} cartas foram para a sua Coleção · saldo: ${getDP()} DP`;
-  const frag = document.createDocumentFragment();
-  for (const p of pulls) {
-    const rc = document.createElement('div');
-    rc.className = 'rc';
-    rc.innerHTML = `<img src="${ART(p.id)}" alt="">`
-      + `<span class="r ${p.rarity}">${p.guaranteed ? '★' : ''}${p.rarity}</span>`
-      + `<div class="nm">${escapeHtml(nameOf(p.id))}${p.guaranteed ? ' (garantida)' : ''}</div>`;
-    frag.append(rc);
-  }
-  $('reveal-cards').replaceChildren(frag);
+  const lotes = new Set(pulls.map((p) => p.pacote ?? 1)).size;
+  const novas = pulls.filter((p) => p.nova).length;
+  $('reveal-sub').innerHTML =
+    `${pulls.length} cartas`
+    + (lotes > 1 ? ` em ${lotes} pacotes` : '')
+    // Quantas são inéditas é o que decide se valeu a pena abrir de novo — vale
+    // mais que o total, e por isso vem na mesma linha.
+    + (novas ? ` <b style="color:#ff8a7a">(${novas} nova(s))</b>` : '')
+    + ` foram para a sua Coleção · saldo: ${getDP()} DP`
+    + ' — clique para virar:';
+
   const price = priceOf(booster);
+  const pular = $('reveal-pular');
+  const liberar = () => {
+    pular.hidden = true;
+    $('reveal-again').disabled = getDP() < price;
+  };
+
+  const rev = montarRevelacao($('reveal-cards'), pulls.map((p) => ({
+    id: p.id,
+    raridade: p.rarity,
+    nova: p.nova,
+    selo: p.guaranteed ? '★' : '',
+    sufixo: p.guaranteed ? ' (garantida)' : '',
+  })), {
+    nomeDe: nameOf,
+    arte: (id) => ART(id),
+    // SETE por linha. Um [abrir 10] traz 50 cartas: numa fileira que só quebra
+    // quando não cabe mais, elas ficavam do tamanho de um selo.
+    colunas: 7,
+    aoTerminar: liberar,
+  });
+
   $('reveal-again').textContent = `abrir outro (${price} DP)`;
-  $('reveal-again').disabled = getDP() < price;
+  $('reveal-again').disabled = true;
+  pular.hidden = false;
+  pular.onclick = () => rev.revelarTudo();
+
+  // **[organizar por raridade]** — com 50 cartas de um [abrir 10] espalhadas na
+  // ordem do sorteio, é este botão que responde a pergunta que se faz depois de
+  // abrir: *tirei alguma coisa boa?*
+  //
+  // Ele REVELA o que ainda estiver virado (quem organiza está pedindo para ver o
+  // resultado), e é um vai-e-volta: a ordem do pacote é a única que mostra em
+  // qual dos dez pacotes cada carta veio, então perdê-la para sempre num clique
+  // seria uma troca ruim.
+  const ordem = $('reveal-ordem');
+  const pintarOrdem = () => {
+    const agrupado = rev.agrupadoPorRaridade();
+    ordem.textContent = agrupado ? 'ordem do pacote' : 'organizar por raridade';
+    ordem.title = agrupado
+      ? 'volta à ordem em que as cartas saíram'
+      : 'agrupa UR → N (revela as que ainda estiverem viradas)';
+  };
+  ordem.onclick = () => { rev.ordenar(!rev.agrupadoPorRaridade()); pintarOrdem(); };
+  pintarOrdem();
+
   $('reveal-back').classList.add('show');
 }
 

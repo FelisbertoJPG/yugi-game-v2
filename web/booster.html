@@ -213,9 +213,14 @@
       <select id="f-tag" title="filtrar por tag"><option value="">tag: todas</option></select>
       <select id="f-sort" title="ordenar as cartas">
         <option value="">ordem: padrão</option>
+        <option value="raridade">raridade: UR &rarr; N</option>
+        <option value="raridade-asc">raridade: N &rarr; UR</option>
         <option value="atk">maior ATK</option>
+        <option value="atk-asc">menor ATK</option>
         <option value="def">maior DEF</option>
+        <option value="def-asc">menor DEF</option>
         <option value="lv">maior nível</option>
+        <option value="lv-asc">menor nível</option>
       </select>
       <input type="number" id="f-lvmin" placeholder="nv⩾" min="0" max="12">
       <input type="number" id="f-lvmax" placeholder="nv⩽" min="0" max="12">
@@ -239,6 +244,13 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module" src="/web/js/boosterbuilder.js"></script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

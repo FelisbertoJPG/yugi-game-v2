@@ -40,6 +40,7 @@ namespace DuelServer
             OsDoisLadosDecidem(sa);
             PerguntaSoChegaAQuemFoiPerguntado(sa);
             NinguemJogaPeloOutro(sa);
+            RaioXNaoAlcancaUmHumano(sa);
 
             Log.Info($"\n=== {_pass} passaram, {_fail} falharam ===");
             return _fail == 0 ? 0 : 1;
@@ -139,6 +140,42 @@ namespace DuelServer
             var boa = d.Respond("endturn", 0, porJogador: 0);
             Checa(boa.question != null && boa.question.player == 1,
                   "depois da recusa, o jogador certo joga normalmente");
+        }
+
+        /// <summary>
+        /// O RAIO-X (`POST /espiar`, a caixa "ver a mao do NPC" do admin) para no
+        /// multiplayer — e esta e' a unica trava de verdade que ele tem.
+        ///
+        /// Quem hospeda roda o motor para os DOIS (ver `web/js/ponte.js`), entao
+        /// este processo tem a mao do outro JOGADOR na memoria. Devolve-la
+        /// transformaria um diagnostico do cerebro do NPC em trapaca contra uma
+        /// pessoa — e sem ninguem perceber, porque do outro lado nada muda.
+        ///
+        /// `null` e nao lista vazia: "nao posso mostrar" e "ele esta sem cartas"
+        /// sao respostas diferentes, e a tela precisa saber qual das duas e'.
+        ///
+        /// O par CONTROLE e' obrigatorio aqui: sem ele, uma `MaoDoNpc()` que
+        /// devolvesse null SEMPRE passaria neste teste — e o raio-x nao mostraria
+        /// nada, em silencio, que e' o defeito que ninguem acusa.
+        /// </summary>
+        static void RaioXNaoAlcancaUmHumano(string sa)
+        {
+            using (var humanos = Duelo(sa, doisHumanos: true, npc: false))
+            {
+                humanos.Advance();
+                Checa(humanos.MaoDoNpc() == null,
+                      "multiplayer: a mao do adversario HUMANO nao sai do servidor");
+            }
+
+            using (var contraNpc = Duelo(sa, doisHumanos: false, npc: true))
+            {
+                contraNpc.Advance();
+                var mao = contraNpc.MaoDoNpc();
+                Checa(mao != null, "par CONTROLE: contra o NPC a mao e' devolvida");
+                Checa(mao != null && mao.Count > 0,
+                      "e ela tem as cartas de verdade (a mao inicial do NPC)",
+                      $"(veio {mao?.Count ?? -1} carta(s))");
+            }
         }
 
         // ------------------------------------------------------------- utilidades

@@ -223,9 +223,27 @@ O original usa WinForms + WebView2 porque não tinha servidor. **Nós temos** �
 - `POST /__update/apply` → dispara o `ApplyAsync`, com o progresso saindo por SSE;
 - `web/atualizando.html` mostra a barra e chama a home quando termina.
 
-No boot do `--app`, antes de abrir o navegador, o `Program` faz o check **com timeout curto**:
-offline nunca trava (§7 do original). Se houver atualização, abre o navegador em
-`/web/atualizando.html`; senão, na home de sempre.
+No boot do `--app`, antes de abrir o navegador, o `Program` faz o check **com timeout
+curto**. Se houver atualização — **ou se a checagem não alcançar o servidor** — abre o
+navegador em `/web/atualizando.html`; senão, na home de sempre.
+
+> **A regra "offline nunca trava o jogo" (§7 do original) foi revogada em
+> 23/08/2026.** A tela perdeu o "jogar sem atualizar" e o boot deixou de entrar
+> offline: login, carteira, coleção, decks, adversários e trilha moram no Supabase,
+> então entrar sem rede entregava uma home vazia com cara de quebrada — e deixava um
+> cliente para trás, que é o defeito mais caro que este projeto já pagou (o motor
+> congelado de 19/08/2026). Sem conexão o jogo **espera** na tela, que reconsulta
+> sozinha a cada 10s; `POST /__update/rechecar` (só localhost) é o "tentar de novo"
+> sem custar um boot inteiro.
+>
+> O que sobrevive intacto da regra antiga: **nenhuma falha de rede pode virar
+> exceção no boot**. Toda falha continua virando um ESTADO (`Indisponivel`) que a
+> tela sabe mostrar.
+>
+> O **cache do manifesto** entrou junto: ele responde, mas agora se anuncia
+> (`UpdateEngine.ManifestoVeioDoCache`), e `Checar` trata cache como "sem conexão".
+> Um manifesto do cache diz o que era verdade da última vez — aceitá-lo deixava
+> passar exatamente o cliente velho que não consegue perguntar se está velho.
 
 O `Action<Progress>` do original vira o mesmo desacoplamento aqui: o núcleo não sabe se quem
 escuta é o SSE, o console ou o self-test.
@@ -359,23 +377,34 @@ troca acontece no boot seguinte (`duel-server/host/Estagio.cs`). Os casos:
    concordam. Duplicata sem guarda envelhece: discordando, a casca procuraria o motor numa
    pasta e o motor instalaria o jogo noutra.
 
-### `--test-offline` — a rede FORA do ar (16 asserções)
+### `--test-offline` — a rede FORA do ar (19 asserções)
 
-O contrário do `--test-remote`, e o caso que acontece de verdade com o jogador. Prova a
-regra mais importante do instalador inteiro — **offline nunca trava o jogo**: fonte
-inexistente, manifesto corrompido (o HTML de um 500), cache do manifesto ilegível e asset
-que some no meio do download. Todos viram "sem atualização" ou "falhou sem estragar nada" —
-nenhum vira exceção subindo até o boot.
+O contrário do `--test-remote`, e o caso que acontece de verdade com o jogador. Prova que
+**toda falha de rede vira um ESTADO, nunca uma exceção**: fonte inexistente, manifesto
+corrompido (o HTML de um 500), cache do manifesto ilegível e asset que some no meio do
+download. Todos viram "não consegui perguntar" ou "falhou sem estragar nada" — nenhum vira
+exceção subindo até o boot.
 
-O caso do meio é o que mais paga: depois de UMA checagem boa, o manifesto fica em cache e
-ficar offline nem é "sem atualização" — o cliente sabe que está em dia e abre direto.
+O caso do meio é o que mais paga, e é onde a mudança de 23/08/2026 mora: depois de UMA
+checagem boa o manifesto fica em cache, e ele **continua** respondendo — mas se ANUNCIA
+como cache, e é essa bandeira (com o par controle do manifesto vindo da rede) que impede um
+cliente velho de concluir que está em dia sem ter conseguido perguntar.
 
-### `--test-selfupdate` — a troca do próprio exe (15 asserções)
+### `--test-selfupdate` — a troca do próprio exe (19 asserções)
 
 A coreografia inteira com um exe de mentira no `%TEMP%`: baixar o `.new`, conferir o sha256,
 apagar o `Zone.Identifier`, escrever o `.bat`, esperar um PID morrer, copiar por cima, apagar
 o `.new` e o `.bat` se autodeletar. O `.bat` roda **de verdade** — o PID esperado é o de um
 processo que já morreu, então a espera termina na hora sem encerrar quem está testando.
+
+Ele confere também **quais argumentos** chegam ao processo reaberto: o `.bat` reabre com
+`--reaberto`, e é essa flag que faz o boot novo NÃO abrir uma segunda janela do navegador.
+Sem ela, a atualização terminava com duas cópias do jogo na tela (a janela que mostrou a
+barra de progresso continuava viva e ia sozinha para a home quando o servidor novo
+respondia) — e como o navegador abre em modo `--app`, sem barra de endereço, cada uma parece
+um executável: *"2 exe abrindo após att"*. A rede de segurança é `WebServer.Atendidas`: se
+ninguém falar com o servidor em 6 segundos, a janela anterior foi fechada e aí sim se abre
+uma nova.
 
 O que ele **não** cobre, e continua exigindo uma publicação real: baixar o exe pelo navegador
 para ele vir com a Marca da Web de verdade. O caso 3 põe a marca à mão e confere que ela sai,
@@ -441,7 +470,12 @@ zips de brinquedo) e só apareceria na máquina do jogador. Rode sempre antes de
 15. [x] Recusar `/__update/aplicar` com duelo ativo (409) — e **soltar** o `cards.cdb` do
         duelo já encerrado, senão atualizar depois de jogar uma vez exigiria fechar o jogo.
 16. [x] Poda dos backups (mantém os 3 mais recentes) e caminho de volta
-        (`/__update/restaurar` + botão na tela de atualização).
+        (`/__update/restaurar`). **O botão saiu da tela em 23/08/2026** — pela
+        mesma razão que o "jogar sem atualizar": voltar é ficar para trás. A rota
+        fica como alavanca de quem conserta um Release quebrado (POST de
+        localhost, na mão), não como opção de quem joga. O caso comum já se
+        resolve sozinho e por outro caminho: a casca reverte um MOTOR que não
+        sobe (`Estagio.Reverter`).
 17. [x] `--test-offline` e `--test-selfupdate`.
 
 A cadeia inteira funciona: o `--app` checa no boot, abre `atualizando.html` se houver

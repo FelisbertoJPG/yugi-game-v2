@@ -205,6 +205,8 @@
       </select>
       <select id="f-sort" title="ordenar as cartas">
         <option value="">ordem: padrão</option>
+        <option value="raridade">raridade: UR &rarr; N</option>
+        <option value="raridade-asc">raridade: N &rarr; UR</option>
         <option value="atk">maior ATK</option>
         <option value="atk-asc">menor ATK</option>
         <option value="def">maior DEF</option>
@@ -231,10 +233,12 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { CARD_LISTS, getCardList, hydrateCardLists } from '/web/js/cardlists.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
+import { ordenarPool } from '/web/js/poolordem.js';
 import {
   hydrateBanlist, getBanlist, saveBanlist,
   addRule, removeRule, assignCardToRule, unassignCard, cardsInRule,
@@ -431,20 +435,6 @@ function matchesSub(c, cardType, sub) {
   return tl.startsWith(sub);
 }
 
-function sortPool(list, key) {
-  if (!key) return list;
-  const asc = key.endsWith('-asc');
-  const field = key.replace('-asc', '');
-  const val = (c) => (field === 'atk' ? c.atk : field === 'def' ? c.def : c.lv);
-  return [...list].sort((a, b) => {
-    const va = val(a), vb = val(b);
-    if (va == null && vb == null) return 0;
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    return asc ? va - vb : vb - va;
-  });
-}
-
 let poolResults = [];
 
 function applyFilters() {
@@ -480,7 +470,7 @@ function applyFilters() {
   // A lista escolhida no topo sempre restringe o pool — banlist só faz
   // sentido dentro de um pool restrito.
   poolResults = poolResults.filter(getCardList(banlist.listId).filter);
-  poolResults = sortPool(poolResults, $('f-sort').value);
+  poolResults = ordenarPool(poolResults, $('f-sort').value);
   renderPool();
 }
 
@@ -620,5 +610,11 @@ $('f-arch').append(...uniq((c) => c.a[0]).map((v) => new Option(v, v)));
 renderRules();
 applyFilters();
 </script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

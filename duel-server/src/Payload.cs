@@ -266,10 +266,68 @@ namespace DuelServer
         /// nao e' escrito e a checagem seguinte vai oferecer o pacote. E' o
         /// comportamento antigo, e e' o certo: mentir um marcador que nao veio do
         /// Release deixaria o jogador preso numa versao velha para sempre.
+        ///
+        /// ------------------------------------------------------------------
+        /// **O PAYLOAD E' SEMENTE, NUNCA SOBRESCRITA** (24/08/2026).
+        ///
+        /// Um pacote que ja' tem MARCADOR em disco e' administrado pelo
+        /// auto-updater, e a partir dali quem manda e' o Release — nao este
+        /// executavel. E' a mesma regra do resto do projeto: *copia local nunca
+        /// vence a nuvem*, e aqui o payload embutido E' a copia local.
+        ///
+        /// Sem isto o jogo entrava num LACO INFINITO de atualizacao, e ele custou
+        /// dias de jogador preso. A sequencia, lida do log:
+        ///
+        ///   pacote 'game' instalado (132 arquivos) — game-e8fb91c13b31  ← do Release
+        ///   executavel novo instalado — reabrindo o Classic Duels
+        ///   ===== nova sessao =====
+        ///   versao nova do jogo — atualizando os arquivos
+        ///   pacote 'game' embutido: 122 arquivos — game-7abc579bf254    ← rebaixou
+        ///   atualizacao disponivel: game + engine + 10 orfao(s)         ← recomeca
+        ///
+        /// A causa e' que o `.exe` publicado num Release pode embutir um `game.zip`
+        /// MAIS VELHO que o `game.zip` daquele mesmo Release (o `pack` rodou antes
+        /// do ultimo `release:build`). O boot seguinte via `.versao` diferente,
+        /// concluia "versao nova do jogo" e reinstalava o payload INTEIRO por cima
+        /// do que o updater acabara de baixar — carimbando o marcador velho. A
+        /// checagem seguinte oferecia a mesma atualizacao, para sempre, e o jogador
+        /// ficava permanentemente no front da data do `pack`.
+        ///
+        /// Nao da' para decidir isso comparando as versoes: o marcador e' um
+        /// DIGEST (`game-e8fb91c13b31`), nao um numero — nao existe "maior". O que
+        /// da' para saber e' quem tem autoridade, e a resposta e' o disco.
+        ///
+        /// Efeito colateral bem-vindo: a troca de executavel deixou de reescrever
+        /// os ~21 mil `.lua` do `cards` a cada vez. Eles eram reextraidos mesmo com
+        /// o marcador identico ao do disco, so' porque o `.versao` do payload havia
+        /// mudado.
         /// </summary>
         static int ExtrairPacote(string root, string id, ZipArchiveEntry entrada,
                                  Dictionary<string, string> versoes)
         {
+            // ESTE PACOTE JA' E' ADMINISTRADO PELO UPDATER? Entao ele nao e' meu.
+            //
+            // Marcador em disco significa que o auto-updater instalou este pacote
+            // alguma vez, e dali em diante a autoridade e' o Release. Sobrescrever
+            // aqui rebaixaria o jogador para o conteudo da data do `pack` e
+            // carimbaria o marcador velho — que e' exatamente o laco descrito
+            // acima. Ver tambem `UpdateEngine.Intocaveis`: a mesma ideia, para os
+            // arquivos de quem joga.
+            //
+            // Ausencia de marcador e' o caso da PRIMEIRA instalacao, e ali o
+            // payload e' a unica fonte que existe: instala.
+            string emDisco = Update.UpdateEngine.MarcadorInstalado(root, id);
+            if (!string.IsNullOrEmpty(emDisco))
+            {
+                versoes.TryGetValue(id, out string doPayload);
+                if (string.Equals(emDisco, doPayload, StringComparison.OrdinalIgnoreCase))
+                    Log.Info($"pacote '{id}': ja' instalado ({emDisco}) — nao mexi");
+                else
+                    Log.Info($"pacote '{id}': o disco tem {emDisco} e este exe traz " +
+                             $"{doPayload ?? "sem versao"} — quem manda e' o Release, nao mexi");
+                return 0;
+            }
+
             var instalados = new List<string>();
 
             // O zip aninhado precisa passar por um arquivo temporario: o stream de

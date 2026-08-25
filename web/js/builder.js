@@ -28,6 +28,7 @@ import { raridadesDosEstruturais } from '/web/js/ydk.js';
 import { montarAuto } from '/web/js/automontagem.js';
 import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
+import { ordenarPool } from '/web/js/poolordem.js';
 import {
   carregarDrops, salvarDrops, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
   RARIDADES, MAX_DROPS, planoRapido, chanceDoIcone,
@@ -1140,7 +1141,11 @@ function applyFilters() {
   if ($('f-lista1').checked) poolResults = poolResults.filter(inLista1);
   // Coleção: no Deck Builder "real", só o que o jogador possui.
   if (ownedMode) poolResults = poolResults.filter((c) => ownsCard(c.id));
-  poolResults = sortPool(poolResults, $('f-sort').value);
+  // A raridade daqui e' a `raridadeReal` (booster e DEPOIS estrutural, na ordem
+  // do servidor), e nao a `rarity` que o `annotateDb` escreve: e' o unico lugar
+  // que conhece as 36 cartas que so' existem em Deck Estrutural, e ordenar sem
+  // elas as jogaria todas para o fim como "sem raridade".
+  poolResults = ordenarPool(poolResults, $('f-sort').value, (c) => raridadeReal(c.id));
   renderPool();
 }
 
@@ -1149,20 +1154,6 @@ function applyFilters() {
  * ele, decrescente (maior primeiro). Cartas sem o valor vão sempre para o fim,
  * independente da direção.
  */
-function sortPool(list, key) {
-  if (!key) return list;
-  const asc = key.endsWith('-asc');
-  const field = key.replace('-asc', '');
-  const val = (c) => (field === 'atk' ? c.atk : field === 'def' ? c.def : c.lv);
-  return [...list].sort((a, b) => {
-    const va = val(a), vb = val(b);
-    if (va == null && vb == null) return 0;
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    return asc ? va - vb : vb - va;
-  });
-}
-
 /** Reconstrói o select de tags a partir das cartas customizadas em memória. */
 function refreshTagSelect() {
   const tags = new Set(allBoosterTags());   // nomes de boosters + raridades

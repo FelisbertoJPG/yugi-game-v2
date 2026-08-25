@@ -616,6 +616,19 @@ Depois **3 bytes de flag** (to_bp, to_ep, shuffle).
 - Resposta = **int32 `(índice << 16) | comando`**: 0=Normal Summon, 3=set monstro,
   4=set magia/arm, 5=ativar, **7=encerrar turno**, 6=ir pra Battle (provável).
 
+**FLIPSUMMONING (64) / FLIPSUMMONED (65) — a Invocação-Virar.** Ela **não** emite
+MSG_POS_CHANGE (53): o core troca `current.position` para `POS_FACEUP_ATTACK` e
+só então escreve o 64, com `code(4) + get_info_location(4)` — `ctrl(1) loc(1)
+seq(1) pos(1)`, os mesmos 9 bytes do MSG_SUMMONING (60). O 65 é vazio, como o
+SUMMONED (61): só fecha a janela de negação.
+> **Não traduzir o 64 é o defeito perfeito deste protocolo**: a mensagem é
+> pulada em silêncio (o buffer é `[len][type][payload]`, então nada desalinha), o
+> duelo anda no servidor e a TELA fica parada com a carta de costas. O clique
+> seguinte, que o cliente ainda acha ser uma virada, cai no reposition de verdade
+> e deita o monstro em DEFESA face-up. O relato do jogador foi *"clico e não
+> acontece nada; no turno seguinte ele vira pra cima em defesa"* — as duas
+> metades do mesmo buraco. `--test-flip` guarda isso, com o par controle.
+
 **SELECT_PLACE (18):** `player(1) count(1) flag(4)`. No flag, bits 0-4 = zonas de
 monstro proibidas, **bits 8-12 = zonas de magia/armadilha**. Zona de campo = SZONE
 `seq=5`. Resposta = **3 bytes** `[player, location, sequence]` (loc 0x4=MZONE, 0x8=SZONE).

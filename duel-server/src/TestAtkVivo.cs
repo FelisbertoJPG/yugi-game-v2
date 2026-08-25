@@ -57,6 +57,8 @@ namespace DuelServer
             OBanco(sa);
             Log.Info("\n=== decisao isolada: o cerebro usa o valor vivo, nao o impresso ===\n");
             Isolado(sa);
+            Log.Info("\n=== e o ALVO do ataque tambem: ele bate em quem ele VENCE ===\n");
+            OAlvoDoAtaque(sa);
             Log.Info("\n=== duelo real: CONTROLE — sem equipamento o NPC ATACA ===\n");
             bool atacouSemEquip = DueloReal(sa, comEquipamento: false);
             Log.Info("\n=== duelo real: com +700 no alvo, o NPC NAO ataca ===\n");
@@ -150,6 +152,140 @@ namespace DuelServer
             Check("o NPC tambem le o bonus no PROPRIO monstro (2400 ataca o 1500)",
                   oxForte.Attack && oxForte.Why.Contains("2400"),
                   $"(veio attack={oxForte.Attack}: {oxForte.Why})");
+        }
+
+        // ------------------------------------------------------- alvo do ataque
+
+        /// <summary>
+        /// **Declarar o ataque e escolher em QUEM bater sao duas perguntas.**
+        ///
+        /// O `SELECT_BATTLECMD` escolhe o ATACANTE; logo depois, um
+        /// `MSG_SELECT_CARD` escolhe o ALVO. A `DecideBattle` sempre leu o ATK
+        /// vivo e sempre recusou a troca ruim — ela declara o ataque contra o
+        /// alvo MAIS FRACO do outro lado —, e a pergunta seguinte desfazia a
+        /// decisao: a lista de alvos tem a MESMA forma de uma remocao (so' cartas
+        /// dele, so' na zona de monstro), entao ela caia no criterio generico do
+        /// `DecideSelect`, que e' *o de maior ATK IMPRESSO*.
+        ///
+        /// Era isto o relato *"se meu monstro tem uns 3 buff que aumentaram o ATK
+        /// dele bastante, o NPC nao enxerga e decide atacar igual com um mais
+        /// fraco"*. O cenario abaixo e' exatamente ele, e os dois numeros apontam
+        /// para lados OPOSTOS de proposito: quem o criterio antigo escolhia (o de
+        /// maior ATK impresso) e' justamente quem mata o atacante.
+        ///
+        /// O par CONTROLE e' a mesma lista de alvos SEM ataque declarado — uma
+        /// remocao de Main Phase —, onde a escolha TEM de continuar sendo o mais
+        /// forte. Sem ele, uma regra que sempre mirasse o mais fraco passaria
+        /// aqui e faria todo Raigeki do NPC estourar o pior monstro da mesa.
+        /// </summary>
+        static void OAlvoDoAtaque(string sa)
+        {
+            using var db = new DatabaseManager(sa);
+
+            // O lado dele: o Uraby (1500, sem reforco) na zona 0, e um Battle Ox
+            // (1700 impresso) na zona 1 com tres reforcos em cima — 3300 de ATK
+            // vivo. O atacante do NPC e' outro Battle Ox, 1700.
+            const int OX_COM_3_BUFFS = 3300;
+            var campoNpc = new List<(uint code, int pos, int seq)> { (BATTLE_OX, POS_ATAQUE, 0) };
+            var campoDele = new List<(uint code, int pos, int seq)>
+            { (URABY, POS_ATAQUE, 0), (BATTLE_OX, POS_ATAQUE, 1) };
+
+            NpcBrain Cerebro(Func<int, int, (int atk, int def)?> statsVivo) => new NpcBrain(
+                db,
+                p => (p == 1 ? campoNpc : campoDele).Select(m => m.code).ToList(),
+                m => Log.Info($"    [npc] {m}"),
+                _ => Array.Empty<uint>(),
+                _ => 0,
+                p => (p == 1 ? campoNpc : campoDele).Select(m => (m.code, m.pos)).ToList(),
+                _ => 0, _ => Array.Empty<uint>(), _ => 8000,
+                p => p == 1 ? campoNpc : campoDele,
+                _ => Array.Empty<uint>(),
+                statsVivo);
+
+            // A lista de alvos que o motor manda depois da declaracao: os dois
+            // monstros DELE, na ordem em que estao no campo.
+            InteractiveDuel.Question Alvos()
+            {
+                var q = new InteractiveDuel.Question
+                { kind = "selectcard", player = 1, selMin = 1, selMax = 1 };
+                for (int i = 0; i < campoDele.Count; i++)
+                    q.choices.Add(new InteractiveDuel.Sel
+                    {
+                        code = campoDele[i].code, index = i, location = MZONE,
+                        controller = 0, sequence = campoDele[i].seq,
+                    });
+                return q;
+            }
+
+            InteractiveDuel.Question Batalha()
+            {
+                var q = new InteractiveDuel.Question { kind = "battle", player = 1 };
+                q.attackers.Add(new InteractiveDuel.Act
+                { code = BATTLE_OX, index = 0, controller = 1, location = MZONE, sequence = 0 });
+                return q;
+            }
+
+            // A premissa: pelo IMPRESSO o Ox (1700) e' o maior alvo da mesa, e
+            // pelo VIVO ele e' o unico que o atacante nao vence. Sem esse
+            // cruzamento o teste nao distinguiria as duas leituras.
+            Check($"o Ox do outro lado e' {OX} impresso e {OX_COM_3_BUFFS} vivo, " +
+                  $"contra {URABY_BASE} do Uraby",
+                  OX > URABY_BASE && OX_COM_3_BUFFS > OX);
+
+            (int, int)? Vivo(int player, int seq) =>
+                player == 1 && seq == 0 ? (OX, 1000)
+                : player == 0 && seq == 0 ? (URABY_BASE, 800)
+                : player == 0 && seq == 1 ? (OX_COM_3_BUFFS, 1000)
+                : ((int, int)?)null;
+
+            var brain = Cerebro(Vivo);
+            var plano = brain.DecideBattle(Batalha(), 1);
+            Check("declara ataque: o 1700 dele supera o alvo mais fraco (1500)", plano.Attack,
+                  $"(veio attack={plano.Attack}: {plano.Why})");
+
+            var alvo = brain.DecideSelect(Alvos(), 1);
+            Check("e bate no URABY de 1500, nao no Ox que esta' em 3300",
+                  alvo.Count == 1 && alvo[0] == 0,
+                  $"(escolheu o indice {(alvo.Count > 0 ? alvo[0].ToString() : "nenhum")} — " +
+                  "no 3300 o atacante morre e ainda entrega 1600 de dano)");
+
+            // PAR CONTROLE 1: a MESMA lista sem ataque declarado e' uma remocao,
+            // e remocao quer o MAIOR — a marca do atacante vale para UMA pergunta
+            // so'. (A chamada acima ja' a consumiu.)
+            var remocao = brain.DecideSelect(Alvos(), 1);
+            Check("par CONTROLE: sem ataque declarado, a mesma lista e' remocao e mira o MAIOR",
+                  remocao.Count == 1 && remocao[0] == 1,
+                  $"(escolheu o indice {(remocao.Count > 0 ? remocao[0].ToString() : "nenhum")} — " +
+                  "a marca do atacante sobrou para a Main Phase)");
+
+            // PAR CONTROLE 2: a Main Phase LIMPA a marca. Sem isto, um ataque que
+            // nao chegasse a ter alvo escolhido (o oponente destroi o atacante em
+            // corrente, por exemplo) deixaria a marca pendurada, e a proxima
+            // remocao miraria o monstro errado.
+            var brain2 = Cerebro(Vivo);
+            brain2.DecideBattle(Batalha(), 1);
+            brain2.Decide(new InteractiveDuel.Question { kind = "idle", player = 1 }, 1);
+            var depoisDaMain = brain2.DecideSelect(Alvos(), 1);
+            Check("par CONTROLE: uma Main Phase no meio apaga a marca — volta a mirar o MAIOR",
+                  depoisDaMain.Count == 1 && depoisDaMain[0] == 1,
+                  $"(escolheu o indice {(depoisDaMain.Count > 0 ? depoisDaMain[0].ToString() : "nenhum")})");
+
+            // PAR CONTROLE 3: sem reforco nenhum os dois alvos empatam em 1700 e
+            // o atacante nao vence NENHUM; a regra cai no mais barato, e nao no
+            // primeiro da lista por acaso. E' tambem o cenario em que o criterio
+            // antigo acertaria — ele existe para mostrar que a mudanca nao trocou
+            // uma escolha certa por outra.
+            (int, int)? SemBuff(int player, int seq) =>
+                player == 1 && seq == 0 ? (OX, 1000)
+                : player == 0 && seq == 0 ? (URABY_BASE, 800)
+                : player == 0 && seq == 1 ? (OX, 1000)
+                : ((int, int)?)null;
+            var brain3 = Cerebro(SemBuff);
+            brain3.DecideBattle(Batalha(), 1);
+            var alvoLimpo = brain3.DecideSelect(Alvos(), 1);
+            Check("par CONTROLE: sem reforco, bate no Uraby — o unico dos dois que ele vence",
+                  alvoLimpo.Count == 1 && alvoLimpo[0] == 0,
+                  $"(escolheu o indice {(alvoLimpo.Count > 0 ? alvoLimpo[0].ToString() : "nenhum")})");
         }
 
         // ---------------------------------------------------------- duelo real

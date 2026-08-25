@@ -36,6 +36,19 @@ namespace DuelServer
         int _winByte = -1;                   // player do MSG_WIN (0/1 vencedor, 2 empate)
 
         // Campo: monstros na zona de monstro, por (jogador, sequência).
+        /// <summary>
+        /// As zonas onde esta' um corpo CONDENADO — invocado por Instant/Ready
+        /// Fusion: nao pode atacar e e' destruido na End Phase deste turno.
+        ///
+        /// Por ZONA e nao por codigo, e alimentado pelo que ACONTECEU (a carta que
+        /// resolveu + o monstro que chegou do Extra logo depois): o mesmo monstro
+        /// pode vir da Polymerization na jogada seguinte e ficar em campo de vez.
+        /// </summary>
+        readonly HashSet<(int player, int seq)> _condenadas = new();
+
+        /// <summary>Quem acabou de ativar uma carta que condena; -1 = ninguem.</summary>
+        int _condenaProximoDoExtra = -1;
+
         // Alimentado pelo MSG_MOVE — é o que a IA do NPC usa para "ver" a mesa.
         readonly Dictionary<(int player, int seq), (uint code, int pos)> _board = new();
 
@@ -58,6 +71,7 @@ namespace DuelServer
         readonly Dictionary<(int player, int seq), (uint code, int pos)> _stBoard = new();
 
         const byte LOCATION_MZONE = 0x4;
+        const byte LOCATION_EXTRA = 0x40;
         const byte LOCATION_HAND = 0x2;
         const byte LOCATION_SZONE = 0x8;
 
@@ -362,7 +376,12 @@ namespace DuelServer
                                 // escondida (não depende do `npcLeitura`): o
                                 // bônus de um Equip/magia de campo está com a
                                 // face para cima na mesa, um humano também o vê.
-                                StatsEmCampo);
+                                StatsEmCampo,
+                                // As zonas com corpo CONDENADO (Instant/Ready
+                                // Fusion). Como o ATK ao vivo, nao e' leitura
+                                // escondida: o corpo esta' com a face para cima e
+                                // um humano tambem sabe que ele some na End Phase.
+                                CorpoCondenado);
             Log.Info($"[npc] nivel: {(npcLeitura ? "AVANCADO (le a mao e as cartas baixadas)" : "iniciante (so' o que esta com a face para cima)")}");
             // `DuelSession` já colocou a carta no motor (antes de OCG_StartDuel),
             // mas isso não gera MSG_MOVE — o front só sabe de campo por evento.
@@ -372,9 +391,30 @@ namespace DuelServer
             _fieldSpellController = (byte)(fieldSpellController == 1 ? 1 : 0);
         }
 
+        /// <summary>O monstro nesta zona e' um corpo CONDENADO? (ver `_condenadas`).</summary>
+        internal bool CorpoCondenado(int player, int seq) => _condenadas.Contains((player, seq));
+
         /// <summary>Cartas na mão de um jogador (para a IA achar Reborn/dragões).</summary>
         IReadOnlyList<uint> HandOf(int player) =>
             player >= 0 && player <= 1 ? _hand[player] : (IReadOnlyList<uint>)Array.Empty<uint>();
+
+        /// <summary>
+        /// A mão do ADVERSÁRIO, para o raio-x de diagnóstico do admin — e SÓ
+        /// quando o adversário é um NPC.
+        ///
+        /// A trava não é formalidade: num duelo entre dois humanos quem hospeda
+        /// roda o motor e este processo tem a mão do OUTRO jogador na memória
+        /// (ver `web/js/ponte.js`). Devolvê-la seria transformar um diagnóstico
+        /// de cérebro de NPC numa trapaça contra uma pessoa. Contra o NPC não há
+        /// ninguém do outro lado para enganar: a mão dele é decidida pelo mesmo
+        /// processo que a está mostrando.
+        ///
+        /// Devolve `null` — não uma lista vazia — quando não se aplica: "não
+        /// posso mostrar" e "ele está sem cartas" são respostas diferentes, e a
+        /// tela precisa saber qual das duas é.
+        /// </summary>
+        public IReadOnlyList<uint> MaoDoNpc() =>
+            _npcEnabled && !_doisHumanos ? _hand[1 - HUMAN] : null;
 
         // ---- visão HONESTA (NPC iniciante) ----
         //
@@ -1024,7 +1064,15 @@ namespace DuelServer
                     _winByte = d[o + 1];
                     break;
                 case 93: ParseEquip(d, o, mlen, ev); break; // MSG_EQUIP
-                case 40: ev.Add(new { type = "turn", player = d[o + 1] }); LimpaGatilho(); break;
+                case 40:
+                    ev.Add(new { type = "turn", player = d[o + 1] });
+                    LimpaGatilho();
+                    // Virou o turno: o corpo condenado ja' morreu na End Phase que
+                    // passou. Marca velha aqui e' pior que marca nenhuma — ela
+                    // faria o cerebro tratar um corpo permanente como descartavel.
+                    _condenadas.Clear();
+                    _condenaProximoDoExtra = -1;
+                    break;
                 case 41: ev.Add(new { type = "phase", phase = (int)BitConverter.ToInt16(d, o + 1) }); break;
                 case 60: ev.Add(new { type = "summoning", code = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF });
                     MarcaGatilho("summon", d, o); break;
@@ -1036,6 +1084,43 @@ namespace DuelServer
                 // para o NPC saber a QUE está respondendo (ver Question.chainTrigger*).
                 case 61: case 63: LimpaGatilho(); break;
                 case 74: LimpaGatilho(); break;
+                // MSG_FLIPSUMMONING (64) — a Invocacao-Virar. Ela NAO emite
+                // MSG_POS_CHANGE: o core vira a carta (`current.position =
+                // POS_FACEUP_ATTACK`) e so' depois escreve esta mensagem, entao
+                // era o UNICO jeito de a tela saber que a carta abriu. Sem ela o
+                // duelo saia do lugar no servidor e ficava parado na tela: o
+                // jogador clicava "Virar para Ataque", nada acontecia, e no turno
+                // seguinte o mesmo clique (que o cliente ainda achava ser uma
+                // virada) caia no reposition de verdade e deitava o monstro em
+                // DEFESA face-up. O sintoma era "a flip-summon nao funciona".
+                //
+                // Layout: code(4) + get_info_location(4) = ctrl(1) loc(1) seq(1)
+                // pos(1) — os mesmos 9 bytes do MSG_SUMMONING (60).
+                case 64:
+                {
+                    uint fcode = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF;
+                    byte fctrl = d[o + 5], floc = d[o + 6], fseq = d[o + 7];
+                    // A posicao vem da propria mensagem — quem decide o resultado
+                    // de uma Invocacao-Virar e' o motor, nao a gente. So' quando
+                    // ela chega impossivel (mensagem curta, ou ainda com bit de
+                    // carta virada) e' que sobra o unico valor que ela pode ter.
+                    int fpos = mlen >= 9 ? d[o + 8] : 0;
+                    if (fpos == 0 || (fpos & 0xa) != 0) fpos = 0x1;   // POS_FACEUP_ATTACK
+                    ev.Add(new
+                    {
+                        type = "pos", code = fcode, hidden = false,
+                        controller = fctrl, loc = floc, seq = (int)fseq,
+                        pos = fpos, prevPos = 0x8, flip = true,
+                    });
+                    if (floc == LOCATION_MZONE && fctrl <= 1)
+                        _board[(fctrl, fseq)] = (fcode, fpos);
+                    // A virada abre janela de corrente como qualquer invocacao —
+                    // e' o que o NPC precisa saber para decidir se nega.
+                    MarcaGatilho("summon", d, o);
+                    break;
+                }
+                // MSG_FLIPSUMMONED (65): a virada passou, nao ha mais o que negar.
+                case 65: LimpaGatilho(); break;
                 // MSG_CHAINING (70): uma carta ACABOU de ser ativada e a corrente
                 // vai abrir. Além do gatilho do NPC, isto vira evento de TELA: é o
                 // único ponto em que o motor diz "esta carta foi ativada" para
@@ -1053,6 +1138,16 @@ namespace DuelServer
                 // `Projetar` deixa passar inteiro para os dois espectadores.
                 case 70:
                     MarcaGatilho("activation", d, o);
+                    // A carta que ACABOU de ser ativada traz um corpo CONDENADO
+                    // (Instant Fusion, Ready Fusion: nao ataca e morre na End
+                    // Phase)? Entao o proximo monstro que chegar do Extra e' ele.
+                    // Marcar aqui, pelo que ACONTECEU, e' o que separa este corpo
+                    // de um que veio da Polymerization e FICA — adivinhar pelo
+                    // tipo da carta (`TYPE_FUSION`) trataria os dois igual, e o
+                    // NPC jogaria fora o melhor corpo do campo achando que ele ia
+                    // sumir sozinho.
+                    if (_gatilhoPlayer >= 0 && _s.Cards.Perfil(_gatilhoCode).TrazCorpoCondenado)
+                        _condenaProximoDoExtra = _gatilhoPlayer;
                     ev.Add(new { type = "chaining", code = _gatilhoCode, controller = _gatilhoPlayer });
                     break;
                 case 50: // MOVE
@@ -1065,6 +1160,20 @@ namespace DuelServer
                     // `Result.Projetar`, na SAÍDA, uma vez por espectador — porque
                     // com dois humanos a mesma jogada tem duas leituras.
                     ev.Add(new { type = "move", code, hidden = false, fromCtrl = pc, fromLoc = pl, fromSeq = ps, controller = cc, loc = cl, seq = cs, pos = cpo });
+
+                    // O corpo CONDENADO chegando do Extra. A marca e' por ZONA, e
+                    // nao por codigo: o mesmo monstro pode vir da Polymerization
+                    // (e ficar) na jogada seguinte.
+                    if (_condenaProximoDoExtra == cc && pl == LOCATION_EXTRA && cl == LOCATION_MZONE)
+                    {
+                        _condenadas.Add((cc, cs));
+                        _condenaProximoDoExtra = -1;
+                    }
+                    // Saiu da zona: a marca vai junto. Sem isto, o proximo monstro
+                    // a ocupar aquela zona herdaria a condenacao — e seria
+                    // tributado de graca por uma regra que acha que ele some
+                    // sozinho.
+                    if (pl == LOCATION_MZONE) _condenadas.Remove((pc, ps));
 
                     // O ATK/DEF de quem acabou de chegar NÃO é emitido aqui. Quem
                     // emite é a `VarrerStats`, que roda logo depois desta leva de

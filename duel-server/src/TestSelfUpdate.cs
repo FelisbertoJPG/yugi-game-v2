@@ -98,7 +98,11 @@ namespace DuelServer
             string prova = Path.Combine(dir, "abriu.txt");
             File.WriteAllText(alvo,
                 "@echo off" + Environment.NewLine +
-                "echo abri > " + "\"" + prova + "\"" + Environment.NewLine +
+                // Guarda os ARGUMENTOS, e nao so' a prova de que abriu: e' por um
+                // argumento (`--reaberto`) que o processo novo sabe que ja' existe
+                // uma janela do jogo na tela. Sem ele, a atualizacao termina com
+                // duas copias do jogo abertas — o relato "2 exe abrindo apos att".
+                "echo abri %* > " + "\"" + prova + "\"" + Environment.NewLine +
                 // `exit` (e nao `exit /b`) porque o `start` do Windows abre um
                 // .cmd com `cmd /K`, que fica com a janela aberta para sempre —
                 // e o teste nunca terminaria. O alvo de verdade e' um .exe, que
@@ -118,6 +122,40 @@ namespace DuelServer
             Checa(Esperar(() => File.Exists(prova), TimeSpan.FromSeconds(20)),
                   "o .bat reabriu o jogo depois de o processo antigo morrer",
                   "passaram 20s e o alvo nao foi executado");
+
+            string argsRecebidos = File.Exists(prova) ? File.ReadAllText(prova) : "";
+            Checa(argsRecebidos.Contains("--reaberto"),
+                  "e passou `--reaberto` — o processo novo nao abre uma SEGUNDA janela",
+                  $"(recebeu: {argsRecebidos.Trim()})");
+
+            // A OUTRA METADE, e ela custou caro: passar o argumento so' serve se
+            // quem o recebe continuar sendo o JOGO. A condicao de modo era
+            // `args.Length == 0`, entao o exe empacotado via UM argumento,
+            // concluia que nao era `--app` e caia no modo de demonstracao —
+            // rodava um duelo de teste no console, nunca subia o servidor do
+            // front, e a janela do navegador ficava consultando um servidor que
+            // nao existia. O relato foi *"o launcher fica travado nessa tela e
+            // preciso fechar e abrir de novo"*.
+            Checa(Program.EhModoApp(new[] { "--reaberto" }, temPayload: true),
+                  "e o processo reaberto AINDA e' o jogo (--app implicito)",
+                  "(um argumento so' o derrubava para o modo de demonstracao)");
+
+            // Os outros modificadores tinham a mesma armadilha esperando.
+            foreach (string flag in new[] { "--lan", "--sem-update", "--no-browser", "--motor-embutido" })
+                Checa(Program.EhModoApp(new[] { flag }, temPayload: true),
+                      $"idem para `{flag}` sozinho");
+
+            Checa(Program.EhModoApp(new[] { "--reaberto", "--lan" }, temPayload: true),
+                  "e para dois modificadores juntos");
+
+            // PAR CONTROLE, nos dois sentidos — sem eles, um `EhModoApp` que
+            // respondesse `true` sempre passaria em tudo acima.
+            Checa(!Program.EhModoApp(new[] { "--serve" }, temPayload: true),
+                  "par CONTROLE: `--serve` escolhe OUTRO modo, e continua escolhendo");
+            Checa(!Program.EhModoApp(Array.Empty<string>(), temPayload: false),
+                  "par CONTROLE: sem payload, dois cliques nao viram jogo (e' o repo em dev)");
+            Checa(Program.EhModoApp(new[] { "--app" }, temPayload: false),
+                  "par CONTROLE: `--app` explicito vale mesmo sem payload");
 
             Checa(Esperar(() => !Directory.EnumerateFiles(Path.GetTempPath(), "classicduels-reabrir-*.bat")
                                            .Any(b => !batsAntes.Contains(b)),

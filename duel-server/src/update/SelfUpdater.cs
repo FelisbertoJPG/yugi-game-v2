@@ -132,7 +132,12 @@ namespace DuelServer.Update
             sb.AppendLine("  goto esperar");
             sb.AppendLine(")");
             sb.AppendLine();
-            sb.AppendLine("start \"\" %ALVO%");
+            // `--reaberto`: o jogador ja' esta' olhando para a janela do jogo
+            // (a tela de atualizacao), e ela vai sozinha para a home quando este
+            // processo novo responder "tudo em dia". Sem a flag, o processo novo
+            // abre UMA SEGUNDA janela do navegador e a atualizacao termina com
+            // duas copias do jogo na tela — o relato foi "2 exe abrindo apos att".
+            sb.AppendLine("start \"\" %ALVO% --reaberto");
             sb.AppendLine("del \"%~f0\"");
 
             try
@@ -197,7 +202,9 @@ namespace DuelServer.Update
             sb.AppendLine("copy /y %NOVO% %ALVO% >nul");
             sb.AppendLine("if errorlevel 1 goto fim");
             sb.AppendLine("del %NOVO% >nul 2>&1");
-            if (reabrir) sb.AppendLine("start \"\" %ALVO%");
+            // Ver o comentario da `AgendarReabertura`: quem reabre o jogo avisa
+            // que ja' ha uma janela do navegador esperando por ele.
+            if (reabrir) sb.AppendLine("start \"\" %ALVO% --reaberto");
             sb.AppendLine(":fim");
             sb.AppendLine("del \"%~f0\"");   // o .bat se autodeleta
 

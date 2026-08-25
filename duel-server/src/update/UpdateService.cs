@@ -10,10 +10,22 @@ namespace DuelServer.Update
     /// estado da checagem/instalação num lugar só, para o boot do `--app` decidir
     /// que página abrir e para as rotas `/__update/*` reportarem progresso.
     ///
-    /// Regra de ouro do boot: **offline nunca trava o jogo**. A checagem tem um
-    /// timeout curto e qualquer falha vira "sem atualização" — o jogador entra
-    /// com o que já tem instalado. Um updater que impede de jogar quando o
-    /// GitHub está fora do ar é pior que nenhum updater.
+    /// **A regra do boot mudou em 23/08/2026.** Ela era "offline nunca trava o
+    /// jogo": qualquer falha de rede virava "sem atualização" e o jogador entrava
+    /// com o que tinha. Hoje é o contrário — sem falar com o servidor, o jogo
+    /// espera na tela de atualização, que reconsulta sozinha até a rede voltar.
+    ///
+    /// O motivo é que a premissa da regra antiga deixou de valer: login, carteira,
+    /// coleção, decks, adversários e trilha moram todos no Supabase, então "entrar
+    /// offline" já não entregava um jogo — entregava uma home vazia com cara de
+    /// quebrada. E a versão desatualizada, essa sim, custava caro: front novo
+    /// falando com motor velho, deck que o servidor recusa por uma regra que só
+    /// existe na versão nova, e o cliente congelado de 19/08/2026, que passou dias
+    /// recebendo front e nunca motor.
+    ///
+    /// O que NÃO mudou: nada disto pode lançar exceção até o boot. A checagem tem
+    /// timeout curto e toda falha vira um ESTADO (`Indisponivel`) que a tela sabe
+    /// mostrar — nunca um jogo que não abre e não diz por quê.
     /// </summary>
     public static class UpdateService
     {
@@ -67,9 +79,17 @@ namespace DuelServer.Update
 
                 using var cts = new CancellationTokenSource(timeout);
                 _manifesto = _engine.CarregarManifestoAsync(cts.Token).GetAwaiter().GetResult();
-                if (_manifesto == null)
+
+                // Sem manifesto NENHUM, ou com um que veio do cache: nos dois casos
+                // nao falamos com o servidor, e nos dois a resposta e' a mesma desde
+                // 23/08/2026 — o jogo espera. O cache diz o que era verdade da
+                // ultima vez; aceita-lo como resposta deixaria passar justamente o
+                // cliente velho que nao consegue perguntar se esta' velho.
+                if (_manifesto == null || _engine.ManifestoVeioDoCache)
                 {
-                    Estagio(Estado.Indisponivel, "sem conexao", "jogando com o que ja' esta instalado", 1);
+                    _manifesto = null;
+                    Estagio(Estado.Indisponivel, "sem conexao",
+                            "o Classic Duels precisa se conectar para abrir", 1);
                     return false;
                 }
 
@@ -92,6 +112,31 @@ namespace DuelServer.Update
                 Estagio(Estado.Indisponivel, "sem conexao", e.Message, 1);
                 Log.Warn($"checagem de atualizacao falhou ({e.Message}) — seguindo offline");
                 return false;
+            }
+        }
+
+        static Task _rechecando;
+
+        /// <summary>
+        /// Refaz a checagem, em segundo plano (idempotente).
+        ///
+        /// Existe porque a tela de atualizacao deixou de ter saida: sem conexao o
+        /// jogo PARA nela, entao ela precisa de um jeito de tentar de novo que nao
+        /// seja fechar e reabrir o jogo. Um boot inteiro por tentativa era o custo
+        /// antes disto — e quem esta' sem rede tende a tentar varias vezes.
+        ///
+        /// Recusa enquanto uma instalacao roda: rechecar no meio dela trocaria o
+        /// `_plano` que o `AplicarAsync` esta' usando.
+        /// </summary>
+        public static void Rechecar(TimeSpan timeout)
+        {
+            lock (_trava)
+            {
+                if (Raiz == null) return;
+                if (_emAndamento != null && !_emAndamento.IsCompleted) return;
+                if (_rechecando != null && !_rechecando.IsCompleted) return;
+                Erro = null;
+                _rechecando = Task.Run(() => Checar(Raiz, timeout));
             }
         }
 

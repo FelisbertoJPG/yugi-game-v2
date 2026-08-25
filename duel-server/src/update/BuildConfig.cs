@@ -153,7 +153,14 @@ namespace DuelServer.Update
         // pacotes `engine`/`native` chegam ao disco dele e nada os carrega —
         // ficam parados em `.staged/` sem ninguem para aplicar. Daqui em diante,
         // so' se `host/` mudar.
-        public const string InstallerVersion = "0.15.0";
+        // 0.16.0 (23/08/2026): `host/` mudou de verdade — o executavel virou
+        // `WinExe` (o jogo nao abre mais janela de terminal), com o
+        // `ConsoleDoPai` pagando o preco disso para as suites de linha de comando
+        // e o `AvisoDaCasca` devolvendo por caixa de dialogo o unico lugar onde a
+        // casca falava quando o motor nao sobe. Sem trocar o exe, o jogador
+        // continua com o terminal na tela — e com uma casca que so' sabe reclamar
+        // num console que nao existe mais.
+        public const string InstallerVersion = "0.16.0";
 
         public const string UserAgent = "ClassicDuels-Updater/" + InstallerVersion;
 

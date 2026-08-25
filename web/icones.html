@@ -63,6 +63,7 @@
                  border-radius: 50%; border: 2px solid var(--gold); opacity: .55; }
 
   .zoom { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 10px; color: var(--dim); }
+  .zoom[hidden] { display: none; }   /* ver esconder.test.mjs */
   .zoom input[type="range"] { flex: 1; }
   .dica { font-size: 10px; color: var(--dim); line-height: 1.6; margin: 0 0 10px; }
 
@@ -201,6 +202,7 @@
   <button class="back" id="btn-voltar">← voltar para a Área de Teste</button>
 </div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module">
 import { requireAdmin } from '/web/js/auth.js';
 import { contaAtual } from '/web/js/supabase.js';
@@ -562,5 +564,11 @@ $('btn-voltar').onclick = () => (location.href = '/web/teste.html');
 await recarregar();
 limpar();
 </script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

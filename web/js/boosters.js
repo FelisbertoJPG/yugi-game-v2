@@ -89,19 +89,41 @@ export const PACK_SIZE = 5;
 /** Preço padrão de um pacote (o booster pode ter o seu). */
 export const DEFAULT_PRICE = 100;
 /**
- * A cada N pacotes deste booster, 1 SR garantida (substitui uma carta N).
- * Era 10; virou 20 junto com o corte da taxa de SR — as duas coisas puxavam
- * a mesma inflação, e mexer só numa deixaria o efeito pela metade.
+ * A cada N pacotes deste booster, 1 SR garantida.
+ *
+ * Foi 10, virou 20 quando a taxa de SR foi cortada, e voltou a 10 agora que ela
+ * subiu (38 → 80) — as duas sempre andaram juntas, e mexer só numa deixa o
+ * efeito pela metade.
+ *
+ * **O múltiplo de 20 dispara as DUAS garantias** (SR a cada 10, UR a cada 20), e
+ * é por isso que elas ocupam cartas diferentes no pacote: a UR na 1, a SR na 2.
+ * Com as duas mirando a carta 1, a UR vencia o `elsif` e a SR garantida sumia
+ * calada em todo múltiplo de 20 — o jogador perdia uma garantia sem nunca saber
+ * que ela existiu. Ver `abrir_pacote` (migration 0046).
  */
-export const PITY_EVERY = 20;
+export const PITY_EVERY = 10;
 /**
  * A cada este tanto de DP gasto em pacotes, 1 UR garantida — em QUALQUER
  * booster que tenha UR. É piso, não fonte: a chance normal já dá ~1 UR a cada
- * ~5000 DP, então isto só socorre quem está com azar acumulado. O contador é
- * global (soma o gasto em todos os boosters) e mora na carteira, porque é
- * progresso do jogador e não do booster — ver `wallet.js`.
+ * Contado em PACOTES do MESMO booster, e ZERADO sempre que uma UR sai — seja
+ * ela natural ou garantida. É o que faz disto um PISO ("você nunca passa 20
+ * pacotes sem UR") e não um bônus: um contador que só somasse entregaria a
+ * garantida no 20º mesmo tendo saído uma natural no 19º.
+ *
+ *   taxa natural: 10,07% por pacote (~1 a cada 9,9)
+ *   com o piso:   nunca mais de 30 — ele dispara em ~4% dos casos
+ *
+ * ERA MEDIDO EM DP (10.000). Saiu por duas razões: era um alvo móvel — o
+ * balanceamento de preços mudaria a promessa sem ninguém tocar nela — e era
+ * ilegível, porque "faltam 7600 DP" não responde à pergunta que o jogador faz,
+ * que é *quantos pacotes ainda*.
+ *
+ * POR BOOSTER, e não global como o DP era: um contador global de PACOTES é
+ * explorável (19 pacotes no booster barato, o 20º no caro, levando a UR dele
+ * de graça). Com o DP isso não existia, porque o barato somava menos — trocar
+ * a unidade sem trocar o escopo abriria a brecha.
  */
-export const UR_PITY_DP = 10000;
+export const UR_PITY_PACKS = 30;
 
 /** Garante o formato { name, coverId, inShop, price, order, cards:{...}, updatedAt }. */
 export function normalize(b = {}) {

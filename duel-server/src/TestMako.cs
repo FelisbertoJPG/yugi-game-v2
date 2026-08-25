@@ -86,21 +86,44 @@ namespace DuelServer
         // Monta um cérebro com o campo/mão/baixadas que o cenário pede.
         // `me` é sempre 1 (o NPC); 0 é o oponente.
         // ------------------------------------------------------------------
+        /// <param name="condenados">
+        /// Os CÓDIGOS que estão em campo como corpo condenado (Instant/Ready
+        /// Fusion: não atacam e morrem na End Phase deste turno).
+        ///
+        /// Antes o cérebro adivinhava isso pelo TIPO da carta — "uma Fusão em
+        /// campo só pode ter vindo do Instant/Ready Fusion" —, e o argumento valia
+        /// para este deck e para mais nenhum: num deck com Polymerization o
+        /// palpite mandaria banir o melhor corpo do campo achando que ele ia sumir
+        /// sozinho. Hoje quem marca é o motor, pelo que aconteceu, e aqui a marca
+        /// é dita explicitamente — que é justamente o que faz este teste continuar
+        /// provando a REGRA e não a coincidência do deck.
+        /// </param>
         static NpcBrain Cerebro(DatabaseManager db,
                                 List<uint> meuCampo = null, List<uint> campoDele = null,
                                 List<uint> minhaMao = null,
-                                List<uint> minhasBaixadas = null, List<uint> minhasAbertas = null)
+                                List<uint> minhasBaixadas = null, List<uint> minhasAbertas = null,
+                                List<uint> condenados = null)
         {
             meuCampo ??= new List<uint>(); campoDele ??= new List<uint>();
             minhaMao ??= new List<uint>();
             minhasBaixadas ??= new List<uint>(); minhasAbertas ??= new List<uint>();
+            condenados ??= new List<uint>();
 
+            // O campo destes cenarios e' uma lista de codigos; a zona de cada um e'
+            // o indice dela. E' o que permite marcar a condenacao por ZONA, como o
+            // motor faz.
             return new NpcBrain(db,
                 fieldOf: p => p == 1 ? meuCampo : campoDele,
                 log: m => Log.Info($"    [npc] {m}"),
                 handOf: p => p == 1 ? minhaMao : new List<uint>(),
                 faceUpStOf: p => p == 1 ? minhasAbertas : new List<uint>(),
-                setStOf: p => p == 1 ? minhasBaixadas : new List<uint>());
+                setStOf: p => p == 1 ? minhasBaixadas : new List<uint>(),
+                // A ZONA de cada monstro — o indice na lista. A condenacao e' por
+                // zona (no motor tambem), entao sem isto ela nao teria onde pousar.
+                todoFieldPosOf: p => (p == 1 ? meuCampo : campoDele)
+                    .Select((c, i) => (code: c, pos: (int)POS_ATAQUE, seq: i)).ToList(),
+                corpoCondenadoOf: (p, seq) => p == 1
+                    && seq >= 0 && seq < meuCampo.Count && condenados.Contains(meuCampo[seq]));
         }
 
         static InteractiveDuel.Question Cadeia(uint oferecida, string gatilhoKind = "",
@@ -147,7 +170,8 @@ namespace DuelServer
             // --- A jogada que o deck existe para fazer: a Fusão do Instant/Ready
             //     Fusion morre na End Phase. Banida, ela escapa e volta.
             b = Cerebro(db, meuCampo: new List<uint> { RARE_FISH, JELLYFISH },
-                        minhasAbertas: new List<uint> { TEMPLO });
+                        minhasAbertas: new List<uint> { TEMPLO },
+                        condenados: new List<uint> { RARE_FISH });
             Check("Fusao condenada em campo: BANE para ela nao morrer na End Phase",
                   b.DecideChain(Cadeia(TEMPLO), 1) == 0);
 
@@ -204,10 +228,21 @@ namespace DuelServer
 
             // --- e a mesma decisão pela Main Phase, não só pela corrente.
             b = Cerebro(db, meuCampo: new List<uint> { RARE_FISH },
-                        minhasAbertas: new List<uint> { TEMPLO });
+                        minhasAbertas: new List<uint> { TEMPLO },
+                        condenados: new List<uint> { RARE_FISH });
             var play = b.Decide(Idle(TEMPLO), 1);
             Check("Main Phase: ativa o Templo pela Fusao condenada",
                   play.Action == "activate", $"(veio {play.Action})");
+
+            // PAR CONTROLE NOVO, e ele so' e' possivel desde que a condenacao virou
+            // MARCA: a MESMA Fusao em campo, sem a marca (veio da Polymerization e
+            // vai FICAR), nao pode fazer o Templo sair. Banir ali seria tirar do
+            // campo o corpo que estava segurando o turno.
+            b = Cerebro(db, meuCampo: new List<uint> { RARE_FISH },
+                        minhasAbertas: new List<uint> { TEMPLO });
+            var semMarca = b.Decide(Idle(TEMPLO), 1);
+            Check("par CONTROLE: a mesma Fusao SEM a marca (Polymerization) nao dispara o Templo",
+                  semMarca.Action != "activate", $"(veio {semMarca.Action} — {semMarca.Why})");
 
             b = Cerebro(db, meuCampo: new List<uint> { JELLYFISH },
                         minhasAbertas: new List<uint> { TEMPLO });

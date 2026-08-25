@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="/web/css/ui.css">
 <!-- As gavetas por raridade — as MESMAS da lista de drops da Trilha. -->
 <link rel="stylesheet" href="/web/css/gavetas.css">
+<!-- A revelação carta a carta — a MESMA do drop de NPC no fim de duelo. -->
+<link rel="stylesheet" href="/web/css/revelacao.css">
 <style>
   body { display: flex; flex-direction: column; overflow: hidden; }
   .dp {
@@ -37,9 +39,69 @@
   /* "ver as cartas" nunca desliga: saber o que vem dentro não custa DP, e é
      justamente quem NÃO tem saldo que precisa decidir onde gastar o próximo. */
   .pack .ver { font-size: 11px; padding: 4px 8px; }
+
+  /* ---------------------------------------------- o medidor das garantidas
+     Era uma linha de texto igual à do preço, e por isso PARECIA um bug: com 0,
+     20 ou 40 pacotes abertos ela dizia a mesma coisa ("faltam 20"), então abrir
+     pacote não mudava nada na tela e a leitura era "o contador esqueceu". O
+     dado sempre esteve certo no banco — faltava ele aparecer ANDANDO. */
+  .pack .compra { display: flex; gap: 6px; margin-top: 4px; }
+  .pack .compra .buy { flex: 1; margin-top: 0; }
+  .pack .buy10 {
+    flex: 0 0 auto; padding: 0 10px; cursor: pointer;
+    background: linear-gradient(180deg, #2a2140, #1b1630);
+    color: var(--gold); border: 1px solid var(--gold);
+    font-family: inherit; font-size: 11px; letter-spacing: .5px;
+  }
+  .pack .buy10 b { font-weight: normal; opacity: .7; }
+  .pack .buy10:hover:not(:disabled) { background: linear-gradient(180deg, #3a2d58, #241c3f); }
+  .pack .buy10:disabled { opacity: .35; cursor: default; }
+
+  .pity { display: flex; flex-direction: column; gap: 3px; }
+  .pity-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .pity-rot { font-size: 9px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
+  .pity-n { font-size: 11px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .pity-n i { font-style: normal; font-size: 9px; color: var(--dim); }
+
+  .pity-trilho { height: 5px; background: #16121f; border: 1px solid var(--line); overflow: hidden; }
+  .pity-fill {
+    height: 100%; min-width: 2px;
+    background: linear-gradient(90deg, #6b5bd6, #a98bff);
+    /* A barra ANDA à vista quando o card é redesenhado depois da compra: é o
+       movimento que diz "seu progresso foi contado". Sem ele o número novo
+       simplesmente aparece, e aparecer não é o mesmo que progredir. */
+    transition: width .45s cubic-bezier(.2, .8, .2, 1);
+  }
+  .pity.ur .pity-fill { background: linear-gradient(90deg, #b8860b, #ffd76a); }
+
+  /* PRONTA: o próximo pacote traz a garantida. Aqui o card para de informar e
+     passa a chamar — é o único estado que vale interromper quem está lendo. */
+  .pity.pronta .pity-rot { color: var(--gold); font-weight: bold; }
+  .pity.pronta .pity-fill {
+    background: linear-gradient(90deg, #ffd76a, #fff3c4, #ffd76a);
+    background-size: 200% 100%;
+    animation: pity-brilho 1.1s linear infinite;
+  }
+  .pity.pronta .pity-trilho { border-color: var(--gold); box-shadow: 0 0 8px rgba(229, 196, 106, .45); }
+  @keyframes pity-brilho { from { background-position: 200% 0; } to { background-position: 0 0; } }
+
+  /* Quem pediu para o sistema não animar nada não recebe o pulso. A informação
+     continua inteira: a cor e o texto já dizem que a garantida está pronta. */
+  @media (prefers-reduced-motion: reduce) {
+    .pity-fill { transition: none; }
+    .pity.pronta .pity-fill { animation: none; }
+  }
   .empty { color: var(--dim); font-style: italic; padding: 30px 4px; }
 
-  /* revelação do pacote aberto */
+  /* ---------------------------------------------- revelação do pacote aberto
+     As cartas viram uma a uma, como no drop do NPC — o desenho e a mecânica
+     vêm de `web/css/revelacao.css` + `web/js/revelacao.js`, que as duas telas
+     dividem. Aqui fica só a CAIXA em volta.
+
+     Ela é uma COLUNA que não passa da altura da janela, com a rolagem no meio
+     (a lista) e nunca na página: um [abrir 10] traz 50 cartas, e antes disto a
+     caixa crescia para fora da tela — o título saía por cima e os botões de
+     [abrir outro] / [fechar] ficavam abaixo do fim da janela, inalcançáveis. */
   .reveal-back {
     position: fixed; inset: 0; z-index: 60; display: none;
     align-items: center; justify-content: center; background: #000c; padding: 20px;
@@ -47,22 +109,22 @@
   .reveal-back.show { display: flex; }
   .reveal {
     background: var(--panel); border: 2px solid var(--gold);
-    padding: 20px; max-width: min(680px, 96vw); text-align: center;
+    padding: 20px; max-width: min(860px, 96vw); max-height: 92vh; text-align: center;
     box-shadow: 0 8px 40px #000c;
+    display: flex; flex-direction: column; min-height: 0;
   }
   .reveal h2 { margin: 0 0 4px; color: var(--gold); font-size: 18px; }
   .reveal .sub { font-size: 11px; color: var(--dim); margin-bottom: 14px; }
-  .reveal .cards { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .reveal .rc { width: 96px; position: relative; }
-  .reveal .rc img { width: 100%; display: block; border: 1px solid var(--line); }
-  .reveal .rc .r {
-    position: absolute; top: 3px; right: 3px; font-size: 9px; font-weight: bold;
-    padding: 2px 4px; border-radius: 2px; background: #04121fcc; letter-spacing: .5px;
-  }
-  .reveal .rc .r.UR { color: #e8c46a; } .reveal .rc .r.SR { color: #cbb7ff; }
-  .reveal .rc .r.R  { color: #7fd0ff; } .reveal .rc .r.N  { color: #cfd6de; }
-  .reveal .rc .nm { font-size: 9px; color: var(--dim); margin-top: 3px; }
-  .reveal .actions { margin-top: 16px; }
+  /* O `min-height:0` é o que faz a rolagem existir: sem ele o item flex se
+     recusa a encolher abaixo do conteúdo e a caixa volta a estourar. */
+  .reveal .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 4px; }
+  .reveal .actions { margin-top: 16px; flex: none; }
+  /* Os dois atalhos da lista, lado a lado: [revelar rápido] (que some quando não
+     resta carta virada) e [organizar por raridade], que fica — depois de abrir
+     dez pacotes, agrupar UR→N é o que responde "tirei alguma coisa boa?". */
+  .reveal .rev-acoes { display: flex; gap: 8px; justify-content: center; margin-top: 10px; flex: none; }
+  .reveal .rev-acoes button { font-size: 11px; padding: 5px 12px; }
+  #reveal-pular[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -115,6 +177,10 @@
     <h2 id="reveal-title">Pacote aberto!</h2>
     <div class="sub" id="reveal-sub"></div>
     <div class="cards" id="reveal-cards"></div>
+    <div class="rev-acoes">
+      <button id="reveal-pular" hidden>revelar rápido</button>
+      <button id="reveal-ordem">organizar por raridade</button>
+    </div>
     <div class="actions">
       <button id="reveal-again" class="btn-primary">abrir outro (100 DP)</button>
       <button id="reveal-close">fechar</button>
@@ -124,6 +190,13 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module" src="/web/js/loja.js"></script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

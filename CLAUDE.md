@@ -18,7 +18,7 @@ node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a 
 node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
-node web/js/drops.test.mjs   # 55 testes do drop por DECK (pool por raridade, a % de cada
+node web/js/drops.test.mjs   # 59 testes do drop por DECK (pool por raridade, a % de cada
                              # uma, o descarte de quem tem carta mas quantidade zero, a
                              # reserva por NPC de quem ainda não tem pool próprio, e o
                              # [definir rápido] — que só leva carta COM raridade e nunca
@@ -31,6 +31,22 @@ node web/js/drops.test.mjs   # 55 testes do drop por DECK (pool por raridade, a 
                              # era desenhada dentro de um container invisível. O
                              # `renderIcones` rodava certo, o DOM enchia, e a tela
                              # mostrava só o cabeçalho — sem um erro no console
+node web/js/revelacao.test.mjs  # 9 testes da REVELAÇÃO carta a carta (o drop virado
+                             # do fim de duelo, hoje também a abertura de pacote
+                             # na Loja). O visual não se prova aqui — é
+                             # `tools/bancada-revelacao.mjs` que o põe na tela.
+                             # O que se testa é o pouco que TRAVA o jogo: o
+                             # `aoTerminar` disparando na ÚLTIMA carta e uma vez
+                             # só (é ele que religa os botões de saída do duelo
+                             # e o [abrir outro] da Loja — nunca disparar deixa
+                             # o jogador preso numa tela de botões desligados,
+                             # sem erro nenhum), a carta que abre uma vez (ela
+                             # continua clicável de propósito: `disabled` a
+                             # apagaria pelo `button:disabled` de `ui.css` e
+                             # mataria o "segurar para ampliar"), e a varredura
+                             # de que toda página que importa o módulo linka o
+                             # CSS dele — sem a folha nada gira e a grade
+                             # desmonta, calada
 node web/js/cardlists.test.mjs  # 15 testes das listas de cartas (pool permitido + resolução)
 node web/js/estrutural.test.mjs # 10 testes do rascunho do Deck Estrutural: ele salva
                              # o trabalho, mas NUNCA é carregado de volta — ao abrir a
@@ -145,7 +161,48 @@ node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # torto (vazio, texto, `data:text/html`) vira um
                              # `src` que o navegador busca, não acha e desenha
                              # como quadrado vazio
-node web/js/esconder.test.mjs # varre TODA página de web/ perguntando uma coisa
+node web/js/poolordem.test.mjs # 15 testes da ORDENAÇÃO do pool de cartas — uma
+                             # regra, CINCO telas (Deck Builder, Booster
+                             # Builder, Banlist, Listas e Deck Estrutural). Ela
+                             # estava escrita quatro vezes (duas em módulos,
+                             # duas soltas dentro do HTML) e DUAS já haviam
+                             # divergido em silêncio: as do Booster Builder e do
+                             # Deck Estrutural não entendiam o sufixo `-asc`,
+                             # então aquelas telas ofereciam metade das ordens.
+                             # Erro de ordenação não dá erro — a lista aparece,
+                             # só que na ordem errada, e quem olha vê uma lista
+                             # plausível.
+                             # A ordem por RARIDADE (UR→SR→R→N, e o inverso) é o
+                             # motivo de o módulo ter nascido: montar deck e
+                             # escolher o que entra na Lista 1 ou ganha regra na
+                             # Banlist é leitura por raridade. Ela não custa
+                             # consulta nova — `annotateDb` já escreve `rarity`
+                             # na entrada do índice; só o Deck Builder passa a
+                             # própria função, porque é o único que conhece
+                             # também a raridade dos Decks Estruturais (as 36
+                             # cartas que nunca entraram em booster).
+                             # "Sem raridade" fica no fim nas DUAS direções: não
+                             # é um degrau da escala, é a ausência dela — só
+                             # invertê-la abriria "N→UR" com centenas de cartas
+                             # fora de booster na frente. Duas varreduras
+                             # guardam o resto: toda tela com `#f-sort` oferece
+                             # a raridade, e nenhuma voltou a ter cópia própria
+                             # da regra
+node web/js/sessao.test.mjs   # 16 testes de ONDE a sessão do jogador é guardada
+                             # (a caixa "manter login nesta máquina"). Marcada,
+                             # a sessão vai para o `localStorage` e sobrevive a
+                             # fechar o jogo; desmarcada — o padrão —, vai para
+                             # o `sessionStorage` e morre com a janela. A regra
+                             # erra CALADA e sempre a favor de quem não devia
+                             # entrar: ler os dois armazenamentos "para não
+                             # perder a sessão" faz uma sessão esquecida no
+                             # `localStorage` manter a pessoa entrada para
+                             # sempre — e "continuou logado" é indistinguível de
+                             # "funcionou". Cobre também o `sair()`, que precisa
+                             # limpar os DOIS (limpar um só é um sair que não
+                             # sai, num PC compartilhado)
+node web/js/esconder.test.mjs # varre TODA página de web/ **e todo módulo de
+                             # web/js/** perguntando uma coisa
                              # só: o atributo `hidden` realmente esconde? Ele
                              # não é mágica — é um `[hidden] { display:none }`
                              # na folha do NAVEGADOR, a especificidade mais
@@ -158,7 +215,23 @@ node web/js/esconder.test.mjs # varre TODA página de web/ perguntando uma coisa
                              # perfil" ficou aparecendo em TODO fim de duelo,
                              # com a arte vazia, inclusive para quem perdeu.
                              # Prova também que a varredura reconhece o caso
-                             # ruim — senão "nenhum culpado" não provaria nada
+                             # ruim — senão "nenhum culpado" não provaria nada.
+                             #
+                             # A varredura tinha DOIS furos, e cada um escondia
+                             # bugs vivos (7 no total, achados de uma vez):
+                             # ela olhava só regras por `#id`, e só o `<script>`
+                             # INLINE da página. Mas o `display` costuma vir de
+                             # uma CLASSE (`<div class="acoes" id="linha-voltar"
+                             # hidden>` — era por isso que "voltar para a versão
+                             # anterior" aparecia em toda atualização, mesmo sem
+                             # backup), e o `.hidden =` costuma morar num MÓDULO
+                             # (`mostrarAba` em `builder.js` escondia
+                             # `#aba-deck`/`#aba-drops`, que ganham `display`
+                             # de `.aba` — trocar de aba não escondia nada, as
+                             # duas ficavam empilhadas, e o editor do pool de
+                             # drop aparecia até no Deck Builder do jogador
+                             # comum). Hoje ela segue os dois caminhos, e cada
+                             # um tem asserção própria provando que ela os vê
 npm run icones:check         # todo ícone do catálogo tem arte? A imagem mora na
                              # coluna `imagem` (0039) e a coluna é nullable de
                              # propósito, então o banco aceita a linha sem ela —
@@ -176,6 +249,32 @@ npm run duel:build           # para o servidor e compila o duel-server
 npm run duel:test            # para, compila e roda --test-npc + --test-summons
 npm run stop                 # encerra front e duel-server de forma limpa
 
+duel-server.exe --cobertura <arquivo.ydk>
+                             # **O NPC sabe usar as cartas deste deck?** Cada
+                             # carta é oferecida ao `NpcBrain` sozinha, em oito
+                             # estados de mesa, e a pergunta é se ele a escolhe
+                             # em algum deles. Existe porque a resposta antes
+                             # saía de LER o `NpcBrain` procurando o id — e ele
+                             # tem 3 mil linhas, metade das regras não cita id
+                             # nenhum (reconhecem a carta pelo EFEITO), e o que
+                             # se procura é justamente o que NÃO está escrito
+                             # lá. Procurar ausência lendo código é como o
+                             # buraco passa: foi assim que Swords of Concealing
+                             # Light, Yellow Luster Shield, Banner of Courage,
+                             # Foolish Burial e Shifting Shadows ficaram anos
+                             # sem regra, num deck publicado.
+                             # As mesas não são decorativas — quase toda regra
+                             # olha a relação entre os dois campos (`ameacaReal`),
+                             # e duas delas existem por falso positivo medido: o
+                             # Foolish Burial só sai com reanimação na MÃO e o
+                             # Shifting Shadows só com carta VIRADA, então uma
+                             # mesa que nunca tem nem uma coisa nem outra
+                             # reportava as duas como buraco. Relatório de
+                             # ausência que dá falso positivo deixa de ser lido.
+                             # NÃO prova que a jogada é boa nem que sai na hora
+                             # certa: é varredura para achar o que olhar, e o
+                             # que ela aponta vira regra com teste próprio.
+
 node tools/bancada-visual.mjs # gera bancada.html na raiz: as animacoes da mesa
                              # (seta de ataque, numero de dano/cura, brilho de
                              # entrada em campo) rodando num quadro de mentira,
@@ -186,6 +285,14 @@ node tools/bancada-visual.mjs # gera bancada.html na raiz: as animacoes da mesa
                              # jogo. Existe porque mudanca VISUAL nao se prova em
                              # teste de logica — a seta foi publicada invisivel
                              # com 13 testes de geometria passando
+
+node tools/bancada-revelacao.mjs # gera bancada-revelacao.html na raiz: as cartas
+                             # viradas (a virada, a aproximacao da revelada e a
+                             # grade de sete colunas) com 50 cartas de mentira,
+                             # sem servidor e sem login. O modulo e o CSS sao
+                             # LIDOS do jogo, nunca copiados. Existe porque olhar
+                             # isso no jogo custava um duelo vencido ou 1000 DP
+                             # num [abrir 10]
 
 node tools/bancada-home.mjs  # gera bancada-home.html na raiz: a HOME com a
                              # lateral social desenhada com dados de mentira,
@@ -209,7 +316,7 @@ npm run atalho               # poe "Classic Duels" na area de trabalho apontando
                              # é feito dos MESMOS game.zip/cards.zip do Release, senão a
                              # instalação nova oferece uma atualização do que ela já tem
 
-npm run update:test          # 142 asserções do instalador/auto-updater (sem rede):
+npm run update:test          # 166 asserções do instalador/auto-updater (sem rede):
                              # --test-casca + --test-update + --test-offline
                              #   + --test-selfupdate + --test-update-duelo
                              # (--test-casca é a troca do MOTOR em disco: o pacote
@@ -235,7 +342,24 @@ npm run publicar:build       # gera publicar.exe na raiz (o publicador)
                              # de distribuicao), confere se a casca mudou desde o
                              # ultimo `pack`, para o servidor, compila, roda as 5
                              # suites do instalador, gera dist/release/ em dry-run,
-                             # mostra QUAIS marcadores mudaram e SOBE o Release.
+                             # mostra QUAIS marcadores mudaram, **reempacota o exe
+                             # se ele ficou para tras** e SOBE o Release.
+                             # O reempacotamento entrou em 24/08/2026: a trava do
+                             # payload (`dist/.cache/payload.markers` x o manifesto)
+                             # morde no `-Publish`, que e' o ULTIMO passo — entao
+                             # toda mudanca de FRONT terminava em "rode npm run pack
+                             # de novo e publique" depois do preparo inteiro. Como o
+                             # front muda em quase todo Release, o "dois cliques" era
+                             # falso no caso comum, e sobrava um ritual de tres
+                             # comandos na mao (release:build -> pack -> publish) —
+                             # exatamente o tipo de coisa que este exe existe para
+                             # nao ter, e que ja' foi esquecido em producao antes.
+                             # A trava NAO afrouxou: ela continua no ps1 e continua
+                             # com a palavra final; o que mudou e' quem executa a
+                             # consequencia mecanica do dry-run. `--exe-em-dia` so'
+                             # RESPONDE (0 em dia, 1 defasado), sem empacotar nem
+                             # publicar, que e' como se confere essa decisao sem
+                             # gastar tres minutos de pack.
                              # NAO pergunta nada (20/08/2026): dois cliques
                              # publicam mesmo. A trava nunca esteve na pergunta e
                              # sim nos passos antes dela — ambiente, servidor
@@ -415,7 +539,22 @@ de campo, efeito contínuo —, e não pelo statline impresso no `cards.cdb`, qu
 era o que ele lia: o jogador punha +700 num monstro e o NPC atacava assim mesmo,
 entregando o corpo numa batalha que a conta dele dizia ganhar. O par CONTROLE é
 o teste: no MESMO duelo sem o equipamento ele TEM de atacar, senão "não atacou"
-não provaria nada),
+não provaria nada.
+> **E o ALVO do ataque é uma SEGUNDA pergunta** — foi por onde a leitura viva
+> continuava sendo desfeita. O `SELECT_BATTLECMD` escolhe o ATACANTE, e logo
+> depois um `MSG_SELECT_CARD` escolhe em QUEM bater. A `DecideBattle` sempre leu
+> o valor vivo e sempre declarou o ataque contra o alvo **mais fraco** do outro
+> lado; a lista de alvos, porém, tem a mesma forma de uma remoção (só cartas
+> dele, só na zona de monstro) e caía no critério genérico do `DecideSelect` —
+> *o de maior ATK IMPRESSO*. Ele declarava contra o 1500 e batia no 1700 que
+> três reforços tinham levado a 3300. Era literalmente o relato: *"meu monstro
+> tem uns 3 buff e o NPC ataca igual com um mais fraco"*.
+> Hoje a declaração passa adiante o ATK vivo do atacante (`_atacanteAtk`) e a
+> escolha do alvo é: entre os que eu **venço**, o mais forte — tirar da mesa a
+> maior ameaça que dá para tirar; não vencendo nenhum, o mais barato. A marca
+> vale por UMA pergunta e é apagada na Main Phase seguinte, senão a próxima
+> remoção miraria "quem eu venço" em vez do maior, que é o avesso do que uma
+> remoção quer. Os três pares CONTROLE guardam exatamente isso),
 `--test-alvos` (**de QUEM é a carta que o NPC escolheu**. O `DecideSelect`
 genérico ordenava os alvos por ATK sem perguntar de quem eram, e três coisas
 saíam do mesmo buraco: o Inseto Devorador de Homens (Man-Eater Bug) virava e
@@ -435,7 +574,198 @@ forte" e tributava o MAIOR corpo do campo, o contrário do que o comentário da
 própria regra dizia. Cada caso tem par CONTROLE, e os dois duelos reais no fim
 provam que a lista chega ao cérebro com os dois lados dentro e com o
 `controller` certo),
-`--test-armory` (Armory Call: qual equipamento vem do deck e em quem ele entra).
+`--test-armory` (Armory Call: qual equipamento vem do deck e em quem ele entra),
+`--test-caos` (o pacote **CAOS** do Yugi — 21 asserções. O relato: *"ele preferiu
+invocar um Lustro Negro em vez de usar Magician of Black Chaos + Chaos Scepter =
+combo pra banir meu ritual pra sempre; ia tirar 2 cards do meu campo, do jeito
+que fez tirou apenas 1"*. A **Chaos Scepter Blast** só liga com um **Mago Nv8+**
+com a face para cima, e aí bane 1 carta do campo **com a face para baixo** —
+remoção permanente. O NPC tinha na mão a Espada, o Mago do Caos (Nv8 MAGO), o
+Lustro Negro (Nv8 GUERREIRO) e os rituais dos dois, e escolheu o Guerreiro, de
+3000 de ATK.
+> Não era critério errado: `AtivavelSe(q, EhRitual)` devolve o **primeiro** ritual
+> ativável da lista. Não havia critério nenhum — a escolha entre 3000 de ATK e um
+> combo de duas remoções era a ordem em que o motor tivesse listado as cartas.
+> Hoje o cérebro pergunta o que faltava: *"tenho como pôr em campo o corpo que a
+> carta parada na minha mão pede?"*. A exigência sai do Lua dela
+> (`ExigeCorpo`: a condição perguntando por um monstro meu em `LOCATION_MZONE` e
+> o filtro pedindo raça e nível — 27 cartas no banco, **uma** em deck hoje), e
+> quem cada ritual pode invocar sai do Lua dele (`RitualInvoca`).
+>
+> **Ritual que não nomeia ninguém devolve lista vazia, e isso é a resposta
+> honesta**: a Black Luster Ritual é `AddProcGreaterCode(c, 8, nil, 5405694)` e
+> diz exatamente quem invoca, mas o Chaos Form filtra por arquétipo e não cita
+> nome nenhum. Quem lê trata assim — ritual que nomeia só serve para os nomeados,
+> ritual que não nomeia é candidato a qualquer um. Fingir uma lista faria o
+> cérebro escolher errado com confiança.
+>
+> A ESCOLHA do monstro vem depois, no `DecideSelect`, pela marca que a regra
+> deixou: sem ela o critério genérico (maior ATK) traria o Guerreiro de volta na
+> pergunta seguinte, desfazendo a decisão que acabara de ser tomada.
+>
+> A segunda metade veio do mesmo relato: **baixar a Espada quando ela não tem
+> uso**. Parada na mão ela não faz nada; destruída pelo oponente na zona de
+> magia, ela Invoca Especialmente do DECK um dos magos do Caos — é o próprio
+> texto dela (`SalvaSeDestruida`), e a diferença está na ZONA. Só quando ela NÃO
+> está ativável: havendo o corpo, banir uma carta do campo dele vale mais que a
+> espera. Com a mesma folga de zona da regra da armadilha, e pelo mesmo motivo.),
+`--test-condenado` (o **CORPO CONDENADO** — Instant Fusion e Ready Fusion põem
+uma Fusão em campo que **não pode atacar** e é **destruída na End Phase deste
+turno**. O buraco tinha três metades: **atacar** já estava segura e não precisou
+de regra (o `EFFECT_CANNOT_ATTACK` é do motor, então o corpo nunca aparece em
+`attackers`); **pagar com ele** estava invertida — o cérebro media o preço pelo
+ATK e por isso PROTEGIA o que ia sumir, tributando um Petit Moth de 300 para
+poupar um Barox de 1380 que evaporava no fim do turno; e **contar como campo**
+inflava o `MaiorAtkEmCampo`, que responde "eu domino a mesa?" — duplamente
+errado, porque o corpo não ataca e nem chega ao turno do oponente, e o NPC
+guardava a trava e o reforço achando que estava bem.
+> **A marca é por ZONA e vem do que ACONTECEU**: a carta que resolveu condena
+> (`Perfil().TrazCorpoCondenado`, lido do Lua) e o monstro que chegou do Extra
+> logo depois é ele. Nunca do TIPO da carta — era assim que a única regra que
+> sabia disso (o Templo do Mako) adivinhava, por `TYPE_FUSION`, e o argumento
+> *"num deck sem Polymerization, uma Fusão em campo só pode ter vindo do Instant
+> Fusion"* vale para aquele deck e para mais nenhum. Num deck com Polymerization
+> o palpite mandaria tributar de graça o melhor corpo do campo, que ia FICAR.
+> A marca sai quando o corpo sai da zona e na virada do turno — marca velha é
+> pior que marca nenhuma, porque o próximo monstro daquela zona herdaria a
+> condenação.
+>
+> **O duelo do teste é dirigido pelo JOGADOR, e não pelo NPC** — não por
+> preferência, por observabilidade: o turno inteiro do NPC (ativar, batalhar,
+> encerrar) é resolvido dentro de um `Respond` só, então o corpo nasce e morre no
+> MESMO lote de eventos e a marca já saiu quando alguém de fora consegue olhar.
+> Pelo lado do humano o motor devolve uma pergunta com o corpo ainda em campo — e
+> isso prova de graça que a marca é da ZONA e não do NPC.
+>
+> **A quarta metade, achada depois: o EQUIPAMENTO ia parar nele.** O relato foi
+> *"ele usa a Ready Fusion, gasta recurso em cima do monstro, e ele não pode
+> atacar e na end é destruído"*. O desempate da escolha do alvo (`AlvosDeEquip`)
+> reforça "quem já vale mais na mesa" quando o bônus empata — e a Fusão que o
+> Instant/Ready Fusion traz costuma ser justamente o maior ATK do campo. O
+> prejuízo é duplo: o bônus de ATK não serve para nada (o corpo não batalha) e o
+> equipamento vai **junto** para o cemitério na End Phase. Nada acusa: a carta
+> equipa, o motor soma, a tela mostra o número novo, e os dois somem no fim do
+> turno. Hoje o corpo condenado fica de fora da lista de alvos de equipamento, e
+> com o campo TODO condenado a carta simplesmente fica na mão.
+>
+> **E as três medidas de "quanto custa esse corpo" passaram a ser uma só.**
+> `ValorDoMeuCorpo` já sabia que um corpo condenado custa zero, mas
+> `CorpoMaisBarato`, `ValorDoTributoQueSai` e o ramo de custo do `DecideSelect`
+> mediam pelo `ValorNaBatalha`/`AmeacaDoAlvo` crus — então a regra autorizava
+> pensando num corpo e a seleção pagava com outro. É a mesma armadilha que o
+> comentário do `ValorDoTributoQueSai` já descrevia, uma função ao lado. Com as
+> três medindo igual, o atalho que cobra um tributo sai de graça no turno em que
+> há um Instant/Ready Fusion na mesa — que é o que o corpo condenado existe para
+> pagar),
+`--test-derrota` (a **queima que se paga em vida própria**. O relato: *"quando o
+oponente sofre uma derrota devido ao próprio efeito, o jogo não sabe interpretar
+isso (o que é uma vitória do player); exemplo é o Panik estar com 500 ou menos
+de vida e usar a Tremendous Fire"*. São duas perguntas, e a medida separou uma
+da outra: **o motor sabe** — um duelo em que o LP do NPC zera termina com
+`ended` e `winner = 0`, o MSG_WIN chega e o front desenha "você venceu" (a
+metade que o teste guarda, porque é a única que prova que a vitória por LP
+zerado **no meio de uma resolução**, e não numa batalha, chega inteira ao lado
+de fora) —; e **o NPC não devia ter feito isso**. A Tremendous Fire tira 1000 do
+oponente e **500 de quem a ativa**, e a regra de queima era uma linha só,
+*"dano fixo no oponente, ativa sempre que der"*.
+> **Não há o que ler no banco**: a `category` da carta é `CATEGORY_DAMAGE` — ela
+> diz que a carta causa dano, nunca EM QUEM. Quem sabe é o Lua dela
+> (`DatabaseManager.DanoEmMim`), onde quem ativou é `tp` e o oponente é `1-tp`.
+> Lê só a forma literal; dano calculado devolve **0**, a mesma resposta honesta
+> que `BonusDeCampo` dá a um script que não sabe ler. Os três pares CONTROLE do
+> reconhecimento (Ookazi, Hinotama, Final Flame, todas com custo zero) pegariam
+> um leitor que confundisse `tp` com `1-tp` — que faria o NPC parar de queimar
+> justamente quando estivesse ganhando, o avesso do bug.
+> A recusa é só contra a **morte**, e não um piso de LP: queimar é a condição de
+> vitória de um deck de queima, e um piso o faria parar de jogar na frente. E
+> nem "mas eu levo ele junto" salva — o Lua aplica os dois danos e só depois o
+> motor confere o LP (`Duel.RDComplete`), então os dois chegam a zero na mesma
+> resolução e o resultado é **empate**, nunca vitória. O filtro entra no
+> critério e não depois dele: com uma Ookazi ao lado, ela sai),
+`--test-campos` (as **MAGIAS DE CAMPO**. A pergunta era *"o NPC sabe posicionar
+magia de campo?"*, e a resposta medida foi: posicionar **sim** (a zona de campo é
+`SZONE seq=5`, e o `ParsePlace` a trata — `for (int z = 0; z < 6; ...)`, o 6 é ela),
+ativar **quase não** — dos seis campos básicos da Lista 1 ele usava dois. Quem
+dizia o que cada carta reforça era uma tabela escrita à mão com TRÊS entradas, e
+Forest, Yami, Sogen e Wasteland ficavam mortas na mão para sempre. Hoje quem
+responde é o Lua da própria carta (`BonusDeCampo`), nas duas formas em que estes
+scripts aparecem: o filtro literal (`aux.TargetBoolFunction(Card.IsRace, …)` +
+`SetValue(200)`) e a **função de valor** (`if r&(…)>0 then return 200 elseif …
+return -200`). A segunda é a que torna isto melhor que a tabela e não só mais
+curto: ela traz a **PENALIDADE** junto — a Umi tira 200 de Máquina e Piro, o Yami
+tira 200 de Fada, e a tabela só sabia dizer quem ganhava.
+> Não é interpretador de Lua e não tenta ser: agrupa as chamadas por variável de
+> efeito, resolve `Clone()` herdando do pai, e só lê o efeito cujo `Code` é
+> `EFFECT_UPDATE_ATTACK`. O `Clone()` não é detalhe — em **A Legendary Ocean** o
+> PRIMEIRO efeito é um `EFFECT_UPDATE_LEVEL` de **−1**, e o de ATK é o clone
+> seguinte; um leitor que casasse "o primeiro SetTarget com o primeiro SetValue"
+> concluiria que a carta PIORA o próprio campo. Script fora dessas formas devolve
+> "não sei ler" e a carta não é ativada — o mesmo silêncio seguro da tabela.
+>
+> A DECISÃO também mudou, e é o par controle que importa: magia de campo é
+> **global**. "Algum monstro meu ganha" não basta — a Mountain com um Dragão meu
+> e dois dele reforça mais o outro lado, e eu ainda pago a carta. A conta agora é
+> a DIFERENÇA. E há o guarda de trocar campo por campo: o duelo do teste mostrou
+> o NPC trocando Forest por Forest turno após turno (o comentário da regra antiga
+> afirmava que "o motor nem oferece a mesma carta" — não é verdade), então ele só
+> troca por uma que renda MAIS.),
+`--test-custo` (**com o que o NPC paga**. O relato foi *"ele está tirando o único
+monstro que controla pra comprar 1 card, ficando com o campo aberto"* — a **Dark
+Factory of More Production**, cujo custo é "mande 1 monstro da MÃO **ou do
+CAMPO**". Eram três defeitos no mesmo lugar: (1) o motor manda as duas origens na
+MESMA lista e o `DecideSelect` olhava só o `location` da PRIMEIRA opção — vindo o
+corpo do campo na frente, ele ordenava por maior ATK e pagava com o melhor da
+mesa; (2) o `Decide` lia `QtdMonstros`, que só conta o que está com a FACE PARA
+CIMA, então com a única parede SETADA a regra concluía "campo vazio, não tenho o
+que fazer" e ativava — num deck que seta o tempo todo esse é o caso comum, não o
+raro; (3) a carta é quick e `EVENT_FREE_CHAIN`, aparece em TODA janela de
+corrente, e a regra genérica do `DecideChain` a ativava em todas, pagando um
+monstro por vez. A correção da escolha é de FORMA, não de carta — uma lista que
+só tem coisa minha e mistura mão com campo é um custo, e custo se paga com o que
+ainda não está em jogo —, então vale para as 142 cartas do banco com esse mesmo
+custo. O par controle do reconhecimento é a Graceful Charity, que cobra duas
+cartas mas só da MÃO: a trava nova não pode alcançá-la),
+`--test-panik` (o pacote de SUPORTE do deck do Panik — três cartas que o cérebro
+carregava a partida inteira sem jogar. **Yellow Luster Shield / Banner of
+Courage**: reforço PERMANENTE do meu campo, reconhecido só pelo Lua
+(`EFFECT_UPDATE_ATTACK/_DEFENSE` + `SetTargetRange(LOCATION_MZONE, 0)`) mais o
+tipo, que precisa FICAR em campo — os dois pares controle são a **Sogen**, que
+reforça os dois lados, e o **Union Attack**, que reforça só os meus mas é de uma
+vez só, e reforço de um turno depende de escolher o turno, coisa que o cérebro
+não sabe fazer. **Foolish Burial**: sozinha é perda de carta, então a condição é
+a MÃO — ter uma reanimação para o corpo enterrado. **Shifting Shadows**: não muda
+um ponto de ATK, apaga o que o outro lado já sabia sobre qual carta está em qual
+zona; num deck de cartas setadas é disso que o duelo vive. Ela tem duas jogadas
+separadas pela LOCALIZAÇÃO da oferta — da mão é pô-la em campo, do campo é o
+efeito que custa 300 LP —, e o par controle é o piso de LP: perder o duelo para
+esconder de qual zona é o muro seria o pior negócio possível),
+`--test-trava` (as magias de TRAVA — as **Espadas**. O relato foi *"ele está
+perdendo e mesmo assim não usa a Swords of Concealing Light"*, e não era critério
+errado: era a AUSÊNCIA de qualquer critério. As duas Espadas vêm com
+`category = 0` no `cards.cdb`, então nenhuma das regras por EFEITO as enxergava,
+e nenhuma lista por id as citava — o NPC carregava a carta a partida inteira
+enquanto apanhava. O reconhecimento é o único do `Perfil` que sai **só do Lua**:
+a proibição (`EFFECT_CANNOT_ATTACK*` / `EFFECT_CANNOT_CHANGE_POSITION`) mais o
+alcance `SetTargetRange(0, LOCATION_MZONE)` — "nenhuma das minhas, todas as
+dele". O alcance é metade da regra: a **Gravity Bind** proíbe igual e mira os
+DOIS lados, e um NPC de batida que a ativasse prenderia o próprio campo e não
+fecharia mais o duelo. O critério de uso é a mesma `ameacaReal` do resto do
+cérebro (ele tem monstro que meu campo não supera), e vem DEPOIS da remoção —
+as duas resolvem o mesmo problema, mas a remoção resolve para sempre e a trava
+tem prazo. Cobre os dois pares controle, a ordem contra o Raigeki, e um duelo
+real, que é o único que prova que a carta chega a `activatable`),
+`--test-flip` (a **Invocação-Virar**. Ela é o único jeito de abrir um monstro
+setado, e não emitia evento nenhum para a tela: o `ocgcore` NÃO manda
+MSG_POS_CHANGE numa flip summon — ele troca a posição sozinho
+(`current.position = POS_FACEUP_ATTACK`) e escreve **MSG_FLIPSUMMONING (64)**,
+que ninguém traduzia. O duelo andava no servidor e a tela ficava parada: o
+jogador clicava "Virar para Ataque", nada acontecia, e no turno seguinte o mesmo
+clique — que o cliente ainda achava ser uma virada — caía no reposition de
+verdade e DEITAVA o monstro em defesa face-up. Sem erro no console nem no log.
+O teste prova o evento que sai para `web/duel.html` (com `flip: true`, pos 0x1 e
+o código real, sem o qual a arte não aparece) e traz o par CONTROLE: o mesmo
+comando num monstro já aberto emite `pos` SEM `flip`, deitando em 0x4 — que era
+exatamente o evento errado que chegava antes).
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
@@ -505,6 +835,114 @@ mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +
 > `Resumo()` e o `BytesTotais` passaram a contar o exe — a tela prometia "0,8 MB"
 > e baixava setenta. Coberto por `ExeVelhoNaoFicaCongelado` em `--test-update`,
 > com o par CONTROLE de que o exe EM DIA continua não abrindo tela nenhuma.
+
+> **A TERCEIRA vez, e a pior: o exe DESFAZENDO a atualização (24/08/2026).** O
+> relato foi *"as versões antigas baixam o conteúdo, mas ficam presas numa home
+> sem interação e sem informações da conta — e no banco o login nem é
+> realizado"*. Não era o login: era um **laço infinito de atualização**, lido do
+> `duel-server.log` de uma máquina de verdade:
+>
+> ```
+> pacote 'game' instalado (132 arquivos) — game-e8fb91c13b31  ← do Release: certo
+> executavel novo instalado — reabrindo o Classic Duels
+> =====  nova sessao  =====
+> versao nova do jogo — atualizando os arquivos
+> pacote 'game' embutido: 122 arquivos — game-7abc579bf254    ← rebaixou tudo
+> atualizacao disponivel: game + engine + 10 orfao(s)         ← e recomeça
+> ```
+>
+> A causa é o `.exe` de um Release embutir um `game.zip` **mais velho que o
+> `game.zip` daquele mesmo Release** — basta o `pack` ter rodado antes do último
+> `release:build`. É a armadilha que o `npm run atalho` já documentava, agora
+> mordendo no `publicar.exe`. O boot seguinte via o `.versao` diferente,
+> concluía "versão nova do jogo" e reinstalava o payload INTEIRO por cima do que
+> o updater acabara de baixar, **carimbando o marcador antigo**. A checagem
+> seguinte oferecia a mesma atualização. Para sempre.
+>
+> Do lado de quem joga não havia "atualização falhou": o jogo ficava
+> permanentemente no front da data do `pack`, rodando contra um banco que já
+> tinha seguido em frente. Os 10 órfãos são a conta exata: 132 − 122.
+>
+> **O conserto é uma regra de autoridade, não uma comparação de versões**: o
+> marcador é um DIGEST (`game-e8fb91c13b31`), não um número — não existe "maior".
+> Havendo marcador em disco, o pacote é administrado pelo updater e **o payload
+> embutido não encosta nele** (`Payload.ExtrairPacote`). O payload voltou a ser o
+> que sempre devia ter sido: a **semente da primeira instalação**, nunca uma
+> sobrescrita. É a mesma regra do resto do projeto — *cópia local nunca vence a
+> nuvem* —, e aqui o payload embutido É a cópia local.
+>
+> De brinde, a troca de executável parou de reescrever os ~21 mil `.lua` do
+> `cards` toda vez: eles eram reextraídos mesmo com o marcador idêntico ao do
+> disco, só porque o `.versao` do payload havia mudado.
+>
+> Coberto por `PayloadVelhoNaoRebaixaOQueOUpdaterInstalou` em `--test-update`,
+> com o par CONTROLE de que a instalação NOVA (sem marcador) continua sendo
+> servida pela semente — sem ele, um `ExtrairPacote` que nunca extraísse nada
+> passaria em todas as outras asserções e deixaria todo download novo do jogo
+> sem conteúdo, que é um estrago bem maior que o laço.
+>
+> E a outra metade, para não voltar: `tools/pack.ps1` registra em
+> `dist/.cache/payload.markers` o que embutiu, e `publish-release.ps1`
+> **recusa publicar** quando isso não bate com os pacotes do manifesto que está
+> subindo. A digital da casca, que já existia, responde *"o exe tem o CÓDIGO mais
+> novo"*; esta responde a metade que ela não vê — *"o exe tem o CONTEÚDO mais
+> novo"*.
+
+> **O ÓRFÃO QUE APAGAVA O QUE O PACOTE ACABARA DE INSTALAR (24/08/2026).** O
+> segundo defeito do mesmo dia, independente do laço acima e **muito** mais
+> visível: a lista de órfãos é montada no PLANO, contra o inventário de ANTES, e
+> aplicada **depois** de os pacotes serem reinstalados. Todo arquivo que o pacote
+> NOVO trazia e o inventário VELHO não conhecia era instalado — e apagado
+> segundos depois.
+>
+> Na instalação de teste sumiram dez: `bootguard.js`, `versao.js`, `chatdoca.js`,
+> `chat.js`, `poolordem.js` e os `.test.mjs` deles. `index.html` importa três, e
+> **um `import` que dá 404 mata o `<script type="module">` inteiro** — a home
+> passou a desenhar só o casco estático de fábrica. É literalmente o relato:
+> *"fica travado numa home sem interação e sem informações da conta"*. E não
+> havia erro em lugar nenhum porque o módulo que existe para mostrar a falha na
+> tela (`bootguard.js`) era um dos apagados.
+>
+> Quem estava no laço do payload era exatamente quem tinha o inventário
+> desatualizado — então os dois defeitos se alimentavam: o laço produzia o
+> inventário torto, e o inventário torto fazia a atualização seguinte apagar os
+> módulos novos.
+>
+> **São dois consertos, e cada um cobre o que o outro não cobre:**
+>
+> - **impedir** — na hora de apagar, o `AplicarAsync` relê os inventários
+>   RECÉM-ESCRITOS e cancela o órfão que o pacote novo reivindica (`orfao
+>   cancelado: … — o pacote novo o traz`);
+> - **curar** — o diff dos pacotes é por MARCADOR e só por ele, então *marcador
+>   em dia com arquivo faltando* é um estado que **nada** reinstalava: o plano
+>   dizia "tudo em dia" para sempre. Agora o `Montar` confere se todo arquivo do
+>   inventário está no disco e, faltando um, marca o pacote como pendente.
+>
+> A checagem de integridade custa **zero I/O extra**: pergunta apenas pelos
+> arquivos que a varredura de órfãos já enumerou. E não é coincidência que baste
+> — quem apaga é essa mesma varredura, então nenhum arquivo fora dela corre esse
+> risco. Hashear os 21 mil `.lua` do `cards` por boot para chegar à mesma
+> conclusão seria pagar segundos por algo que a lista já sabia.
+>
+> Coberto por `OrfaoNaoApagaOQuePacoteNovoTrouxe` em `--test-update`, que prova
+> as duas metades separadamente e traz o par CONTROLE de que uma instalação
+> intacta continua sendo "tudo em dia" — sem ele, uma checagem que pedisse
+> reinstalação sempre passaria nas outras asserções e faria todo boot baixar 27
+> MB de `cards`.
+
+> **A parede de versão não sobe na tela de LOGIN** (`deveBloquear`, 24/08/2026).
+> Ela é `position: fixed; inset: 0` e cobria o formulário inteiro — foi metade do
+> relato acima, na população que roda um exe anterior a 0.15.0: esses aplicam o
+> `game.zip` mas nunca o `engine`, então ficam com o front de hoje sobre um motor
+> que **não tem a rota `/__versao`**. O 404 vira selo vazio, vazio não alcança
+> piso nenhum, e com `modo='bloquear'` a parede subia em cima do login.
+>
+> Barrar ali não protegia nada — quem barra de verdade é `iniciar_duelo`, na
+> porta — e criava um beco sem saída: a isenção de ADMIN (`eh_admin()`, migration
+> 0042) lê `auth.uid()`, que sem sessão é nulo. Com a parede antes do login, o
+> admin de cliente velho não conseguia se autenticar para ser isento — exatamente
+> o "trancar do lado de fora quem pode desligar a trava" que a 0042 foi escrita
+> para impedir, um passo mais cedo.
 
 > **Compile sempre com o servidor parado.** O `.exe` fica travado enquanto roda,
 > o `dotnet build` falha *e o teste seguinte roda o binário antigo* — parece que a
@@ -612,6 +1050,22 @@ dificuldade de cada um e o cadeado de quem ainda não foi liberado. Qual deck
 foi enfrentado viaja em `duel.html?npc=<id>&deck=<nome>` e é gravado em
 `duelos.deck_npc` — sem isso o servidor não saberia de que pool sortear nem
 qual deck a vitória destranca.
+
+> **`dropsDoDeck` devolve a configuração INTEIRA, e não uma cópia de dois
+> campos.** Ela remontava `{ quantidade, pool }` à mão, e o ÍCONE ficava para
+> trás — sem erro, porque o objeto continuava parecendo certo. O estrago não
+> parava em "não mostrou": a aba DROPS carrega dali, então o ícone voltava sempre
+> como *nenhum selecionado* e o **salvamento seguinte apagava do banco** o que
+> estava gravado. Do lado de quem edita: *"tive que salvar 2x; voltei ao deck e o
+> ícone não estava selecionado com a taxa dele"*. O servidor (`premiar_vitoria`)
+> sempre leu certo — o buraco era só a volta. Uma lista de campos escrita à mão
+> envelhece toda vez que a configuração ganha um.
+>
+> O teste que devia ter pego existia e tinha o nome certo (*"o ícone também vale
+> por deck"*), mas a asserção era `assert.ok(d)`: conferia só que a função
+> devolveu **alguma coisa**. Hoje ele confere o ciclo completo — o que o editor
+> grava tem de voltar igual —, com par controle de que quem não configurou ícone
+> não ganha os campos do nada.
 
 > Renomear um deck reaponta sozinho quem o liberava (`religarLibera`) e move o
 > pool de drop para a chave nova. Sem isso a cadeia apontaria para um deck
@@ -728,6 +1182,47 @@ Coleção, mais o "faltam N". A pergunta do jogador é a mesma nos dois lugares 
 a mesma caixa; duas cópias divergiriam caladas, uma ganhando o selo de "você
 tem" e a outra não. O botão nunca desliga por falta de DP: quem está sem saldo
 é justamente quem precisa escolher onde gastar o próximo.
+
+**A revelação carta a carta** (`web/js/revelacao.js` + `web/css/revelacao.css`).
+As cartas chegam VIRADAS e são abertas uma a uma, com um **[revelar rápido]**
+para quem não quer a cerimônia; a revelada **se aproxima da tela e volta**, num
+movimento só, e traz a moldura da raridade e o selo **NEW!!** de quem entrou na
+Coleção agora. Nasceu no drop do NPC (fim de duelo) e hoje é literalmente a
+mesma nas **duas** telas — a da Loja despejava as cartas já abertas, sem virada
+e sem dizer o que era inédito, e o mesmo prêmio parecia valer menos vindo do
+pacote. Pelo mesmo motivo de `gavetas.js`: duas cópias de uma cerimônia divergem
+sem ninguém perceber.
+
+> **A caixa da Loja não passa da altura da janela.** Um [abrir 10] traz 50
+> cartas; a rolagem é da LISTA e nunca da página, senão o título sai por cima e
+> os botões de [abrir outro]/[fechar] ficam abaixo do fim da tela,
+> inalcançáveis. E a grade quebra em **sete** por linha: numa fileira que só
+> quebra quando não cabe mais, as cinquenta encolhem até virar selo. O
+> `--rev-cols` se fecha no número de cartas quando são menos que isso (três
+> cartas de drop numa fileira de sete ficavam encostadas à esquerda).
+
+> **[organizar por raridade]**, ao lado do [revelar rápido]: agrupa UR→N e
+> volta. Ele **revela o que ainda estiver virado** — agrupar cartas viradas
+> diria onde estão as boas antes de alguém as virar, e a cerimônia morreria sem
+> aviso nenhum. É vai-e-volta porque a ordem do sorteio é a única que mostra em
+> qual dos dez pacotes cada carta veio. Carta sem raridade fica no FIM (a mesma
+> regra de `poolordem.js`: ausência não é degrau da escala — e o `indexOf` cru
+> devolve −1, que a jogaria na frente da UR, calado).
+
+> **O "NEW!!" tem de ser lido ANTES da compra.** `abrirPacote` grava a carteira
+> de volta no cache, e depois dela toda carta do lote "já está na Coleção" — a
+> pergunta deixa de ter resposta. É a mesma razão pela qual o drop do NPC
+> responde isso no SERVIDOR, antes de creditar (migration 0029). Na Loja quem
+> responde é o cliente, com a coleção de antes da chamada, e o campo `nova` do
+> servidor vence esse palpite no dia em que `abrir_pacote()` passar a mandá-lo.
+> Cópia repetida DENTRO do mesmo lote conta uma vez: a segunda cópia da mesma
+> carta nos dez pacotes não é nova.
+
+> **[abrir outro] fica desligado enquanto sobrar carta virada** — ele redesenha
+> a caixa por cima, e um clique apressado apagaria o pacote antes de alguém ter
+> visto o que veio nele. O **[fechar] não**: com 50 cartas isso prenderia o
+> jogador até o quinquagésimo clique, e o [revelar rápido] está bem ali. (No fim
+> de duelo os DOIS ficam desligados, porque lá a saída é o "novo duelo".)
 
 > **A chance de cada gaveta não é uma fórmula só.** O booster e o drop do NPC
 > sorteiam DIFERENTE, e cada um tem de bater com o seu servidor: `chancesDe`
@@ -936,6 +1431,26 @@ Reconstruir isso da linha crua faria a tela mostrar um desafio já expirado.
 > identity full`. Sem o `full`, o UPDATE chega sem a linha ANTIGA — "o pedido
 > foi aceito" sem dizer de quem era.
 
+**A lista de amigos ganhou as duas pontas que faltavam** (23/08/2026): clicar num
+amigo abre um cartão com **desafiar** e **remover amigo**, e uma **busca** entre o
+cabeçalho e a lista adiciona alguém por nome ou etiqueta (`buscar_jogador` +
+`pedir_amizade`, os dois já existiam — o único caminho era ir ao Multiplayer).
+
+> **O amigo OFFLINE voltou a ser clicável.** Ele estava desabilitado por um bom
+> motivo (desafiar quem está com o jogo fechado gasta um convite que expira em 10
+> minutos), e esse motivo continua valendo — quem decide é o cartão, que só
+> oferece "chamar" a quem está online. O que a trava fazia junto, sem querer, era
+> **impedir remover um amigo offline**: o clique é a única porta para isso, e ela
+> estava fechada justamente para a maior parte da lista na maior parte do tempo.
+
+> A busca **cruza o resultado com a sua lista** antes de oferecer "adicionar":
+> `buscar_jogador` responde o que a policy de `perfis` permitiria a qualquer um e
+> não sabe quem já é seu amigo. Sem o cruzamento, o botão prometeria adicionar
+> quem já está lá e o servidor devolveria um erro que ninguém pediu. E cada
+> digitada carrega um selo de ordem — as consultas voltam fora de ordem, e uma
+> resposta velha chegando depois pintaria o resultado de um termo que ninguém
+> está mais buscando.
+
 **Desafiar da home leva ao Multiplayer.** Não é preguiça: quem desafia precisa
 entrar no duelo no instante em que o outro aceita, e essa espera já existe lá
 (`pintarPartida` + `aguardavaSala`). Ficando na home, o convite seria aceito do
@@ -944,6 +1459,45 @@ outro lado e o desafiante continuaria parado olhando o menu.
 O **amigo offline não é clicável** — o convite expira em 10 minutos e chamar
 quem está com o jogo fechado é gastá-lo à toa —, mas continua **visível**:
 sumir com ele faria a lista dançar sozinha e esconderia quem você tem.
+
+### Chat: o global e a conversa com um amigo (23/08/2026)
+
+Uma **doca** no rodapé da home com janelinhas lado a lado: o **chat global**
+(botão de globo na lateral) e uma conversa por amigo (`[abrir chat]` no cartão
+dele). Várias abertas ao mesmo tempo; ao minimizar uma, as outras se grudam na
+lateral — a doca é um `flex` e as minimizadas são reinseridas primeiro no DOM,
+em vez de posição absoluta com conta de largura refeita a cada abrir/fechar.
+
+**Uma tabela para os dois** (`mensagens`, migration 0040), e a diferença é uma
+coluna: `para` nulo = global. Duas tabelas exigiriam duas policies, dois RPCs de
+envio e dois caminhos de Realtime para a mesma coisa.
+
+> **Quem pode falar com quem é decidido no BANCO.** A conversa privada só existe
+> entre amigos (`amizades` aceita), e a tabela **não tem policy de INSERT** — um
+> `POST /mensagens` direto é recusado, e todo envio passa pelo `enviar_mensagem`
+> (`security definer`), que é onde a regra de amizade e o limite de ritmo vivem.
+> Se a trava morasse na tela, bastaria abrir o console.
+
+> **O nome de quem falou vem do RPC**, e não de uma consulta da tela: a policy de
+> `perfis` só deixa cada um ver o próprio registro, então sem a junção do
+> `chat_global`/`chat_com` (que rodam como `definer`) o chat mostraria uuids.
+
+> **`mensagens` viaja no MESMO canal de Realtime das notificações.** O Phoenix
+> cobra um join por canal e um heartbeat por socket; abrir um segundo socket para
+> o mesmo usuário dobraria os dois sem ganhar nada. O aviso é separado no
+> despacho — mensagem vai para o chat, o resto para a lista de notificações; sem
+> isso, cada linha de conversa faria o sino piscar.
+
+> **`juntar` existe porque a entrega tem dois caminhos** (Realtime + releitura de
+> reserva), e isso é ótimo para a entrega e péssimo para a lista: a mesma
+> mensagem chega duas vezes e as releituras se cruzam. Sem ele a conversa mostra
+> tudo em dobro e embaralhado — e nada disso dá erro.
+> `node web/js/chat.test.mjs`.
+
+> **Texto de outra pessoa entra por `textContent`, nunca `innerHTML`.** É a
+> ÚNICA entrada do jogo em que alguém digita algo que aparece na tela de
+> terceiros; montar a linha com `innerHTML` seria pôr um `<script>` de um jogador
+> na home de todos os outros.
 
 ### Ícones de perfil (22/08/2026)
 
@@ -1133,6 +1687,38 @@ nenhuma lógica de camada.
 > um NPC preso dentro de uma parede não dá erro nenhum, só é impossível de
 > alcançar. `buildMap()` já descarta `spot` em cima de sólido, mas não avisa.
 
+> **RAIO-X: a caixa "ver a mão do NPC"** na tela do duelo, só para admin. É o
+> mesmo diagnóstico do log, mas ao vivo — a pergunta que o originou foi *"o que
+> ele tem de tão brickado que não descarta, não compra e não popula o campo?"*.
+> A mão vem por uma rota à parte (`POST /espiar`, em 8770), nunca nos eventos do
+> duelo: `Projetar` manda `code: 0` do lado do oponente, e é ele que impede a
+> mão de vazar para quem não pediu — enfiar isso no `Entregar` um dia vazaria
+> para a tela de quem não pediu.
+>
+> **A trava de verdade é uma só: contra um HUMANO a mão não sai.** No
+> multiplayer quem hospeda roda o motor para os dois e tem a mão do outro
+> jogador na memória (`ponte.js`), então `MaoDoNpc()` devolve `null` ali —
+> `null` e não lista vazia, porque "não posso mostrar" e "ele está sem cartas"
+> são respostas diferentes. O "só admin" é guarda de TELA (a caixa nasce
+> `hidden` e só aparece quando o SERVIDOR diz que o perfil é admin, como o botão
+> da Área de Teste): este servidor roda na máquina do jogador e não valida token
+> do Supabase, então chamá-lo de fechadura seria mentira. `IsLocal` fecha a
+> porta para a rede, que com `--lan` alcança a 8770. Coberto por
+> `--test-multiplayer`, com o par controle — sem ele, uma `MaoDoNpc()` que
+> devolvesse `null` sempre passaria no teste e o raio-x não mostraria nada, em
+> silêncio.
+
+> **O log diz o que o NPC tinha na MÃO** (`[npc] mao (5): 62121 Nv4 920/1930 | …`),
+> uma linha por mudança de mão, escrita pelo `Decide`. Todas as outras linhas
+> `[npc]` dizem o que ele decidiu e por quê; nenhuma dizia com o que ele estava
+> decidindo — e sem isso um turno em que ele "não fez nada" tem duas explicações
+> indistinguíveis: a mão não tinha jogada, ou tinha e a regra não a viu. É
+> exatamente a pergunta de quem desconfia do cérebro. De fora não dá para
+> reconstruir: a mão dele nunca chega ao front (`Projetar` manda `code: 0`), e
+> repetir o embaralhamento pelo seed exigiria os dois decks na ordem exata em que
+> foram enviados, que o log não guarda. Os códigos vão crus porque o motor não
+> conhece o nome das cartas — o nome mora no `ygo-data`, que é do front.
+
 **`duel-server/`** — .NET 8 que hospeda o `ocgcore` (edo9300) via P/Invoke e o
 expõe como **RPC HTTP** em 8770. São **dois projetos** desde 19/08/2026:
 `engine/duel-engine.csproj` compila `src/**` como **`DuelServer.Engine.dll`** (o
@@ -1259,6 +1845,142 @@ por cima de um `.ydk` vindo de outra máquina. Sem servidor no ar ele não faz
 nada, de propósito: mexer no `localStorage` sem conseguir ler o disco só
 destruiria a cópia de trabalho.
 
+### Atualizar deixou de ser opcional (23/08/2026)
+
+A tela de atualização (`web/atualizando.html`) tinha um **"jogar sem atualizar"**,
+e o boot deixava entrar quem estivesse **offline**. As duas saíram, e as duas
+pelo mesmo motivo: a premissa que as justificava (*"offline nunca trava o
+jogo"*) deixou de valer quando login, carteira, coleção, decks, adversários e
+trilha foram todos para o Supabase. Entrar sem rede não entrega mais um jogo —
+entrega uma home vazia com cara de quebrada. E o cliente parado numa versão
+velha, esse sim, custa caro: front novo falando com motor velho, deck que o
+servidor recusa por uma regra que só existe na versão nova, e o congelamento de
+19/08/2026, que passou dias entregando front e nenhum motor.
+
+Hoje: havendo atualização, a única ação é **atualizar agora**; não alcançando o
+servidor, o jogo **espera** na tela, que reconsulta sozinha a cada 10s (e tem um
+**tentar de novo** para quem não quer esperar). O **"voltar para a versão
+anterior"** saiu junto, pela mesma razão — voltar é ficar para trás. Os backups
+continuam sendo feitos (nada é apagado numa atualização) e a rota
+`/__update/restaurar` continua existindo; o que deixou de existir é oferecê-la
+como escolha a quem joga. Ela é a alavanca de quem conserta um Release quebrado,
+e o caso comum nem chega nela: a casca reverte sozinha um MOTOR que não sobe. A rota nova é
+`POST /__update/rechecar`, só de localhost — sem ela, cada tentativa custava um
+boot inteiro do jogo.
+
+> **O cache do manifesto também não passa mais.** `CarregarManifestoAsync` cai
+> no `.duelacademy/manifest.cache.json` quando a rede falha, e o plano montado
+> em cima dele dizia "tudo em dia" — o jogo abria offline achando-se atualizado.
+> Ele continua existindo e continua respondendo, mas agora se **anuncia**
+> (`UpdateEngine.ManifestoVeioDoCache`), e `Checar` trata isso como "sem
+> conexão". O cache diz o que era verdade **da última vez**; aceitá-lo como
+> resposta deixava passar exatamente o cliente velho que não consegue perguntar
+> se está velho. Coberto por `--test-offline`, com o par controle.
+
+> **O que NÃO mudou:** nada disto pode virar exceção no boot. Toda falha de rede
+> continua virando um ESTADO (`Indisponivel`) que a tela sabe mostrar — jogo que
+> não abre e não diz por quê continua sendo o pior desfecho possível.
+
+> **`npm run dev` e `--sem-update` não são afetados**: a checagem só roda com
+> `Payload.Exists` (jogo empacotado). Em desenvolvimento nada disso acontece.
+
+### Duas janelas do jogo depois de atualizar (23/08/2026)
+
+A troca do motor e a do exe fecham o jogo e o reabrem por um `.bat`. O processo
+novo abria o navegador — e a janela ANTERIOR (a que mostrou a barra de
+progresso) continuava viva, consultando `/__update/status`: quando o servidor
+novo respondia "tudo em dia", ela ia sozinha para a home. Duas cópias do jogo na
+tela, e como o navegador abre em modo `--app` (sem barra de endereço), cada uma
+parece um executável. O relato foi *"2 exe abrindo após att"*.
+
+> **A metade que faltava, e que quebrou o boot (23/08/2026).** Passar o
+> argumento só serve se quem o recebe continuar sendo o JOGO — e a condição de
+> modo era `bool app = … || (args.Length == 0 && Payload.Exists)`. Com
+> `--reaberto`, o executável empacotado via UM argumento, concluía que não era
+> `--app` e caía no **modo de demonstração**: rodava um duelo de teste no
+> console, nunca subia o servidor do front, e a janela do navegador ficava
+> consultando `/__update/status` num servidor que não existia. Do lado de quem
+> joga: *"o launcher fica travado nessa tela e preciso fechar e abrir de novo"*.
+> `--lan`, `--sem-update`, `--no-browser` e `--motor-embutido` tinham a mesma
+> armadilha esperando — qualquer um sozinho caía no mesmo lugar. Hoje a regra é
+> sobre o que o argumento SIGNIFICA (`Program.EhModoApp` + a lista
+> `MODIFICADORES`), não sobre quantos vieram, e é `internal` justamente para ter
+> teste: `Main` não é chamável de fora, e a decisão erra calada.
+
+O `.bat` agora reabre com **`--reaberto`**, e com essa flag o boot **não abre
+janela nenhuma**: a que já está aberta é a janela do jogo, e é ela que vai para
+a home. A rede de segurança é `WebServer.Atendidas` — se ninguém falar com o
+servidor em 6 segundos, a janela anterior foi fechada durante a atualização, e
+aí sim se abre uma nova. Coberto por `--test-selfupdate`, que confere o
+argumento que chega ao processo reaberto.
+
+> Efeito colateral bem-vindo: como a janela é a mesma, o `sessionStorage`
+> sobrevive à atualização — quem não marcou "manter login" não é deslogado por
+> ter atualizado.
+
+### O jogo não abre mais uma janela de terminal (23/08/2026)
+
+`ClassicDuels.exe` virou **`WinExe`**: o Windows para de criar a janela de
+console, que aparecia por cima do jogo e tinha de ser minimizada. Três peças
+pagam o preço disso, e nenhuma é opcional:
+
+- **`host/Console.cs`** — um `WinExe` chamado de um terminal **não se anexa a
+  ele**, e as suítes (`--test-*`, `--cobertura`, `--probe-*`) ficariam mudas.
+  `AttachConsole(ATTACH_PARENT_PROCESS)` resolve os dois casos com a mesma linha,
+  porque a resposta vem de quem chamou: do terminal, anexa; de dois cliques, o
+  pai é o Explorer e não há nada a anexar.
+  > **Só quando não há para onde escrever.** A primeira versão anexava sempre e
+  > reabria `Console.Out` — o que **jogava fora o pipe** de quem tinha
+  > redirecionado. O sintoma foi `npm run update:test` respondendo exit 0 com a
+  > saída das suítes sumida. Hoje um `GetFileType` decide: handle utilizável
+  > (pipe, arquivo ou console herdado) → não encosta em nada. E "não é nulo" não
+  > basta — o handle de um `WinExe` vem não-nulo e **inválido**, e a primeira
+  > escrita morria com `IOException`.
+- **`AvisoDaCasca`** — sem console, `CascaLog.Err` só escrevia no arquivo, e "o
+  motor não subiu" virava o jogo não aparecer em silêncio absoluto. Agora é caixa
+  de diálogo, como o `Aviso` do lado do motor (que não dá para reusar daqui: ele
+  mora no motor, que é justamente o que falhou).
+- **`Console.OutputEncoding` e `Console.Title` viraram `try/catch`.** As duas
+  EXIGEM console e lançam sem ele — e a exceção subia até o `Motor.Invocar`, que
+  a lia como *"o motor novo quebrou ao subir"*, punha o motor de castigo e caía
+  para o embutido. Um enfeite de acentuação teria feito o updater **rejeitar todo
+  motor novo**, na primeira linha executada.
+
+**E quem fecha o jogo agora?** Era a janela do terminal ("DEIXE ESTA JANELA
+ABERTA"). Passou a ser a ausência de batidas: toda tela de `web/` chama
+`manterVivo()` (`web/js/vivo.js`), que pinga `POST /__vivo` a cada 5s, e
+`WebServer.VigiarAJanela` encerra o processo depois de `JANELA_VIVO` (15s) sem
+nenhuma. Só no modo `--app` — em `npm run dev` o duel-server é outro processo, que
+ninguém manda sair —, e só **depois da primeira batida**: entre subir o servidor e
+o navegador abrir passam segundos, e um relógio contando desde o boot encerraria
+o jogo antes de ele aparecer.
+
+> **Não é o processo do navegador que se espera morrer**, que seria menos código:
+> com `--app=URL` e sem `--user-data-dir`, um Chrome já aberto repassa a janela
+> para a instância existente e o processo que lançamos **morre na hora** — o
+> servidor cairia com o jogo aberto na tela, e só para quem já estava com o
+> navegador aberto. Consertar isso exigiria um perfil de navegador dedicado, que
+> muda o `localStorage` de lugar e desloga todo mundo uma vez.
+
+> **A janela DOBRA quando a página está oculta** (`JANELA_VIVO_OCULTO`, 10 min), e
+> essa é a metade que faltaria: o navegador **estrangula `setInterval` em página
+> minimizada** — o Chrome derruba para cerca de uma batida por minuto. Com os 15s
+> valendo ali, minimizar o jogo por um minuto o encerraria, e o jogador voltaria
+> para uma janela morta sem ter fechado nada. A batida manda `?oculto=1` e
+> também dispara no `visibilitychange`, para o servidor saber disso na hora. Os
+> dez minutos ainda limitam o estrago do caso indetectável (o navegador morto
+> enquanto minimizado, sem `pagehide`).
+
+> **`node web/js/vivo.test.mjs`** varre TODA página de `web/` exigindo a linha —
+> uma tela que a esqueça faz o jogo se fechar debaixo de quem está jogando, e o
+> sintoma não é erro nem log, é o jogo sumindo depois de quinze segundos parado
+> numa tela específica. O teste também **lê a `JANELA_VIVO` do fonte em C#** em
+> vez de copiar o número: dois valores escritos à mão em linguagens diferentes se
+> desencontram no primeiro ajuste, e aqui o desencontro só encurta a folga até o
+> dia em que o jogo começa a se fechar sozinho. `--test-vivo` cobre a decisão do
+> outro lado (o boot, a batida atrasada, o relógio ajustado para trás, a página
+> oculta), com par controle.
+
 ### Conta (login/registro)
 
 `store/wallet.json` e `decks/player/*.ydk` viraram dado de **conta**, não da
@@ -1276,6 +1998,29 @@ cookie sozinho, sem precisar mexer em nenhuma chamada existente.
 
 `requireLogin()` no boot de `index/loja/deck/inventario/duel.html` redireciona
 pra `web/login.html` sem sessão.
+
+> **A sessão morre com a janela, a não ser que o jogador peça o contrário**
+> (23/08/2026). A tela de login tem uma caixa **"manter login nesta máquina"**:
+> marcada, a sessão vai para o `localStorage` e sobrevive a fechar o jogo;
+> desmarcada — o padrão —, vai para o `sessionStorage`, e abrir o jogo de novo
+> pede a senha. Quem decide onde gravar é `armazenamento()` em `supabase.js`, e
+> a escolha (`ygo:manter-login`) fica no `localStorage` dos dois jeitos: ela é
+> preferência, não sessão, e é o que faz a caixa aparecer como a pessoa a
+> deixou.
+>
+> Três armadilhas, todas silenciosas e todas a favor de quem não devia entrar:
+> `sessao()` lê **um** armazenamento só (ler os dois "para não perder a sessão"
+> faria uma sessão esquecida no `localStorage` manter a pessoa entrada para
+> sempre); gravar **apaga a cópia do outro lado** (senão ela ressuscita no dia
+> em que a escolha mudar); e `limparSessao()` limpa os **dois** — sair que limpa
+> só um é um sair que não sai. Um `import` de `supabase.js` também varre a
+> sessão que ficou no `localStorage` sem a escolha ligada: é o caso de todo
+> jogador que já estava logado no dia desta mudança, e deixá-la ali guardaria um
+> refresh token válido no disco para sempre. `node web/js/sessao.test.mjs`.
+>
+> Nada disso vale prazo de expiração próprio: o `sessionStorage` é o navegador
+> quem apaga. Um "vence em N dias" gravado junto do token seria um prazo que
+> qualquer um edita.
 
 **A Área de Teste inteira é de ADMIN** (23/08/2026), por `requireAdmin()`
 (`web/js/auth.js`): sem sessão vai pro login, com sessão de jogador comum volta

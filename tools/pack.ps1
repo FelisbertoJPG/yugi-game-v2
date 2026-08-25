@@ -119,7 +119,8 @@ $fonteCs = Get-ChildItem (Join-Path $root 'duel-server\src'), (Join-Path $root '
                          -Recurse -File -Filter '*.cs' -ErrorAction SilentlyContinue |
            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if ($fonteCs -and $fonteCs.LastWriteTimeUtc -gt (Get-Item $zipEngine).LastWriteTimeUtc) {
-  Write-Host "  ERRO distelease\engine.zip esta' velho." -ForegroundColor Red
+  Write-Host "  ERRO dist
+elease\engine.zip esta' velho." -ForegroundColor Red
   Write-Host "       $($fonteCs.FullName.Substring($root.Length + 1)) mudou depois dele." -ForegroundColor Red
   Write-Host "       rode:  npm run release:build" -ForegroundColor Red
   exit 1
@@ -271,6 +272,23 @@ $cache = Join-Path $dist '.cache'
 if (-not (Test-Path $cache)) { New-Item -ItemType Directory -Path $cache -Force | Out-Null }
 Set-Content -Path (Join-Path $cache 'casca.digital') `
             -Value (DigitalDaCasca $root) -Encoding ascii -NoNewline
+
+# O QUE ESTE EXE EMBUTIU. O publish-release compara isto com as versoes dos
+# pacotes que ele esta' prestes a publicar e RECUSA sair quando discordam.
+#
+# O exe traz uma copia do conteudo dentro dele, e o boot da instalacao usa essa
+# copia como SEMENTE. Se o `pack` rodou antes do ultimo `release:build`, o exe
+# publicado embute um game.zip mais velho que o game.zip do mesmo Release — e
+# foi assim que o jogo entrou num laco infinito de atualizacao em 24/08/2026:
+# baixava o Release, trocava o exe, o boot seguinte reinstalava a semente por
+# cima e a checagem oferecia tudo de novo, para sempre.
+#
+# O `Payload.ExtrairPacote` hoje se recusa a rebaixar um pacote que ja' tem
+# marcador em disco, entao o laco nao volta. Esta trava e' a outra metade:
+# impede de PUBLICAR o descompasso, que continua sendo um exe entregando
+# conteudo velho para toda instalacao nova.
+Copy-Item (Join-Path $conteudo 'payload.markers') `
+          (Join-Path $cache 'payload.markers') -Force
 
 Remove-Item $stage -Recurse -Force
 $tamanho = [math]::Round((Get-Item $exeFinal).Length / 1MB, 1)

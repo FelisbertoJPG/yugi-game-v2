@@ -36,9 +36,14 @@ export const RESERVA_MS = 15_000;
  * canal está de pé (a tela usa isso só para o pontinho de "ao vivo"; nada
  * depende dele funcionalmente).
  *
+ * `aoChegarMensagem` é avisado quando entra linha em `mensagens` — o chat vive
+ * do mesmo canal, e este parâmetro é a porta dele. Ver o comentário das tabelas,
+ * abaixo.
+ *
  * @returns {() => void} chame para parar.
  */
-export function vigiar(aoMudar) {
+export function vigiar(aoMudar, aoChegarMensagem = () => {}) {
+  const avisarMensagem = () => { try { aoChegarMensagem(); } catch { /* a tela nao derruba o canal */ } };
   let vivo = true;
   let ultimas = [];
   let tempoReal = false;
@@ -84,9 +89,24 @@ export function vigiar(aoMudar) {
       url: SUPABASE_URL,
       apikey: SUPABASE_KEY,
       token: tokenValido,
-      tabelas: [{ table: 'partidas', event: 'INSERT' }, { table: 'amizades' }],
+      // `mensagens` viaja no MESMO canal das notificações, e não num socket
+      // próprio: o Phoenix cobra um join por canal e um heartbeat por socket, e
+      // abrir dois para o mesmo usuário dobraria as duas coisas sem ganhar
+      // nada. O aviso é repassado a quem se inscreveu (`aoChegarMensagem`) — a
+      // doca do chat relê por conta dela, como esta lista faz.
+      tabelas: [
+        { table: 'partidas', event: 'INSERT' },
+        { table: 'amizades' },
+        { table: 'mensagens', event: 'INSERT' },
+      ],
     },
-    () => reler(),
+    (e) => {
+      // A MENSAGEM não mexe na lista de notificações: ela vai para o chat. Sem
+      // esta separação, cada linha de conversa faria a lista de convites piscar
+      // e o contador do sino subir.
+      if (e?.tabela === 'mensagens') { avisarMensagem(); return; }
+      reler();
+    },
     (ligado) => {
       tempoReal = ligado;
       // O estado do canal e a lista são coisas diferentes: avisar SEMPRE, senão

@@ -27,6 +27,47 @@ export const SUPABASE_KEY = 'sb_publishable_FxGEPSbXqJEBBUqG9ugJ6w_3z5AaVzC';
 
 const CHAVE_SESSAO = 'ygo:sb-session';
 
+/**
+ * "Manter login nesta máquina" — a preferência, não a sessão.
+ *
+ * Ela mora no `localStorage` mesmo quando a resposta é NÃO: é o que faz a caixa
+ * aparecer marcada do jeito que a pessoa deixou da última vez. O que muda de
+ * lugar é a SESSÃO.
+ */
+const CHAVE_MANTER = 'ygo:manter-login';
+
+/** A pessoa pediu para continuar entrada nesta máquina? */
+export function manterLogin() {
+  try { return localStorage.getItem(CHAVE_MANTER) === '1'; } catch { return false; }
+}
+
+/**
+ * Guarda a escolha. Precisa ser chamada ANTES do `entrar()`, porque é ela que
+ * decide em qual armazenamento a sessão recém-criada vai cair.
+ */
+export function definirManterLogin(sim) {
+  try {
+    if (sim) localStorage.setItem(CHAVE_MANTER, '1');
+    else localStorage.removeItem(CHAVE_MANTER);
+  } catch { /* modo privativo: a escolha só não sobrevive ao reload */ }
+}
+
+/**
+ * Onde a sessão mora — e é aqui que "exigir login ao entrar" acontece.
+ *
+ * `sessionStorage` morre com a janela: fechar o jogo e abrir de novo pede a
+ * senha outra vez, que é o comportamento padrão desde 23/08/2026. Marcar a
+ * caixa move a sessão para o `localStorage`, que sobrevive a tudo.
+ *
+ * Por que não um "vence em N dias" gravado junto do token: um prazo escrito no
+ * mesmo lugar que a sessão é um prazo que qualquer um edita, e o token do
+ * GoTrue se renova sozinho para sempre enquanto o refresh valer. O
+ * `sessionStorage` é o navegador quem apaga.
+ */
+function armazenamento() {
+  try { return manterLogin() ? localStorage : sessionStorage; } catch { return localStorage; }
+}
+
 /** Renova quando falta menos que isto para vencer (o token dura ~1h). */
 const MARGEM_RENOVACAO_MS = 60_000;
 
@@ -35,7 +76,11 @@ const MARGEM_RENOVACAO_MS = 60_000;
 /** `{access_token, refresh_token, expires_at, user, usuario}` ou null. */
 export function sessao() {
   try {
-    const cru = localStorage.getItem(CHAVE_SESSAO);
+    // SÓ no armazenamento que a escolha manda. Ler o outro "para não perder a
+    // sessão" desfaria a escolha inteira: uma sessão esquecida no localStorage
+    // de antes desta versão manteria a pessoa entrada para sempre, que é
+    // exatamente o que a caixa desmarcada diz que não vai acontecer.
+    const cru = armazenamento().getItem(CHAVE_SESSAO);
     return cru ? JSON.parse(cru) : null;
   } catch {
     return null;
@@ -44,12 +89,51 @@ export function sessao() {
 
 function guardar(s) {
   try {
-    if (s) localStorage.setItem(CHAVE_SESSAO, JSON.stringify(s));
-    else localStorage.removeItem(CHAVE_SESSAO);
+    if (s) armazenamento().setItem(CHAVE_SESSAO, JSON.stringify(s));
+    else armazenamento().removeItem(CHAVE_SESSAO);
   } catch { /* modo privativo/quota — a sessão só não sobrevive ao reload */ }
+  // A cópia no OUTRO armazenamento nunca pode sobrar: ela viraria uma sessão
+  // fantasma no dia em que a escolha mudasse de lado.
+  try { (manterLogin() ? sessionStorage : localStorage).removeItem(CHAVE_SESSAO); } catch { }
 }
 
-export function limparSessao() { guardar(null); }
+/**
+ * Reescreve a sessão guardada com campos novos (hoje: o nome no jogo, que só é
+ * conhecido depois da primeira consulta a `perfis`).
+ *
+ * Existe para ninguém precisar escrever no `localStorage` na mão — quem fazia
+ * isso (`auth.js`) gravava sempre no `localStorage`, e depois da caixa "manter
+ * login" isso passou a ser um jeito de deixar a sessão no lugar errado.
+ */
+export function atualizarSessao(campos) {
+  const s = sessao();
+  if (!s) return null;
+  const nova = { ...s, ...campos };
+  guardar(nova);
+  return nova;
+}
+
+/**
+ * Faxina de uma vez, no carregamento do módulo: com a caixa DESMARCADA, uma
+ * sessão no `localStorage` não pode existir.
+ *
+ * Ela existe em duas situações, e as duas são a mesma coisa por fora: a de quem
+ * já estava logado antes de a caixa existir (23/08/2026 — todo mundo, no dia da
+ * atualização), e a de quem tinha "manter" ligado e desligou. Deixá-la ali não
+ * mantém ninguém entrado (o `sessao()` nem olha para lá), mas guarda um refresh
+ * token válido no disco para sempre — que é justamente o que a caixa desmarcada
+ * promete não fazer.
+ */
+try {
+  if (!manterLogin()) localStorage.removeItem(CHAVE_SESSAO);
+} catch { /* modo privativo: não havia o que limpar */ }
+
+/** Apaga a sessão dos DOIS armazenamentos — sair tem de sair de todo lugar. */
+export function limparSessao() {
+  for (const store of [localStorage, sessionStorage]) {
+    try { store.removeItem(CHAVE_SESSAO); } catch { }
+  }
+}
 
 /** Normaliza a resposta do GoTrue para o formato que guardamos. */
 function daResposta(j, anterior) {
@@ -290,13 +374,23 @@ export async function recuperarSenha(email, redirect) {
  * 401 e 406 são respostas normais aqui (sessão vencida, nenhuma linha).
  */
 export async function req(caminho, { method = 'GET', body, prefer } = {}) {
-  const token = await tokenValido();
+  // O `tokenValido()` fica DENTRO do try, e isso nao e' detalhe: ele renova a
+  // sessao, e renovar GRAVA (`guardar`). Um `setItem` pode lancar — cota cheia,
+  // armazenamento do site bloqueado, modo privado —, e `renovar` repassa tudo
+  // que nao e' `SemRede`. Fora do try, essa excecao escapava do `req` inteiro e
+  // subia por `me()` ate' o `await requireLogin()` do topo da home, que nao tem
+  // catch: o modulo morria antes da primeira linha de desenho e a tela ficava
+  // em 'carregando…' para sempre, sem um erro em lugar nenhum.
+  //
+  // Dentro dele, a mesma falha vira o que ela e': uma resposta ruim.
   const headers = { apikey: SUPABASE_KEY };
-  if (token) headers.authorization = `Bearer ${token}`;
-  if (body !== undefined) headers['content-type'] = 'application/json';
-  if (prefer) headers.prefer = prefer;
 
   try {
+    const token = await tokenValido();
+    if (token) headers.authorization = `Bearer ${token}`;
+    if (body !== undefined) headers['content-type'] = 'application/json';
+    if (prefer) headers.prefer = prefer;
+
     const r = await pedir(`${SUPABASE_URL}/rest/v1/${caminho}`, {
       method,
       headers,
@@ -310,7 +404,13 @@ export async function req(caminho, { method = 'GET', body, prefer } = {}) {
     };
   } catch (e) {
     if (e instanceof SemRede) return { ok: false, status: 0, dados: null, error: 'sem conexao' };
-    throw e;
+    // NADA sai daqui como excecao. `req` e' a fronteira de rede do jogo e
+    // promete `{ok, error}` — deixar uma escapar obriga CADA chamador a se
+    // guardar, e os do topo de uma pagina nao se guardam: a excecao mata o
+    // modulo antes do desenho e a tela fica parada, sem erro visivel. Aqui ela
+    // vira uma resposta ruim, que e' o que todo chamador ja' sabe tratar.
+    console.warn('[supabase] falha inesperada em', caminho, e);
+    return { ok: false, status: 0, dados: null, error: e?.message || 'falha inesperada' };
   }
 }
 

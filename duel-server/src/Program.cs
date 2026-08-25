@@ -30,7 +30,16 @@ namespace DuelServer
         /// </summary>
         internal static int Executar(string[] args)
         {
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            // As duas linhas de console abaixo (e o `Console.Title` mais adiante)
+            // EXIGEM um console de verdade e lancam sem ele. Desde que o
+            // executavel virou `WinExe` — o jogo nao abre mais janela de terminal
+            // — isso deixou de ser garantido: com dois cliques nao ha' console
+            // nenhum, e a excecao subia ate' o `Motor.Invocar`, que a lia como
+            // "o motor novo quebrou ao subir", punha o motor de castigo e caia
+            // para o embutido. Um enfeite de acentuacao derrubando a atualizacao
+            // do jogo inteiro, na primeira linha executada.
+            try { Console.OutputEncoding = System.Text.Encoding.UTF8; }
+            catch { /* sem console: nao ha' codificacao para ajustar */ }
 
             // Suite do instalador/auto-updater. Vem ANTES de tudo de proposito:
             // nao toca no ocgcore nem precisa dos StreamingAssets, entao roda numa
@@ -72,17 +81,34 @@ namespace DuelServer
 
             bool serve = Array.IndexOf(args, "--serve") >= 0;
 
+            // A condicao era `args.Length == 0`, e isso quebrou no dia em que a
+            // atualizacao passou a reabrir o jogo com `--reaberto`: o executavel
+            // empacotado recebia UM argumento, concluia que nao era o modo --app
+            // e caia no modo de demonstracao. Do lado de quem joga, o sintoma foi
+            // *"o launcher fica travado nessa tela e preciso fechar e abrir de
+            // novo"* — o processo reaberto rodava um duelo de teste no console,
+            // nunca subia o servidor do front, e a janela do navegador ficava
+            // consultando `/__update/status` num servidor que nao existia.
+            //
+            // `--lan`, `--sem-update`, `--no-browser` e `--motor-embutido` tinham
+            // a mesma armadilha esperando: qualquer um deles sozinho no exe
+            // empacotado cairia no mesmo lugar. Por isso a regra passou a ser
+            // sobre o que o argumento SIGNIFICA — modo ou ajuste —, e nao sobre
+            // quantos argumentos vieram.
+            // (a regra mora em `EhModoApp`, para poder ser provada em teste —
+            //  `Main` nao e' chamavel de fora)
+
             // --app: o jogo inteiro num processo so' (duelo + front + navegador),
             // que e' o modo do executavel distribuido. Sem Node, sem launcher.
             //
             // Com payload embutido e sem argumento nenhum, --app e' o padrao: quem
             // recebeu o arquivo vai dar dois cliques, nao abrir um terminal.
-            bool app = Array.IndexOf(args, "--app") >= 0
-                       || (args.Length == 0 && Payload.Exists);
+            bool app = EhModoApp(args, Payload.Exists);
             string appRoot = null;
             if (app)
             {
-                Console.Title = "Classic Duels";
+                try { Console.Title = "Classic Duels"; }
+                catch { /* sem console: nao ha' titulo (ver o comentario do OutputEncoding) */ }
                 Log.Info("=== Classic Duels ===");
                 appRoot = Payload.EnsureExtracted() ?? FindProjectRoot();
                 if (appRoot == null)
@@ -157,6 +183,7 @@ namespace DuelServer
                 // ar nao pode impedir ninguem de jogar o que ja tem instalado.
                 // `--sem-update` pula (util pra depurar o front sem rede nenhuma).
                 bool temUpdate = false;
+                bool semConexao = false;
                 if (Payload.Exists && Array.IndexOf(args, "--sem-update") < 0)
                 {
                     temUpdate = Update.UpdateService.Checar(appRoot, TimeSpan.FromSeconds(8));
@@ -165,6 +192,16 @@ namespace DuelServer
                     // jogo sem trocar o exe deixa os dois fora de sincronia.
                     if (Update.UpdateService.InstaladorDesatualizado)
                         Log.Info("ha' uma versao nova do proprio Classic Duels.exe");
+
+                    // NAO ALCANCOU o servidor. Ate' 23/08/2026 isto era ignorado e o
+                    // jogo abria com o que tinha no disco ("offline nunca trava o
+                    // jogo"). A regra mudou de proposito: praticamente tudo que o
+                    // jogo faz — login, carteira, decks, adversarios, trilha — mora
+                    // no Supabase, entao entrar sem rede so' entregava um jogo vazio
+                    // com cara de quebrado. Agora ele para na tela de atualizacao,
+                    // que reconsulta sozinha ate' a rede voltar.
+                    semConexao = Update.UpdateService.Situacao == Update.UpdateService.Estado.Indisponivel;
+                    if (semConexao) Log.Warn("sem conexao — o jogo espera na tela de atualizacao");
                 }
 
                 bool subiu = WebServer.Run(streamingAssets,
@@ -173,13 +210,31 @@ namespace DuelServer
                     extraUrl: frontBindUrl,
                     onReady: () =>
                     {
+                        // O jogo nao tem mais janela de terminal, e era ela o botao
+                        // de fechar. Quem diz que o jogo ainda esta' na tela e' a
+                        // batida das paginas (`web/js/vivo.js`); parou de bater,
+                        // fechou. So' aqui, no modo --app: em desenvolvimento o
+                        // duel-server e' um processo a parte que ninguem manda sair.
+                        WebServer.VigiarAJanela();
+
                         if (lan) ImprimeEnderecosLan();
                         if (Array.IndexOf(args, "--no-browser") >= 0) return;
                         // A porta pode NAO ser a 8080: se ela estava ocupada por
                         // outro programa, o servidor andou para a proxima. Abrir
                         // a URL fixa levaria o jogador ao programa do outro.
                         string baseFront = (WebServer.UrlFront ?? FrontUrl).Replace("://+:", "://localhost:");
-                        AbrirNavegador(baseFront + (temUpdate ? "web/atualizando.html" : "web/index.html"));
+                        // A tela de atualizacao tambem e' a sala de espera de quem
+                        // esta' sem conexao: ela nao tem mais saida para a home.
+                        string alvo = baseFront
+                            + (temUpdate || semConexao ? "web/atualizando.html" : "web/index.html");
+
+                        // Reaberto PELA propria atualizacao: ja' existe uma janela do
+                        // jogo na tela — a que mostrou a barra de progresso — e ela
+                        // volta sozinha para a home assim que este processo responder
+                        // "tudo em dia". Abrir outra daria DUAS copias do jogo, que e'
+                        // exatamente o que foi relatado ("2 exe abrindo apos att").
+                        if (Array.IndexOf(args, "--reaberto") >= 0) { EsperarAJanelaDeAntes(alvo); return; }
+                        AbrirNavegador(alvo);
                     });
 
                 // Nao subiu: ate' agora o processo saia com 0 e a janela fechava
@@ -365,6 +420,59 @@ namespace DuelServer
             // nao pelo statline impresso no cards.cdb.
             if (Array.IndexOf(args, "--test-atk-vivo") >= 0)
                 return TestAtkVivo.Run(streamingAssets);
+
+            // A Invocacao-Virar. Ela nao emite MSG_POS_CHANGE — quem avisa e' o
+            // MSG_FLIPSUMMONING —, entao a virada acontecia no motor e a tela
+            // ficava parada, com a carta ainda de costas.
+            // As magias de TRAVA (as Espadas). Elas nao entravam em regra
+            // nenhuma — nem a `category` do banco as classifica (vem 0) —, entao
+            // o NPC as carregava a partida toda enquanto apanhava.
+            // "O NPC sabe usar as cartas deste deck?" — a varredura que responde
+            // por MEDIDA em vez de por leitura do NpcBrain (ver Cobertura.cs).
+            {
+                int i = Array.IndexOf(args, "--cobertura");
+                if (i >= 0)
+                    return Cobertura.Run(streamingAssets, i + 1 < args.Length ? args[i + 1] : null);
+            }
+
+            // O pacote de SUPORTE do deck do Panik: reforco permanente, enterrar
+            // para reanimar, e o blefe das cartas viradas.
+            // COM O QUE o NPC paga: o custo que aceita a mao OU o campo, e que
+            // fazia ele entregar o unico corpo em jogo para comprar 1 carta.
+            // As MAGIAS DE CAMPO, lidas do Lua da propria carta em vez de uma
+            // tabela escrita a mao — e a decisao pela DIFERENCA entre os dois
+            // lados, porque magia de campo vale para os dois.
+            // Quando o jogo se fecha sozinho — a batida que substituiu a janela
+            // de terminal como botao de fechar.
+            // O CORPO CONDENADO (Instant/Ready Fusion): nao ataca e morre na End
+            // Phase, entao e' o tributo mais barato da mesa e nao conta como campo.
+            // O pacote CAOS do Yugi: escolher o ritual que ACORDA a carta parada
+            // na mao, e baixar a que vale mais em campo do que na mao.
+            if (Array.IndexOf(args, "--test-caos") >= 0)
+                return TestCaos.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-derrota") >= 0)
+                return TestDerrota.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-condenado") >= 0)
+                return TestCondenado.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-vivo") >= 0) return TestVivo.Run();
+
+            if (Array.IndexOf(args, "--test-campos") >= 0)
+                return TestCampos.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-custo") >= 0)
+                return TestCusto.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-panik") >= 0)
+                return TestPanik.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-trava") >= 0)
+                return TestTrava.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-flip") >= 0)
+                return TestFlip.Run(streamingAssets);
 
             if (Array.IndexOf(args, "--test-armory") >= 0)
                 return TestArmory.Run(streamingAssets);
@@ -590,6 +698,74 @@ namespace DuelServer
         /// de navegador. Sem Edge/Chrome instalado (raro no Windows 11, onde o
         /// Edge vem de fábrica), cai para o navegador padrão do sistema.
         /// </summary>
+        /// <summary>
+        /// Quanto o boot reaberto espera pela janela que ja' estava aberta antes de
+        /// concluir que ela sumiu. A tela de atualizacao consulta
+        /// `/__update/status` a cada 500 ms, entao qualquer valor acima de um par
+        /// de segundos e' folga — o que nao pode e' ser CURTO: desistir cedo abre a
+        /// segunda janela, que e' justamente o defeito que isto conserta.
+        /// </summary>
+        static readonly TimeSpan EsperaDaJanelaDeAntes = TimeSpan.FromSeconds(6);
+
+        /// <summary>
+        /// Boot vindo de `--reaberto` (a atualizacao fechou e reabriu o jogo).
+        ///
+        /// A janela do navegador que mostrou a barra de progresso continua aberta e
+        /// vai sozinha para a home quando este processo responder "tudo em dia" —
+        /// abrir outra janela aqui daria DUAS copias do jogo na tela, que foi o
+        /// relato. Entao nao se abre nada: espera-se um pouco e, SO' SE ninguem
+        /// aparecer, abre-se a janela (o jogador pode ter fechado a tela de
+        /// atualizacao enquanto ela rodava — sem esta rede o jogo reabriria
+        /// invisivel, com o servidor de pe' e nenhuma janela).
+        ///
+        /// Em segundo plano de proposito: o `onReady` roda antes do laco de
+        /// requisicoes, entao esperar aqui seguraria justamente as respostas que
+        /// estamos esperando chegar.
+        /// </summary>
+        private static void EsperarAJanelaDeAntes(string url)
+        {
+            Log.Info("reaberto pela atualizacao — usando a janela que ja' estava aberta");
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                var relogio = System.Diagnostics.Stopwatch.StartNew();
+                while (relogio.Elapsed < EsperaDaJanelaDeAntes)
+                {
+                    if (WebServer.Atendidas > 0) return;   // ela esta' viva: nada a fazer
+                    System.Threading.Thread.Sleep(200);
+                }
+                Log.Warn("a janela anterior nao respondeu — abrindo uma nova");
+                AbrirNavegador(url);
+            });
+        }
+
+        /// <summary>
+        /// Argumentos que NAO escolhem um modo: eles ajustam o modo ja' escolhido.
+        /// Um executavel empacotado que receba SO' estes continua sendo `--app`,
+        /// que e' o que ele e' quando alguem da' dois cliques nele.
+        /// </summary>
+        static readonly string[] MODIFICADORES =
+        {
+            "--reaberto",        // a atualizacao reabriu o jogo (nao abre 2a janela)
+            "--lan",             // escuta em todas as interfaces (app mobile)
+            "--sem-update",      // pula a checagem
+            "--no-browser",      // nao abre o navegador
+            "--motor-embutido",  // forca o motor que veio dentro do exe (casca)
+        };
+
+        /// <summary>
+        /// Este processo e' o JOGO (`--app`)?
+        ///
+        /// Explicito pelo `--app`, ou implicito: um executavel COM PAYLOAD que so'
+        /// recebeu modificadores e' alguem dando dois cliques no arquivo.
+        ///
+        /// Internal, e nao um `if` solto dentro do `Main`, para ter teste: `Main`
+        /// nao e' chamavel de fora, e esta decisao erra CALADA — o processo sobe,
+        /// roda outra coisa, e a unica pista e' a primeira linha do log.
+        /// </summary>
+        internal static bool EhModoApp(string[] args, bool temPayload) =>
+            Array.IndexOf(args, "--app") >= 0
+            || (temPayload && args.All(MODIFICADORES.Contains));
+
         private static void AbrirNavegador(string url)
         {
             Console.WriteLine();

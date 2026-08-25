@@ -444,6 +444,18 @@ namespace DuelServer
             // Voltar para a versao anterior. Mesmas travas do `aplicar`: e' o
             // mesmo tipo de operacao (trocar os arquivos do jogo em massa), so'
             // que na outra direcao.
+            //
+            // NENHUMA TELA CHAMA ISTO desde 23/08/2026: o botao "voltar para a
+            // versao anterior" saiu de `web/atualizando.html` pela mesma razao
+            // que o "jogar sem atualizar" — voltar e' ficar para tras, e cliente
+            // parado numa versao velha e' o defeito mais caro deste projeto.
+            //
+            // A ROTA fica, e a diferenca importa: ela nao e' uma opcao oferecida
+            // a quem joga, e' a alavanca de quem esta' consertando um Release
+            // publicado quebrado (um POST de localhost, na mao). O caminho
+            // automatico para o caso comum ja' existe noutro lugar e nao passa
+            // por aqui: a casca reverte sozinha um MOTOR que nao sobe
+            // (`Estagio.Reverter`).
             if (resto == "restaurar")
             {
                 if (!req.IsLocal) { Status(res, 403, "403"); return true; }
@@ -454,6 +466,18 @@ namespace DuelServer
                     return true;
                 }
                 Json(res, DuelServer.Update.UpdateService.Restaurar());
+                return true;
+            }
+
+            // Tentar a checagem de novo sem reabrir o jogo. E' a UNICA saida da
+            // tela quando nao ha' conexao — desde que atualizar virou obrigatorio,
+            // ficar sem rede nao devolve mais o jogador para a home.
+            if (resto == "rechecar")
+            {
+                if (!req.IsLocal) { Status(res, 403, "403"); return true; }
+                if (req.HttpMethod != "POST") { Status(res, 405, "405"); return true; }
+                DuelServer.Update.UpdateService.Rechecar(TimeSpan.FromSeconds(8));
+                Json(res, DuelServer.Update.UpdateService.Snapshot());
                 return true;
             }
 

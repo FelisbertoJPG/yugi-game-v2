@@ -649,37 +649,16 @@ namespace DuelServer
             [70828912] = new(0, 0, 0),                 // Premature Burial
         };
 
-        /// <summary>
-        /// MAGIA DE CAMPO que reforça os MEUS: a raça que ganha e quanto.
-        ///
-        /// Mesma razão de a tabela de equipamentos existir — o bônus mora no Lua
-        /// e não há de onde lê-lo. Aqui a tabela é mais necessária ainda: uma
-        /// magia de campo é global, então ativar a errada reforça o adversário
-        /// junto. Sem saber quem ganha, o certo é NÃO ativar.
-        ///
-        /// `Raca` é uma máscara: Mountain pega Dragão, Alado e Trovão de uma vez.
-        /// </summary>
-        static readonly Dictionary<uint, Equipamento> CAMPOS = new()
-        {
-            // Mountain — +200 ATK/DEF para Dragão/Alado/Trovão. É o campo do deck
-            // de Harpias da Mai: pega as Harpie Lady e o Pet Dragon juntos.
-            [50913601] = new(200, R_DRAGON | R_WINGEDBEAST | R_THUNDER, 0),
+        // A tabela `CAMPOS` saiu daqui em 23/08/2026. Ela dizia quem cada Magia
+        // de Campo reforca e quanto, escrita a mao, e tinha TRES entradas — das
+        // seis magias de campo basicas da Lista 1 o NPC usava duas, e Forest,
+        // Yami, Sogen e Wasteland ficavam mortas na mao para sempre.
+        //
+        // Quem responde agora e' o Lua da propria carta (`BonusDeCampo`), como ja'
+        // acontece com compra, busca, destruicao e trava. Manter as duas fontes
+        // seria o erro que este projeto ja' pagou uma vez (`chancesDe` x
+        // `chancesDoPacote`): elas se desencontram no primeiro campo novo.
 
-            // Umi — +200 para Peixe/Serpente-Marinha/Trovão/Aqua (e −200 para
-            // Máquina/Piro, que a tabela não modela: ela só responde "quem dos
-            // MEUS ganha"). É o campo do deck do Mako, e a falta dela aqui era
-            // cara de um jeito difícil de ver: o deck roda 3 Umi MAIS 3
-            // Terraforming para achá-la, o Legendary Fisherman só fica protegido
-            // com ela em campo — e o NPC nunca a ativava, porque a tabela só
-            // conhecia a Mountain. A busca funcionava, a carta chegava à mão e
-            // ficava lá.
-            [UMI] = new(200, R_FISH | R_SEASERPENT | R_THUNDER | R_AQUA, 0),
-
-            // A Legendary Ocean — o bônus dela é por ATRIBUTO (todo WATER +200),
-            // não por raça, e por isso alcança o Legendary Fisherman, que é
-            // Warrior e fica de fora da Umi.
-            [295517] = new(200, 0, A_WATER),
-        };
 
 
         readonly DatabaseManager _cards;
@@ -701,9 +680,70 @@ namespace DuelServer
         /// pelo statline impresso e ignorava equipamento e magia de campo.
         /// </summary>
         readonly Func<int, int, (int atk, int def)?> _statsEmCampo;
+
+        /// <summary>
+        /// Esta zona tem um corpo CONDENADO — Instant/Ready Fusion: nao pode
+        /// atacar e morre na End Phase deste turno.
+        ///
+        /// Sem quem informe, ninguem e' condenado: e' o comportamento de antes, e
+        /// e' o certo para os testes de decisao isolada, que montam o campo com
+        /// codigos e nao tem zona de verdade.
+        /// </summary>
+        readonly Func<int, int, bool> _corpoCondenado;
         readonly Action<string> _log;
 
         const int POS_ATAQUE = 0x1, POS_DEFESA = 0x4, POS_DEFESA_VIRADA = 0x8;
+
+        /// <summary>
+        /// Os DOIS bits de "carta com a face para baixo" (0x2 virada em ataque,
+        /// 0x8 virada em defesa). Testar so' o 0x8 deixaria de fora a virada em
+        /// ataque, que existe — e' o que a Invocacao-Virar desfaz.
+        /// </summary>
+        const int POS_VIRADA = 0x2 | 0x8;
+
+        /// <summary>Bit de EQUIPAMENTO no `type` do `cards.cdb` (o mesmo do ocgcore).</summary>
+        const uint TYPE_EQUIP = 0x40000;
+
+        /// <summary>Bit de MAGIA DE CAMPO no `type` do `cards.cdb`.</summary>
+        const uint TYPE_CAMPO = 0x80000;
+
+        /// <summary>
+        /// A ultima mao ja' registrada. `Decide` roda VARIAS vezes na mesma Main
+        /// Phase (a cada jogada ele e' perguntado de novo), e repetir a mesma
+        /// linha a cada volta afogaria justamente as linhas de decisao que ela
+        /// existe para explicar.
+        /// </summary>
+        string _maoJaLogada = "";
+
+        /// <summary>
+        /// Escreve a mao do NPC no log — codigos, com o statline de quem e'
+        /// monstro, porque o motor nao conhece o nome das cartas (o nome mora no
+        /// `ygo-data`, que e' do front). "62121 M4 920/1930" ja' diz o suficiente
+        /// para reconhecer a carta ao lado das outras linhas `[npc]`.
+        /// </summary>
+        void LogarMao(int me)
+        {
+            var mao = _handOf(me);
+            if (mao.Count == 0)
+            {
+                // Mao vazia e' informacao, nao ausencia dela: e' a resposta
+                // completa para "por que ele nao jogou nada".
+                if (_maoJaLogada != "-") { _maoJaLogada = "-"; _log("mao: vazia"); }
+                return;
+            }
+
+            var partes = mao.Select(c =>
+            {
+                var st = _cards.Stats(c);
+                return st.IsMonster ? $"{c} Nv{st.Level} {st.AtkValue}/{st.DefValue}"
+                     : $"{c} [{(st.IsTrap ? "armadilha" : st.IsSpell ? "magia" : "?")}]";
+            }).ToList();
+
+            string linha = $"mao ({mao.Count}): " + string.Join(" | ", partes);
+            if (linha == _maoJaLogada) return;
+            _maoJaLogada = linha;
+            _log(linha);
+        }
 
         public NpcBrain(DatabaseManager cards,
                         Func<int, IReadOnlyList<uint>> fieldOf,
@@ -716,9 +756,11 @@ namespace DuelServer
                         Func<int, int> lpOf = null,
                         Func<int, IReadOnlyList<(uint code, int pos, int seq)>> todoFieldPosOf = null,
                         Func<int, IReadOnlyList<uint>> setStOf = null,
-                        Func<int, int, (int atk, int def)?> statsEmCampoOf = null)
+                        Func<int, int, (int atk, int def)?> statsEmCampoOf = null,
+                        Func<int, int, bool> corpoCondenadoOf = null)
         {
             _cards = cards;
+            _corpoCondenado = corpoCondenadoOf ?? ((_, _) => false);
             _fieldOf = fieldOf;
             _log = log ?? (_ => { });
             _handOf = handOf ?? (_ => Array.Empty<uint>());
@@ -840,7 +882,11 @@ namespace DuelServer
             (uint code, int pos, int seq, int valor) menor = (0, 0, -1, int.MaxValue);
             foreach (var m in AbertosDe(me))
             {
-                int v = ValorNaBatalha(m.code, m.pos, me, m.seq);
+                // Pelo `ValorDoMeuCorpo`, e nao pelo `ValorNaBatalha` cru: e' ele
+                // que sabe que um corpo CONDENADO custa zero. Medir aqui de um
+                // jeito e no `DecideSelect` de outro faz a regra autorizar
+                // pensando num corpo e a selecao pagar com outro.
+                int v = ValorDoMeuCorpo(me, m.code, m.seq);
                 if (v < menor.valor) menor = (m.code, m.pos, m.seq, v);
             }
             return menor.code == 0 ? (0, 0, -1, 0) : menor;
@@ -852,6 +898,10 @@ namespace DuelServer
         /// motor. Mesmo conjunto que o `_fieldOf` de sempre devolve; a diferença
         /// é só carregar a zona junto.
         /// </summary>
+        /// <summary>Os meus corpos CONDENADOS (Instant/Ready Fusion), com a zona.</summary>
+        List<(uint code, int pos, int seq)> ZonasCondenadas(int player) =>
+            _todoFieldPosOf(player).Where(m => _corpoCondenado(player, m.seq)).ToList();
+
         List<(uint code, int pos, int seq)> AbertosDe(int player) =>
             _todoFieldPosOf(player)
                 .Where(m => (m.pos & (POS_ATAQUE | POS_DEFESA)) != 0 && _cards.Stats(m.code).IsMonster)
@@ -1000,6 +1050,25 @@ namespace DuelServer
         {
             int foe = 1 - me;
 
+            // Main Phase: nao ha' ataque pendente. A marca do atacante e' de UMA
+            // pergunta so' (a escolha de alvo que vem logo depois da declaracao);
+            // sobrando, ela faria uma remocao de Main Phase mirar o alvo "que eu
+            // venco" em vez do maior — e uma remocao quer justamente o maior.
+            _atacanteAtk = -1;
+
+            // O que ele TEM na mao, antes de decidir o que fazer com isso.
+            //
+            // Toda linha `[npc] ...` deste arquivo diz o QUE ele decidiu e POR
+            // QUE; nenhuma dizia com o que ele estava decidindo. Sem isso, ler o
+            // log de um turno em que o NPC "nao fez nada" nao distingue as duas
+            // explicacoes possiveis — a mao nao tinha jogada, ou tinha e a regra
+            // nao a viu —, que e' justamente a pergunta de quem desconfia do
+            // cerebro. Reconstruir a mao de fora tambem nao da': ela nunca chega
+            // ao front (o `Projetar` manda `code: 0`), e replicar o embaralhamento
+            // pelo seed exigiria os dois decks na ordem exata em que foram
+            // enviados, que o log tambem nao guarda.
+            LogarMao(me);
+
             // Alvo do Mausoléu que não foi consumido: a ativação foi negada, ou
             // o motor nunca chegou a perguntar quem sobe. Chegar aqui significa
             // que a jogada acabou — deixar a marca de pé faria a PRÓXIMA escolha
@@ -1062,11 +1131,37 @@ namespace DuelServer
                 bool podeReanimar = _handOf(me).Concat(_faceUpStOf(me)).Concat(_setStOf(me))
                     .Any(c => Perfil(c).ReanimaDoCemiterio);
 
-                if (semJogada)
+                // O PRECO PODE SER UM CORPO EM JOGO. A Dark Factory of More
+                // Production cobra "1 monstro da MAO OU DO CAMPO", e o `Descarta`
+                // acima diz so' metade da verdade. Sem monstro na mao para pagar,
+                // o custo sai do campo — e ai comprar 1 carta custa o corpo que
+                // esta' segurando o turno. O relato foi exatamente esse: *"tirando
+                // o unico monstro que controla pra comprar 1 card"*.
+                //
+                // A trava e' so' para quem TEM campo a perder: com o campo vazio a
+                // carta continua sendo a jogada certa (nao ha' corpo para gastar,
+                // e o custo sairia da mao de qualquer jeito).
+                // Conta os monstros com `_todoFieldPosOf`, e nao com
+                // `QtdMonstros`: este ultimo le' `_fieldOf`, que so' devolve o que
+                // esta' com a FACE PARA CIMA. E' justamente o corpo SETADO que
+                // corre perigo aqui — para o resto do cerebro ele nem existe
+                // (`semJogada` acima da' verdadeiro com o campo "vazio"), a carta
+                // e' ativada, e o custo leva embora a unica parede da mesa. Num
+                // deck que seta o tempo todo, como o do Panik, esse e' o caso
+                // COMUM, nao o raro.
+                int corposMeus = _todoFieldPosOf(me).Count(m => _cards.Stats(m.code).IsMonster);
+                if (Perfil(compraCara.code).CustoPodeVirDoCampo
+                    && corposMeus >= 1
+                    && !_handOf(me).Any(c => _cards.Stats(c).IsMonster))
+                {
+                    _log($"guarda {compraCara.code}: sem monstro na mao, o custo sairia do CAMPO — " +
+                         $"comprar 1 carta nao vale o(s) {corposMeus} corpo(s) que seguram o turno");
+                }
+                else if (semJogada)
                     return new Play("activate", compraCara.index,
                         $"compra com descarte ({compraCara.code}): sem monstro em campo nem " +
                         "invocacao na mao, parado eu nao faco nada mesmo");
-                if (gordoNaMao && podeReanimar)
+                else if (gordoNaMao && podeReanimar)
                     return new Play("activate", compraCara.index,
                         $"compra com descarte ({compraCara.code}): o corpo grande preso na mao " +
                         "vai para o cemiterio e volta pela reanimacao que eu tenho");
@@ -1107,6 +1202,29 @@ namespace DuelServer
                     return new Play("setspell", trap.index, $"seta armadilha {trap.code} (mantem zona p/ magias)");
             }
 
+            // 2.5 BAIXAR A MAGIA QUE VALE MAIS EM CAMPO DO QUE NA MÃO.
+            //
+            //     A Chaos Scepter Blast é o caso: sem um Mago Nv8+ em campo ela
+            //     não pode ser ativada, e na mão uma carta parada é carta morta.
+            //     Baixada, ela vira uma armadilha de verdade — destruída pelo
+            //     oponente na zona de magia, ela traz do DECK um dos magos do
+            //     Caos, de graça. É o próprio texto dela que diz isso
+            //     (`SalvaSeDestruida`), e a diferença entre as duas situações é a
+            //     ZONA: na mão, destruída, ela não faz nada.
+            //
+            //     Só quando ela NÃO está ativável agora — havendo o corpo, ativar
+            //     e banir uma carta do campo dele vale mais que a espera. E com a
+            //     mesma folga de zona da armadilha, pelo mesmo motivo: magia
+            //     recicla o slot, e encher as cinco zonas trava o próprio jogo.
+            var guardaChuva = q.settableST.FirstOrDefault(a =>
+                !EhArmadilha(a.code)
+                && _cards.SalvaSeDestruida(a.code)
+                && !q.activatable.Any(x => x.code == a.code));
+            if (guardaChuva.code != 0 && _stCountOf(me) <= 3)
+                return new Play("setspell", guardaChuva.index,
+                    $"baixa {guardaChuva.code}: parada na mao ela nao faz nada, e na zona de " +
+                    "magia ela poe um corpo em campo se ele a destruir");
+
             // Diagnóstico: "o NPC parou de setar armadilha" foi relatado em duelo
             // e a regra acima está certa (há teste). Quando ela NÃO dispara, o
             // motivo é sempre um destes dois — e sem registrar isso a próxima
@@ -1128,6 +1246,19 @@ namespace DuelServer
 
             // 5. Ritual (QUALQUER magia-ritual) — tributa monstro de nível alto (pra
             //    reviver depois com o Reborn). Reconhecido por tipo, não por ID.
+            //
+            //    QUAL ritual, quando há mais de um: o que põe em campo o corpo que
+            //    ACORDA uma carta parada na mão. Antes não havia critério nenhum —
+            //    `AtivavelSe` devolve o primeiro da lista —, e foi assim que o
+            //    relato aconteceu: com a Chaos Scepter Blast na mão (que exige um
+            //    Mago Nv8+ e bane 1 carta do campo com a face para baixo), o NPC
+            //    tinha o Magician of Black Chaos (Nv8 MAGO) e o Black Luster
+            //    Soldier (Nv8 GUERREIRO) e escolheu o Guerreiro, de 3000 de ATK.
+            //    Corpo maior, combo morto: em vez de tirar DUAS cartas do campo do
+            //    jogador, tirou uma.
+            var acordar = RitualQueAcorda(q, me);
+            if (acordar.HasValue) return acordar.Value;
+
             var ritual = AtivavelSe(q, EhRitual);
             if (ritual.code != 0)
                 return new Play("activate", ritual.index,
@@ -1282,49 +1413,84 @@ namespace DuelServer
                 }
             }
 
-            // 5.356 MAGIA DE CAMPO que reforça os MEUS (tabela `CAMPOS`).
+            // 5.356 MAGIA DE CAMPO — quem ela reforça, lido do LUA DELA.
             //
-            //   Magia de campo é GLOBAL: ela vale para os dois lados. Por isso a
-            //   regra não é "tenho uma, ativo" — é "tenho monstro em campo de
-            //   uma raça que ELA reforça". Sem isso o NPC ativaria a Mountain
-            //   para dar +200 ao Dragão do adversário.
+            //   Magia de campo é GLOBAL: vale para os DOIS lados. Por isso a regra
+            //   nunca foi "tenho uma, ativo" — e por isso ela também não pode ser
+            //   "algum monstro meu ganha": a Mountain com um Dragão meu e dois
+            //   dele reforça mais o outro lado do que o meu, e eu ainda pago a
+            //   carta por isso. A conta é a DIFERENÇA.
             //
-            //   Não confere se já existe campo ativo: se for a MESMA carta o
-            //   motor nem oferece; se for outra, trocar é justamente o que se
-            //   quer (a que estava ali era do outro, ou pior que esta).
+            //   Quem diz o que a carta faz é o Lua dela (`BonusDeCampo`), não uma
+            //   tabela nossa. A tabela existiu e tinha três entradas — Mountain,
+            //   Umi e A Legendary Ocean —, e das seis magias de campo básicas da
+            //   Lista 1 o NPC usava duas: Forest, Yami, Sogen e Wasteland ficavam
+            //   mortas na mão para sempre, sem um aviso.
+            //
+            //   Ler o Lua trouxe de graça o que a tabela não sabia dizer: a
+            //   PENALIDADE. A Umi tira 200 de Máquina e Piro, o Yami tira 200 de
+            //   Fada — e agora isso entra na conta dos dois lados.
+            //
+            //   Script que não dá para ler devolve `Conhecido == false`, e aí a
+            //   carta simplesmente não é ativada. É o mesmo silêncio seguro da
+            //   tabela: errar para menos deixa uma carta parada, errar para mais
+            //   reforça o adversário.
+            //
+            //   Não confere se já existe campo ativo: se for a MESMA carta o motor
+            //   nem oferece; se for outra, trocar é justamente o que se quer (a que
+            //   estava ali era do outro, ou pior que esta).
             {
-                var campo = AtivavelSe(q, c => CAMPOS.ContainsKey(c) && CAMPOS[c].Bonus > 0);
+                var campo = AtivavelSe(q, c => _cards.Stats(c).IsSpell
+                                            && (_cards.Stats(c).Type & TYPE_CAMPO) != 0
+                                            && _cards.CampoDe(c).Conhecido
+                                            && !COM_REGRA_PROPRIA.Contains(c));
                 if (campo.code != 0)
                 {
-                    var cfg = CAMPOS[campo.code];
+                    var bonus = _cards.CampoDe(campo.code);
+                    int Soma(int quem) => MonstrosFaceUp(quem).Sum(c => bonus.Para(_cards.Stats(c)));
 
-                    // Raça OU atributo: a Mountain reforça por RAÇA, A Legendary
-                    // Ocean por ATRIBUTO. Ler só a raça deixava a segunda de fora
-                    // em silêncio — e é justamente ela que alcança o Legendary
-                    // Fisherman, que é Warrior.
-                    int beneficiados = MonstrosFaceUp(me).Count(c =>
-                    {
-                        var st = _cards.Stats(c);
-                        return (cfg.Raca != 0 && (st.Race & cfg.Raca) != 0)
-                               || (cfg.Atributo != 0 && (st.Attribute & cfg.Atributo) != 0);
-                    });
+                    int meu = Soma(me), dele = Soma(foe);
 
                     // O GANHO NÃO É SÓ ATK. Uma carta que conta como "Umi" liga a
                     // proteção do Legendary Fisherman — ele passa a não poder ser
                     // alvo de ataque. Medir só o bônus faria o NPC guardar a Umi
-                    // com o Fisherman em campo, que é o caso em que ela mais vale:
-                    // o Fisherman é Warrior e não ganha ATK nenhum dela.
+                    // com o Fisherman em campo, que é quando ela mais vale: ele é
+                    // Warrior e não ganha um ponto de ATK dela.
                     int protegidos = CONTAM_COMO_UMI.Contains(campo.code)
                         ? MonstrosFaceUp(me).Count(c => IMUNES_A_MAGIA_COM_UMI.Contains(c))
                         : 0;
 
-                    if (beneficiados > 0 || protegidos > 0)
-                        return new Play("activate", campo.index,
-                            $"magia de campo {campo.code}: +{cfg.Bonus} em {beneficiados} monstro(s) meu(s)" +
-                            (protegidos > 0 ? $" e protege {protegidos}" : ""));
+                    // JA' TENHO CAMPO EM PE'? Ativar outra magia de campo manda a
+                    // que esta' la' para o cemiterio — trocar por uma que rende o
+                    // MESMO (ou menos) e' jogar uma carta fora.
+                    //
+                    // Nao e' hipotese: o comentario antigo aqui dizia que "se for a
+                    // MESMA carta o motor nem oferece", e o duelo de `--test-campos`
+                    // mostrou o contrario — com tres Forest na mao ele trocava
+                    // Forest por Forest, turno apos turno. So' apareceu agora
+                    // porque a regra passou a valer para todas as magias de campo,
+                    // e nao para as tres de uma tabela.
+                    int deQuemJaEsta = _faceUpStOf(me)
+                        .Where(c => (_cards.Stats(c).Type & TYPE_CAMPO) != 0)
+                        .Select(c => MonstrosFaceUp(me).Sum(m => _cards.CampoDe(c).Para(_cards.Stats(m)))
+                                   - MonstrosFaceUp(foe).Sum(m => _cards.CampoDe(c).Para(_cards.Stats(m))))
+                        .DefaultIfEmpty(int.MinValue)
+                        .Max();
 
-                    _log($"guarda a magia de campo {campo.code}: nenhum monstro meu " +
-                         "ganha nem fica protegido — ativaria so' para o outro lado");
+                    if (deQuemJaEsta != int.MinValue && meu - dele <= deQuemJaEsta)
+                    {
+                        _log($"guarda a magia de campo {campo.code}: a que ja' esta' em campo " +
+                             $"rende {deQuemJaEsta:+#;-#;0} e esta renderia {meu - dele:+#;-#;0} — " +
+                             "trocar seria perder uma carta");
+                    }
+                    else if ((meu > 0 && meu > dele) || protegidos > 0)
+                        return new Play("activate", campo.index,
+                            $"magia de campo {campo.code}: {meu:+#;-#;0} para mim contra " +
+                            $"{dele:+#;-#;0} para ele" +
+                            (protegidos > 0 ? $" e protege {protegidos}" : ""));
+                    else
+                        _log($"guarda a magia de campo {campo.code}: {meu:+#;-#;0} para mim contra " +
+                             $"{dele:+#;-#;0} para ele — nao compensa a carta");
                 }
             }
 
@@ -1483,9 +1649,159 @@ namespace DuelServer
                 }
                 _log($"guarda {remST.code} — {alvoSt.porque}");
             }
-            var burn = AtivavelSe(q, BURN.Contains);
+            // 5.55 TRAVA — a magia que prende o campo DELE (as Espadas).
+            //
+            // Faltava inteira: as duas Espadas nao entravam em regra nenhuma e
+            // ficavam na mao a partida toda. O relato foi literal — *"ele ta
+            // perdendo e mesmo assim nao usa a Swords of Concealing Light"*. Nao
+            // era um criterio errado, era a ausencia de qualquer criterio: nem a
+            // `category` do banco as classifica (vem 0 nas duas), entao nenhuma
+            // das regras por EFEITO as via, e nenhuma lista por id as citava.
+            //
+            // O criterio e' a mesma `ameacaReal` que o resto do cerebro usa: ele
+            // tem monstro que o meu campo NAO supera. E' exatamente a situacao
+            // que a trava resolve — o ataque dele para por dois ou tres turnos e
+            // eu ganho tempo para achar corpo. Com o campo dominado, a carta fica
+            // guardada: travar quem eu ja' venco no combate so' adia o meu
+            // proprio ataque e joga uma carta fora.
+            //
+            // Vem DEPOIS da remocao de proposito. As duas resolvem o mesmo
+            // problema, mas a remocao resolve para sempre e a trava tem prazo —
+            // gastar a trava com um Raigeki na mao seria trocar a solucao pela
+            // pausa.
+            //
+            // LIMITE CONHECIDO, escrito aqui para nao ser redescoberto: a regra
+            // nao le' a CONDICAO da trava, so' o alcance. Uma Insect Barrier
+            // (que so' prende os Insetos dele) sairia contra um campo sem inseto
+            // nenhum. Nao ha' carta assim em deck de NPC hoje, e ler a condicao
+            // seria reimplementar o filtro do Lua do lado de fora — o que este
+            // projeto nao faz. Quem oferece a carta continua sendo o motor.
+            //
+            // O `!IsMonster` e o `!TYPE_EQUIP` nao sao formalidade: o alcance
+            // `(0, LOCATION_MZONE)` tambem aparece em monstro com efeito continuo
+            // (que se poe em campo, nao se "ativa") e no Gravity Axe - Grarl, um
+            // EQUIPAMENTO — e equipamento ja' tem regra propria, que escolhe o
+            // alvo. Duas regras disputando a mesma carta e' como o alvo errado
+            // aparece.
+            var trava = AtivavelSe(q, c =>
+            {
+                var st = _cards.Stats(c);
+                return Perfil(c).Trava && !st.IsMonster && (st.Type & TYPE_EQUIP) == 0
+                       && !COM_REGRA_PROPRIA.Contains(c);
+            });
+            if (trava.code != 0)
+            {
+                if (ameacaReal)
+                    return new Play("activate", trava.index,
+                        $"trava: {trava.code} prende o campo dele — a maior ameaca ({ameaca}) " +
+                        $"supera o meu melhor atacante ({meuMelhor})");
+                _log($"guarda a trava {trava.code}: " +
+                     (oponenteTemMonstro
+                        ? $"meu melhor atacante ({meuMelhor}) ja' supera o campo dele ({ameaca})"
+                        : "o campo dele esta vazio — nao ha' o que travar"));
+            }
+
+            // 5.56 ENTERRAR PARA REANIMAR (Foolish Burial e afins).
+            //
+            // Sozinha e' perda de carta: tira um monstro do deck e nao poe nada em
+            // campo. O valor esta' no PAR — enterrar o corpo grande e trazer de
+            // volta —, entao a condicao e' ter a reanimacao na MAO. Sem ela, o
+            // NPC estaria pagando uma carta para encher o proprio cemiterio.
+            //
+            // Vem depois da regra que POE CORPO (o Premature Burial ja' rodou
+            // acima): com alvo bom no cemiterio o motor ja' oferece a reanimacao,
+            // e reanimar agora vale mais que preparar outra. Sem alvo, o motor nao
+            // a oferece — e e' exatamente ai que enterrar faz sentido.
+            var enterrar = AtivavelSe(q, c => Perfil(c).EnterraDoDeck && !COM_REGRA_PROPRIA.Contains(c));
+            if (enterrar.code != 0)
+            {
+                var reanimacao = _handOf(me).FirstOrDefault(c => Perfil(c).ReanimaDoCemiterio);
+                if (reanimacao != 0)
+                    return new Play("activate", enterrar.index,
+                        $"enterra do deck ({enterrar.code}) para reanimar depois — tenho {reanimacao} na mao");
+                _log($"guarda {enterrar.code}: sem reanimacao na mao, enterrar e' so' perder carta");
+            }
+
+            // 5.57 REFORCO PERMANENTE do meu campo (Yellow Luster Shield, Banner
+            //      of Courage). Ele so' vale com corpo para receber: ativado com o
+            //      campo vazio nao faz nada e ainda ocupa a zona que uma armadilha
+            //      usaria. E' barato e definitivo, entao nao disputa prioridade com
+            //      nada — fica no fim, antes de partir para a batalha.
+            // Magia de CAMPO tem regra propria (5.356) e nao entra aqui: ela vale
+            // para os dois lados, e esta regra so' sabe medir o meu.
+            var reforco = AtivavelSe(q, c => Perfil(c).ReforcoMeuCampo && !COM_REGRA_PROPRIA.Contains(c)
+                                          && (_cards.Stats(c).Type & TYPE_CAMPO) == 0);
+            if (reforco.code != 0)
+            {
+                if (QtdMonstros(me) >= 1)
+                    return new Play("activate", reforco.index,
+                        $"reforco permanente ({reforco.code}): tenho {QtdMonstros(me)} corpo(s) para receber");
+                _log($"guarda {reforco.code}: sem monstro em campo, o reforco nao reforca nada");
+            }
+
+            // 5.58 EMBARALHAR AS MINHAS VIRADAS (Shifting Shadows, Magical Hats).
+            //
+            // Nao muda um ponto de ATK: o que ela faz e' apagar o que o outro lado
+            // ja' sabia sobre qual carta esta' em qual zona — e num deck de cartas
+            // setadas, como o do Panik, e' disso que o duelo vive. Contra o motor
+            // valeria zero; contra gente, que ve' a mesa e lembra, vale.
+            //
+            // Duas jogadas na mesma carta, separadas pela LOCALIZACAO da oferta:
+            //   • da MAO (loc 2) e' po-la em campo — de graca, e so' faz sentido
+            //     com alguma carta virada para esconder;
+            //   • do CAMPO (loc 8) e' o efeito de ignicao, que custa LP. Quantas
+            //     viradas sao precisas quem decide e' o motor (o Lua exige duas),
+            //     entao aqui so' resta a conta que ele nao faz: o custo cabe?
+            var embaralha = AtivavelSe(q, c => Perfil(c).EmbaralhaViradas && !COM_REGRA_PROPRIA.Contains(c));
+            if (embaralha.code != 0)
+            {
+                int viradas = _todoFieldPosOf(me).Count(m => (m.pos & POS_VIRADA) != 0);
+                bool doCampo = embaralha.location == SZONE;
+                bool custoCabe = !Perfil(embaralha.code).PagaLp || _lpOf(me) - 300 >= LP_PISO;
+
+                if (doCampo && custoCabe)
+                    return new Play("activate", embaralha.index,
+                        $"embaralha as minhas {viradas} viradas ({embaralha.code}): ele perde o que sabia da mesa");
+                if (!doCampo && viradas >= 1)
+                    return new Play("activate", embaralha.index,
+                        $"poe {embaralha.code} em campo: tenho {viradas} carta(s) virada(s) para esconder depois");
+                _log($"guarda {embaralha.code}: " +
+                     (doCampo ? $"os 300 LP me deixariam abaixo do piso de {LP_PISO}"
+                              : "nao tenho carta virada nenhuma para esconder"));
+            }
+
+            // A queima que se paga em VIDA PROPRIA. A **Tremendous Fire** tira
+            // 1000 dele e 500 de MIM, e a regra era uma so' — "dano fixo no
+            // oponente, ativa sempre que der". Com 500 de vida o NPC a ativava e
+            // perdia o duelo ali; foi o relato do Panik.
+            //
+            // Nao ha' o que ler no banco: a `category` diz que a carta causa
+            // dano, nunca EM QUEM. Quem sabe e' o Lua dela (`DanoEmMim`), onde
+            // quem ativou e' `tp` e o oponente e' `1-tp`.
+            //
+            // A recusa e' so' contra a MORTE, e nao um piso de LP: queimar e' a
+            // condicao de vitoria de um deck de queima, e um piso o faria parar
+            // de jogar justamente quando esta' na frente. E nem "mas eu levo ele
+            // junto" salva: o Lua aplica os dois danos e SO' DEPOIS o motor
+            // confere o LP (`Duel.RDComplete`), entao os dois chegam a zero na
+            // mesma resolucao e o resultado e' EMPATE — nunca vitoria.
+            //
+            // O filtro entra no criterio, e nao depois dele: com uma Ookazi e
+            // uma Tremendous Fire na mao, recusar a segunda nao pode engolir a
+            // primeira, que nao custa nada.
+            bool BurnSeguro(uint c) => BURN.Contains(c) && _lpOf(me) - _cards.DanoEmMim(c) > 0;
+            var burn = AtivavelSe(q, BurnSeguro);
             if (burn.code != 0)
-                return new Play("activate", burn.index, $"burn: dano fixo no oponente ({burn.code})");
+            {
+                int custo = _cards.DanoEmMim(burn.code);
+                return new Play("activate", burn.index,
+                    $"burn: dano fixo no oponente ({burn.code})" +
+                    (custo > 0 ? $" — os {custo} que ela cobra de mim cabem nos {_lpOf(me)} que eu tenho" : ""));
+            }
+            var burnSuicida = AtivavelSe(q, BURN.Contains);
+            if (burnSuicida.code != 0)
+                _log($"guarda {burnSuicida.code}: ela tira {_cards.DanoEmMim(burnSuicida.code)} de MIM " +
+                     $"e eu tenho {_lpOf(me)} — ativa-la e' perder o duelo");
 
             // 5.6 MAGO DO TEMPO — a moeda. Cara destrói os monstros DELE, coroa
             //     destrói os MEUS e ainda tira LP. É jogada de quem está atrás:
@@ -1888,6 +2204,27 @@ namespace DuelServer
                 return picks;
             }
 
+            // O CORPO QUE O RITUAL DEVE TRAZER, escolhido pela regra 5 — ela ativou
+            // aquele ritual justamente para pôr ESTE monstro em campo (ver
+            // `RitualQueAcorda`). Sem esta linha, a escolha cairia no critério
+            // genérico de maior ATK e traria o Guerreiro de volta, desfazendo a
+            // decisão que acabou de ser tomada.
+            //
+            // Vem DEPOIS do ramo de tributo (`release > 0`): num ritual que cobra
+            // tributos da mão, o monstro desejado também aparece na lista de
+            // custo — e escolhê-lo ali seria pagar com ele.
+            if (escolhaUnica && _proximoRitualCorpo != 0)
+            {
+                uint desejado = _proximoRitualCorpo;
+                var mira = q.choices.FirstOrDefault(c => c.code == desejado);
+                if (mira.code == desejado)
+                {
+                    _proximoRitualCorpo = 0;
+                    _log($"ritual: invoca {desejado}, que e' o corpo que a regra escolheu");
+                    return new List<int> { mira.index };
+                }
+            }
+
             // Alvo do Cocoon of Evolution: o inseto mais FRACO, não o mais forte
             // (o default logo abaixo é para remoção/reborn — o oposto do que o
             // casulo quer). `release==0` de propósito, nunca colide com o
@@ -2036,7 +2373,11 @@ namespace DuelServer
                 var meusEmCampo = q.choices.Where(c => c.controller == me).ToList();
                 if (meusEmCampo.Count >= need)
                 {
-                    foreach (var c in meusEmCampo.OrderBy(c => AmeacaDoAlvo(c)))
+                    // `ValorDoMeuCorpo` e nao `AmeacaDoAlvo`: os dois medem o
+                    // mesmo numero da batalha, mas so' o primeiro sabe que um
+                    // corpo CONDENADO custa zero — e' ele que tem de sair antes
+                    // de qualquer outro.
+                    foreach (var c in meusEmCampo.OrderBy(c => ValorDoMeuCorpo(me, c.code, c.sequence)))
                     {
                         if (picks.Count >= need) break;
                         picks.Add(c.index);
@@ -2044,6 +2385,48 @@ namespace DuelServer
                     _log("custo: paga com o(s) corpo(s) mais barato(s) do meu campo");
                     return picks;
                 }
+            }
+
+            // **O ALVO DO ATAQUE que acabou de ser declarado.**
+            //
+            // A lista aqui e' so' do outro lado e so' da zona de monstro — a
+            // mesma forma de uma remocao —, e por isso ela caia no criterio
+            // generico la' embaixo: *o de maior ATK IMPRESSO*. Para uma remocao
+            // isso esta' certo (tirar da mesa a maior ameaca); para um ataque e'
+            // o avesso, porque quem ataca MORRE na troca ruim.
+            //
+            // O relato foi *"se meu monstro tem uns 3 buff que aumentaram o ATK
+            // dele bastante, o NPC nao enxerga e decide atacar igual com um mais
+            // fraco"*. A `DecideBattle` ja' lia o ATK vivo e ja' recusava a troca
+            // ruim — ela declarava o ataque contra o alvo MAIS FRACO do outro
+            // lado —, e a pergunta seguinte desfazia a decisao: entre um 1500 e
+            // um 1800 equipado ate' 3300, o criterio impresso escolhia o
+            // segundo, e o corpo do NPC morria.
+            //
+            // Criterio: entre os que eu VENCO, o mais forte — tirar da mesa a
+            // maior ameaca que eu consigo tirar. Nao vencendo nenhum (a marca
+            // veio de um ataque DIRETO que virou ataque a monstro, ou o campo
+            // mudou entre as duas perguntas), o mais fraco: o menor prejuizo.
+            //
+            // Carta virada vale 0 aqui (o host mascara o codigo e, sem leitura,
+            // ela nem aparece no campo lido), entao ela e' a ULTIMA entre as
+            // vencivies — o NPC prefere bater no que ele conhece, que e' o que um
+            // humano faria.
+            if (escolhaUnica && _atacanteAtk >= 0
+                && q.choices.All(c => c.location == MZONE && c.controller != me))
+            {
+                int atk = _atacanteAtk;
+                _atacanteAtk = -1;
+                var venciveis = q.choices.Where(c => AmeacaDoAlvo(c) < atk).ToList();
+                var alvo = venciveis.Count > 0
+                    ? venciveis.OrderByDescending(AmeacaDoAlvo).First()
+                    : q.choices.OrderBy(AmeacaDoAlvo).First();
+                _log($"alvo do ataque: bate em {alvo.code} (vale {AmeacaDoAlvo(alvo)}) " +
+                     $"com os {atk} de ATK do atacante — " +
+                     (venciveis.Count > 0
+                        ? $"o mais forte entre os {venciveis.Count} que eu venco"
+                        : "nao venco nenhum dos oferecidos; vai no mais barato"));
+                return new List<int> { alvo.index };
             }
 
             // ALVO EM CAMPO com os DOIS LADOS na mesma lista: isso é REMOÇÃO, e
@@ -2110,6 +2493,52 @@ namespace DuelServer
                 _log($"Mausoleu: {alvo} nao esta' entre os oferecidos — segue o criterio geral");
             }
 
+            // CUSTO QUE ACEITA MAO **OU** CAMPO — e a mao vem primeiro, sempre.
+            //
+            // O relato: *"o oponente esta' tirando o unico monstro que controla
+            // pra comprar 1 card, ficando com o campo aberto"*. A carta e' a Dark
+            // Factory of More Production, cujo custo e' "mande 1 monstro da MAO OU
+            // DO CAMPO para o cemiterio". O motor manda as duas origens na MESMA
+            // lista, e o criterio geral logo abaixo olha so' o `location` da
+            // PRIMEIRA opcao: vindo um monstro do campo na frente, ele ordenava
+            // por MAIOR ATK e pagava com o melhor corpo da mesa — que num campo de
+            // um monstro so' e' o unico.
+            //
+            // A regra e' de forma, nao de carta: uma lista que so' tem coisa MINHA
+            // e mistura mao com campo e' um custo, e um custo se paga com o que
+            // nao esta' em jogo. Corpo em campo esta' fazendo trabalho; carta na
+            // mao ainda nao faz nada.
+            //
+            // Dentro da mao, o criterio e' o mesmo do descarte de sempre
+            // (`ValorDescarte`, o maior monstro): num deck com reanimacao — e o do
+            // Panik tem tres Premature Burial — mandar o grandao para o cemiterio
+            // e' meio caminho para po-lo em campo.
+            {
+                var naMao = q.choices.Where(c => c.location == HAND).ToList();
+                var meusNoCampo = q.choices.Where(c => c.location == MZONE && c.controller == me).ToList();
+                bool ehCustoDosDois = naMao.Count > 0 && meusNoCampo.Count > 0
+                    && q.choices.All(c => c.location == HAND
+                                          || (c.location == MZONE && c.controller == me));
+                if (ehCustoDosDois)
+                {
+                    foreach (var c in naMao.OrderByDescending(ValorDescarte))
+                    {
+                        if (picks.Count >= need) break;
+                        picks.Add(c.index);
+                    }
+                    // A mao nao cobriu o pedido: o resto sai do campo, e ai pelo
+                    // corpo MAIS BARATO — o avesso do criterio de remocao.
+                    foreach (var c in meusNoCampo.OrderBy(c => ValorDoMeuCorpo(me, c.code, c.sequence)))
+                    {
+                        if (picks.Count >= need) break;
+                        picks.Add(c.index);
+                    }
+                    _log($"custo (mao ou campo): paga com {picks.Count} da mao/campo, a mao primeiro — " +
+                         $"corpo em campo esta' segurando o turno");
+                    return picks;
+                }
+            }
+
             var ordem = loc == HAND
                 ? q.choices.OrderByDescending(ValorDescarte)                       // descarta o maior monstro
                 : q.choices.OrderByDescending(c => _cards.Stats(c.code).AtkValue); // alvo/reborn: o mais forte
@@ -2141,11 +2570,26 @@ namespace DuelServer
         /// <summary>
         /// Os meus monstros que podem RECEBER um equipamento, já com a posição e
         /// a zona. Mesmo conjunto que o <see cref="MonstrosFaceUp"/> devolve (o
-        /// `eqfilter` do Lua exige a face para cima); a diferença é carregar
-        /// junto o que decide se o bônus vale alguma coisa.
+        /// `eqfilter` do Lua exige a face para cima), MENOS o corpo CONDENADO; a
+        /// diferença é carregar junto o que decide se o bônus vale alguma coisa.
+        ///
+        /// **O corpo condenado fica de fora, e essa é a metade que faltava.**
+        /// Instant/Ready Fusion trazem uma Fusão que **não pode atacar** e é
+        /// destruída na End Phase deste mesmo turno — e o equipamento vai junto
+        /// para o cemitério com ela. Reforçar o ATK de quem não vai batalhar e
+        /// não chega ao turno seguinte é rasgar a carta, e o desempate desta
+        /// função ("na dúvida, reforça quem já vale mais na mesa") escolhia
+        /// justamente ele: a Fusão que o Instant Fusion traz costuma ser o maior
+        /// ATK do campo. Foi o relato — *"ele usa a Ready Fusion, gasta recurso
+        /// em cima do monstro, e ele não pode atacar e na end é destruído"*.
+        ///
+        /// Nada disso dá erro: a carta equipa, o motor soma o bônus, a tela
+        /// mostra o número novo — e os dois somem juntos na End Phase.
         /// </summary>
         List<(uint code, int pos, int seq, DatabaseManager.CardStats st)> AlvosDeEquip(int me) =>
-            AbertosDe(me).Select(m => (m.code, m.pos, m.seq, st: _cards.Stats(m.code))).ToList();
+            AbertosDe(me)
+                .Where(m => !_corpoCondenado(me, m.seq))
+                .Select(m => (m.code, m.pos, m.seq, st: _cards.Stats(m.code))).ToList();
 
         /// <summary>Este equipamento serve neste monstro? (raça/atributo da
         /// tabela × banco de cartas — ver <see cref="EQUIPAMENTOS"/>).</summary>
@@ -2316,6 +2760,14 @@ namespace DuelServer
         /// </summary>
         int ValorDoMeuCorpo(int me, uint code, int seq)
         {
+            // CORPO CONDENADO custa ZERO. Ele morre na End Phase deste turno de
+            // qualquer jeito, entao gasta-lo num tributo ou num material e' de
+            // graca — o preco ja' foi pago quando a carta que o trouxe foi
+            // ativada. Sem esta linha o cerebro media pelo ATK e PROTEGIA o corpo
+            // que ia sumir: com um Barox (1380, do Instant Fusion) e um Petit Moth
+            // (300) em campo, ele tributava o Moth e ficava com o Barox.
+            if (_corpoCondenado(me, seq)) return 0;
+
             foreach (var m in _todoFieldPosOf(me))
                 if (m.seq == seq && m.code == code) return ValorNaBatalha(code, m.pos, me, seq);
             // Sem casar a zona (testes de decisão isolada, campo montado só com
@@ -2336,7 +2788,11 @@ namespace DuelServer
             foreach (var m in AbertosDe(me))
             {
                 if (PECAS_GATE_GUARDIAN.Contains(m.code)) continue;
-                menor = Math.Min(menor, ValorNaBatalha(m.code, m.pos, me, m.seq));
+                // Mesma medida do `CorpoMaisBarato` e do `DecideSelect`: um corpo
+                // CONDENADO custa zero, porque ele some na End Phase de qualquer
+                // jeito. E' o que faz o atalho que cobra um tributo sair de graca
+                // no turno em que ha' um Instant/Ready Fusion na mesa.
+                menor = Math.Min(menor, ValorDoMeuCorpo(me, m.code, m.seq));
             }
             return menor == int.MaxValue ? 0 : menor;
         }
@@ -2425,6 +2881,11 @@ namespace DuelServer
         {
             int foe = 1 - me;
 
+            // Pergunta nova, ataque anterior ja' resolvido: a marca do atacante
+            // nao pode sobrar. Marca velha faria a proxima escolha de alvo medir
+            // pelo ATK de um monstro que nem esta' atacando.
+            _atacanteAtk = -1;
+
             if (q.attackers.Count == 0)
                 return new BattlePlay(false, 0, "sem atacantes");
 
@@ -2458,6 +2919,7 @@ namespace DuelServer
             {
                 var a = Atacante(diretos, punidora != 0, 0, me);
                 bool campoVazio = QtdMonstros(foe) == 0;
+                _atacanteAtk = AtkEmCampo(a.code, me, a.sequence);
                 return new BattlePlay(true, a.index,
                     (campoVazio ? "campo do oponente vazio" : "passa por cima dos monstros dele") +
                     $" — ataque direto com {a.code} " +
@@ -2477,8 +2939,11 @@ namespace DuelServer
 
             var maisForte = q.attackers.OrderByDescending(x => AtkEmCampo(x.code, me, x.sequence)).First();
             if (doOponente.Count == 0)
+            {
+                _atacanteAtk = AtkEmCampo(maisForte.code, me, maisForte.sequence);
                 return new BattlePlay(true, maisForte.index,
                     $"campo do oponente sem monstro — ataca com {maisForte.code}");
+            }
 
             // Basta UM alvo que eu vença: o motor pergunta o alvo em seguida.
             var maisFraco = doOponente.OrderBy(m => m.valor).First();
@@ -2486,10 +2951,17 @@ namespace DuelServer
             int meuAtk = AtkEmCampo(escolhido.code, me, escolhido.sequence);
 
             if (meuAtk > maisFraco.valor)
+            {
+                // O ALVO e' escolhido depois, noutra pergunta. Sem passar adiante
+                // o ATK de quem esta' atacando, aquela escolha caia no criterio
+                // generico (o de maior ATK impresso) e batia justamente em quem
+                // esta decisao acabou de recusar enfrentar.
+                _atacanteAtk = meuAtk;
                 return new BattlePlay(true, escolhido.index,
                     $"ATK {meuAtk} supera o alvo mais fraco ({maisFraco.code} vale {maisFraco.valor}) " +
                     $"— ataca com {escolhido.code}" +
                     (punidora != 0 ? $" [o mais barato que ainda vence: ele tem {punidora} baixada]" : ""));
+            }
 
             return new BattlePlay(false, 0,
                 $"meu melhor ATK ({AtkEmCampo(maisForte.code, me, maisForte.sequence)}) nao vence nem o alvo mais fraco " +
@@ -2537,6 +3009,85 @@ namespace DuelServer
         /// cérebro: DEF desconhecida é risco assumido, não motivo para ficar
         /// parado.
         /// </summary>
+        /// <summary>
+        /// A carta da MÃO que está parada por falta de corpo, e o corpo que a
+        /// acordaria — também da mão.
+        ///
+        /// "Parada" aqui é literal: ela não está em `activatable`. A pergunta que
+        /// o cérebro passa a fazer é a que faltava — *"eu tenho como pôr em campo
+        /// o corpo que essa carta pede?"* —, e a resposta vale porque o corpo
+        /// pedido é um monstro que também está na minha mão, esperando um ritual.
+        /// </summary>
+        (uint carta, uint corpo) ParadaPorFaltaDeCorpo(InteractiveDuel.Question q, int me)
+        {
+            foreach (uint c in _handOf(me))
+            {
+                if (q.activatable.Any(a => a.code == c)) continue;   // ela já pode sair
+                var exige = _cards.ExigeCorpo(c);
+                if (exige.raca == 0) continue;
+
+                // Já tenho o corpo em campo? Então ela não está parada por isto —
+                // está por outro motivo, e inventar um ritual não resolveria.
+                bool jaTem = MonstrosFaceUp(me).Any(m => Serve(m, exige));
+                if (jaTem) continue;
+
+                uint naMao = _handOf(me).FirstOrDefault(m => Serve(m, exige));
+                if (naMao != 0) return (c, naMao);
+            }
+            return (0, 0);
+        }
+
+        /// <summary>Este monstro é o corpo que a carta pede (raça e nível)?</summary>
+        bool Serve(uint code, (uint raca, int nivel) exige)
+        {
+            var st = _cards.Stats(code);
+            return st.IsMonster && (st.Race & exige.raca) != 0 && st.Level >= exige.nivel;
+        }
+
+        /// <summary>
+        /// O ritual que traz o corpo capaz de acordar uma carta da mão.
+        ///
+        /// A escolha entre dois rituais precisa saber o que cada um pode invocar,
+        /// e o Lua nem sempre diz: `Ritual.AddProcGreaterCode(c, 8, nil, 5405694)`
+        /// nomeia a carta, mas o Chaos Form filtra por ARQUÉTIPO e não nomeia
+        /// ninguém. Então a regra é conservadora: um ritual que nomeia códigos só
+        /// serve se o corpo desejado estiver entre eles; um que não nomeia nenhum
+        /// é candidato. Errar para menos aqui deixa a jogada como era antes —
+        /// errar para mais gastaria o ritual e não acordaria nada.
+        ///
+        /// A escolha do MONSTRO vem depois, no `DecideSelect`: o motor pergunta
+        /// qual invocar, e sem a marca ele cairia no critério genérico (o de maior
+        /// ATK) e traria o Guerreiro de volta.
+        /// </summary>
+        Play? RitualQueAcorda(InteractiveDuel.Question q, int me)
+        {
+            var (carta, corpo) = ParadaPorFaltaDeCorpo(q, me);
+            if (carta == 0) return null;
+
+            var rituais = q.activatable.Where(a => EhRitual(a.code)).ToList();
+            if (rituais.Count == 0) return null;
+
+            var escolhido = rituais.FirstOrDefault(a =>
+            {
+                var nomeados = _cards.RitualInvoca(a.code);
+                return nomeados.Count == 0 || nomeados.Contains(corpo);
+            });
+            if (escolhido.code == 0) return null;
+
+            // Com um ritual só e ele servindo, isto não muda a jogada — mas o
+            // `_proximoRitualCorpo` ainda importa: é ele que faz a ESCOLHA do
+            // monstro sair certa.
+            _proximoRitualCorpo = corpo;
+            return new Play("activate", escolhido.index,
+                $"Ritual {escolhido.code}: invoca {corpo} para acordar {carta}, que esta' parada na mao");
+        }
+
+        /// <summary>
+        /// O corpo que o próximo ritual deve pôr em campo — decidido pela regra,
+        /// cumprido pelo `DecideSelect`. Zero quando não há preferência.
+        /// </summary>
+        uint _proximoRitualCorpo;
+
         Play? LevantarParaAtacar(InteractiveDuel.Question q, int me, int foe)
         {
             if (q.repositionable.Count == 0) return null;
@@ -2927,6 +3478,24 @@ namespace DuelServer
         /// </summary>
         bool _proximoTributoBarato;
 
+        /// <summary>
+        /// **O ATK vivo de quem acabou de declarar ataque** — −1 quando nao ha'
+        /// ataque pendente.
+        ///
+        /// O ataque tem DOIS passos no motor: o `SELECT_BATTLECMD` escolhe o
+        /// ATACANTE, e logo depois um `MSG_SELECT_CARD` escolhe o ALVO. A
+        /// `DecideBattle` decidia atacar porque vencia o alvo **mais fraco** do
+        /// outro lado, e a escolha do alvo caia no criterio generico do
+        /// `DecideSelect` — *o de maior ATK IMPRESSO*. Duas pontas, duas contas:
+        /// ele declarava contra o 1500 e batia no 2400 equipado.
+        ///
+        /// Era isto o relato *"se meu monstro tem uns 3 buff que aumentaram o
+        /// ATK dele bastante, o NPC nao enxerga e decide atacar igual com um
+        /// mais fraco"*: a leitura de ATK ao vivo ja' existia e estava certa —
+        /// so' que quem escolhia em QUEM bater nao a usava.
+        /// </summary>
+        int _atacanteAtk = -1;
+
         /// <summary>Alvo legal do Templo: Nv≤4 e Fish/Sea Serpent/Aqua.</summary>
         bool AlcancadoPeloTemplo(uint code)
         {
@@ -2984,12 +3553,22 @@ namespace DuelServer
             bool podeReviver = _setStOf(me).Contains(TORRENTIAL_REBORN)
                                || NaMao(me, PREMATURE_BURIAL);
 
-            // A. O corpo com prazo de validade. Reconhecido pelo TIPO (0x40 =
-            //    Fusão): num deck sem Polymerization, uma Fusão em campo só pode
-            //    ter vindo do Instant/Ready Fusion, e as duas matam o que
-            //    trouxeram. Mesmo que viesse de uma fusão de verdade, banir
-            //    custaria pouco — ela volta na End Phase deste mesmo turno.
-            uint condenado = elegiveis.FirstOrDefault(c => (_cards.Stats(c).Type & TYPE_FUSION) != 0);
+            // A. O corpo com prazo de validade — agora pela MARCA de verdade, e
+            //    não mais pelo tipo da carta.
+            //
+            //    Antes ele era reconhecido por `TYPE_FUSION`, com o argumento de
+            //    que "num deck sem Polymerization, uma Fusão em campo só pode ter
+            //    vindo do Instant/Ready Fusion". O argumento vale para ESTE deck e
+            //    para mais nenhum: num deck com Polymerization, o palpite mandaria
+            //    banir o melhor corpo do campo — que ia FICAR — achando que o
+            //    estava salvando de uma destruição que não viria.
+            //
+            //    Quem marca hoje é o motor, pelo que ACONTECEU: a carta que
+            //    resolveu condena, e o monstro que chegou do Extra logo depois é
+            //    ele (`InteractiveDuel._condenadas`).
+            uint condenado = ZonasCondenadas(me)
+                .Select(z => z.code)
+                .FirstOrDefault(c => elegiveis.Contains(c));
             if (condenado != 0)
             {
                 if (podeReviver)
@@ -3188,6 +3767,22 @@ namespace DuelServer
                 // `EVENT_FREE_CHAIN` — o Templo do Mako é oferecido em TODA
                 // janela de corrente, e sem esta linha ele era ativado em todas.
                 if (COM_REGRA_PROPRIA.Contains(c.code)) continue;
+
+                // E MESMO ARGUMENTO, terceira vez, para quem COBRA UMA CARTA por
+                // ativar. A Dark Factory of More Production é quick e free-chain:
+                // ela aparece em TODA janela de corrente, e a regra genérica a
+                // ativava em todas — cada vez pagando um monstro por 1 compra.
+                // Vista no log de um duelo real, três vezes na mesma partida.
+                //
+                // Não é "nunca use": no Main Phase ela continua passando pela
+                // regra 0.15, que pesa o custo. O que não pode é sair no reflexo
+                // de uma janela que o motor abre por outro motivo qualquer.
+                if (Perfil(c.code).Descarta)
+                {
+                    _log($"chain: nao gasto {c.code} numa janela qualquer — ela cobra uma carta, " +
+                         "e o Main Phase decide isso com criterio");
+                    continue;
+                }
 
                 if (!REMOCAO_ST.Contains(c.code))
                 {
@@ -3518,6 +4113,13 @@ namespace DuelServer
             int max = -1;
             foreach (var m in AbertosDe(player))
             {
+                // O CORPO CONDENADO nao entra nesta conta, dos dois lados. Ela
+                // responde "quem ganha a batalha?", e ele nao briga: o motor nao o
+                // deixa atacar (`EFFECT_CANNOT_ATTACK`) e ele morre na End Phase
+                // deste turno, entao nem chega ao turno seguinte para defender.
+                // Contando-o, o NPC concluia que dominava a mesa e guardava a
+                // trava e o reforco — com o campo ficando vazio logo depois.
+                if (_corpoCondenado(player, m.seq)) continue;
                 int atk = AtkEmCampo(m.code, player, m.seq);
                 if (atk > max) max = atk;
             }

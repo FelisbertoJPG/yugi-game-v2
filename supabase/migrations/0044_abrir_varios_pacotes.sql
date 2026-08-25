@@ -1,0 +1,31 @@
+-- 0044 — ABRIR VARIOS PACOTES de uma vez, e o servidor dizendo qual carta veio
+-- por GARANTIA. (aplicada; ver o corpo vivo com pg_get_functiondef)
+--
+-- Por que o laco mora no BANCO e nao em 10 chamadas do front:
+--
+--   * as garantias sao SEQUENCIAIS. O `pity` sobe a cada pacote e a SR sai no
+--     multiplo de 20; o `urSpend` sobe a cada preco pago e a UR sai ao cruzar o
+--     teto. Dez chamadas independentes dariam o resultado certo so' se
+--     chegassem em ordem — e elas nao chegam: sao dez requisicoes concorrentes,
+--     e a carteira e' lida no comeco de cada uma. Duas que se cruzem leem o
+--     MESMO `pity` e uma sobrescreve a outra, PERDENDO pacotes do contador;
+--   * uma falha no meio deixaria o jogador com 6 pacotes pagos e 4 nao;
+--   * e' uma transacao so': ou os dez saem, ou nenhum.
+--
+-- `p_qtd` tem DEFAULT 1, entao o cliente antigo (que manda so' `p_booster`)
+-- continua funcionando sem saber que isto existe. Teto de 10 por chamada.
+--
+-- O DROP da versao de 1 argumento nao e' descuido: acrescentar um parametro NAO
+-- substitui a funcao, cria uma SOBRECARGA — e o PostgREST escolhe pela chave do
+-- corpo JSON. Com as duas no ar, `{p_booster}` casa com ambas e o servidor
+-- responde "could not choose the best candidate function": ninguem compra mais
+-- nada, nem quem esta' em dia. (A mesma pegadinha da 0041 com `iniciar_duelo`.)
+--
+-- Campos NOVOS na resposta, ignorados por um front antigo:
+--   `pacote`     de qual dos N pacotes a carta saiu;
+--   `guaranteed` a carta veio de uma garantia.
+-- O segundo existe porque a tela ADIVINHAVA ("a primeira carta acima de comum"),
+-- e o palpite erra sempre que a primeira sai rara por sorte — com 50 cartas de
+-- um [abrir 10] na tela, erraria em quase todo lote.
+--
+-- (SQL completo aplicado via migration `abrir_varios_pacotes`.)

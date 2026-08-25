@@ -13,14 +13,22 @@
  * O que mudou foi `register`/`login`, que agora pedem e-mail — e o único
  * chamador dos dois é `login.html`.
  *
- * OFFLINE: `me()` responde pela sessão guardada, sem rede. Quem já entrou uma
- * vez continua abrindo o jogo sem internet (ver `supabase.js`).
+ * OFFLINE: `me()` responde pela sessão guardada, sem rede — o login em si não
+ * exige internet quando a sessão já existe. (O BOOT do jogo empacotado exige,
+ * mas por outro motivo e noutro lugar: ver `UpdateService`.)
+ *
+ * QUANTO A SESSÃO DURA é escolha de quem entra, na caixa "manter login nesta
+ * máquina" (`definirManterLogin`). Desmarcada — o padrão —, ela vive só
+ * enquanto a janela do jogo estiver aberta.
  */
 
 import {
-  cadastrar, entrar, sair, sessao, req,
+  cadastrar, entrar, sair, sessao, req, atualizarSessao,
+  manterLogin, definirManterLogin,
   recuperarSenha, sessaoDoHash, trocarSenha, contaAtual, perfilAtual,
 } from '/web/js/supabase.js';
+
+export { manterLogin, definirManterLogin };
 
 /** Cria a conta. `usuario` é o nome no jogo; o e-mail é a credencial. */
 export async function register(email, password, usuario) {
@@ -32,7 +40,14 @@ export async function register(email, password, usuario) {
   return { ok: true, username: await me() };
 }
 
-export async function login(email, password) {
+/**
+ * Entra. `manter` é a caixa "manter login nesta máquina" — e ela é decidida
+ * ANTES de a sessão existir, porque é ela que escolhe onde a sessão vai ser
+ * guardada (ver `armazenamento()` em `supabase.js`). Desmarcada, fechar o jogo
+ * pede a senha de novo.
+ */
+export async function login(email, password, manter = false) {
+  definirManterLogin(manter);
   const r = await entrar(email, password);
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, username: await me() };
@@ -98,9 +113,10 @@ export async function me() {
   const usuario = Array.isArray(r.dados) && r.dados[0]?.usuario;
   if (!usuario) return s.user?.email ?? null;
 
-  try {
-    localStorage.setItem('ygo:sb-session', JSON.stringify({ ...s, usuario }));
-  } catch { /* sem cache: só custa uma consulta a cada boot */ }
+  // Pelo módulo, nunca no `localStorage` na mão: com a caixa "manter login"
+  // desmarcada a sessão mora no `sessionStorage`, e gravar direto aqui deixava
+  // uma cópia dela no lugar de onde ninguém a apaga.
+  atualizarSessao({ usuario });
   return usuario;
 }
 

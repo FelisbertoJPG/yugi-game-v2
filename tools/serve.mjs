@@ -41,6 +41,21 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     let rel = decodeURIComponent(url.pathname);
 
+    // QUAL VERSÃO ESTE CLIENTE É — o par do `/__versao` de `StaticServer`/
+    // `WebServer` no jogo empacotado. Aqui a resposta é sempre `dev: true`: o
+    // repositório não é uma instalação, ele É a versão mais nova que existe, e
+    // não há atualização a exigir de quem está desenvolvendo.
+    //
+    // A rota precisa existir mesmo assim. Sem ela o `npm run dev` cairia no
+    // ramo de "não consegui perguntar", que do lado do servidor NÃO alcança
+    // piso nenhum — e o Deck Builder ficaria barrado na máquina de quem está
+    // escrevendo o jogo.
+    if (rel === '/__versao') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+         .end(JSON.stringify({ exe: '', game: '', dev: true }));
+      return;
+    }
+
     // Encerramento limpo, pedido pelo launcher. Só aceita da própria máquina —
     // é servidor de desenvolvimento, mas derrubar processo é coisa que não se
     // deixa aberta para a rede.

@@ -177,13 +177,23 @@ export async function hydrateDecks() {
   let migrados = 0;
   for (const d of read(KEY_DECKS, [])) {
     if (d.path) continue;                       // já veio do projeto
-    const deck = new Deck(d);
-    const r = await saveProjectDeck(caminhoLivre(deck.name, ocupados), deck,
-                                    { updated: new Date().toISOString() });
-    if (!r.ok) continue;
-    ocupados.add(r.path);
-    projeto.push({ path: r.path, deck });
-    migrados++;
+    // O que se le' aqui e' o `localStorage` daquele navegador, escrito por
+    // versoes antigas do jogo — nao ha' garantia nenhuma sobre o formato. Um
+    // registro torto fazia `new Deck(d)` lancar, e a excecao subia ate' o
+    // `await hydrateDecks()` do topo da home, que nao tinha catch: a tela
+    // ficava em 'carregando…' PARA SEMPRE naquela maquina, porque o registro
+    // ruim continuava la' no boot seguinte.
+    try {
+      const deck = new Deck(d);
+      const r = await saveProjectDeck(caminhoLivre(deck.name, ocupados), deck,
+                                      { updated: new Date().toISOString() });
+      if (!r.ok) continue;
+      ocupados.add(r.path);
+      projeto.push({ path: r.path, deck });
+      migrados++;
+    } catch (e) {
+      console.warn('[decks] deck local ilegivel; deixando para tras', d, e);
+    }
   }
 
   const nomeAtivo = getActiveDeck()?.name ?? null;

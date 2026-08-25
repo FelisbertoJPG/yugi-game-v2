@@ -7,7 +7,16 @@
        executavel de 67,8 MB. Ver host/Program.cs. -->
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe, e nao Exe: o Windows para de criar a janela de terminal. Ela
+         aparecia por cima do jogo e tinha de ser minimizada, o que para quem nao
+         e' tecnico e' ruido — e era ELA o botao de fechar ("DEIXE ESTA JANELA
+         ABERTA"). Quem diz agora que o jogo esta' na tela e' a batida das
+         paginas (`web/js/vivo.js` + `WebServer.VigiarAJanela`).
+
+         O preco esta' pago em `host/Console.cs`: um WinExe chamado de um
+         terminal nao se anexa a ele, e as suites de linha de comando ficariam
+         mudas. -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>

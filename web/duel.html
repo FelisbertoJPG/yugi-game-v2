@@ -6,6 +6,9 @@
 <title>Treino de Duelo — Classic Duels</title>
 <link rel="icon" href="/web/img/icone.png">
 <link rel="stylesheet" href="/web/css/ui.css">
+<!-- A revelacao carta a carta (o drop virado do fim de duelo) — a MESMA que a
+     Loja usa ao abrir um pacote. Ver `web/js/revelacao.js`. -->
+<link rel="stylesheet" href="/web/css/revelacao.css">
 <style>
   body { display: flex; flex-direction: column; overflow: hidden; }
   .status-line { font-size: 11px; }
@@ -84,6 +87,23 @@
   .arena { flex: 1; zoom: 1.25; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; overflow: auto; }
   .handrow { display: flex; gap: 4px; justify-content: center; align-items: center; align-content: center; flex-wrap: wrap; min-height: 62px; overflow: hidden; }
   .handrow.opp { opacity: .8; }
+
+  /* `display:flex` tem especificidade maior que o `[hidden]{display:none}` da
+     folha do NAVEGADOR, entao o guarda precisa vir junto — a mesma armadilha do
+     aviso de icone novo. Ver `node web/js/esconder.test.mjs`. */
+  .raiox {
+    display: flex; align-items: center; gap: 6px; align-self: flex-end;
+    margin: 0 8px -2px; padding: 3px 8px; cursor: pointer;
+    background: var(--panel2); border: 1px solid var(--line);
+    font-size: 10px; letter-spacing: 1px; color: var(--dim);
+  }
+  .raiox[hidden] { display: none; }
+  .raiox:hover { color: var(--gold); border-color: var(--gold); }
+  .raiox input { margin: 0; cursor: pointer; }
+  .raiox small { color: #7d7466; letter-spacing: 0; }
+  /* A carta revelada nao pode passar por carta aberta de verdade: o tracejado
+     dourado diz "isto e' o raio-x", nao "o NPC baixou isto". */
+  .handrow.opp .card.espiada img { outline: 1px dashed var(--gold); outline-offset: -1px; }
 
   .rows { display: flex; flex-direction: column; gap: 4px; }
   .zonerow { display: flex; gap: 6px; justify-content: center; align-items: center; }
@@ -556,6 +576,7 @@
   }
   #cardmenu .mi:hover .sub, #cardmenu .mi:focus .sub { color: #4a3c12; }
   #cardmenu .mi.prim { color: var(--gold); font-weight: bold; }
+  #cardmenu .mi.cancelar { color: #8a8375; border-top: 1px solid #2a2418; }
   #cardmenu .mi:hover, #cardmenu .mi:focus {
     background: var(--gold); color: #1a1408; outline: none;
   }
@@ -670,70 +691,13 @@
   #end-icone b { font-size: 10px; letter-spacing: 2px; color: var(--gold); }
   #end-icone .nome { font-size: 14px; color: var(--ink); }
   #end-icone .onde { font-size: 9px; color: var(--dim); }
-  #end-drops { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 4px 0 16px; }
-  .drop {
-    width: 96px; aspect-ratio: 59/86; perspective: 700px; cursor: pointer;
-    background: none; border: 0; padding: 0;
-  }
-  /* Revelada, a carta NÃO fica `disabled`, e por duas razões: o
-     `button:disabled { opacity: .4 }` de `ui.css` apagava justamente o prêmio
-     recém-ganho (mal dava para enxergar a arte), e navegador nenhum entrega
-     evento de ponteiro a um controle desligado — o "segurar para ampliar"
-     simplesmente não começaria. Quem impede a segunda virada é o `abertas` do
-     `renderDrops`, que é onde a regra já morava. */
-  .drop.aberta { cursor: zoom-in; }
-  .drop .giro {
-    position: relative; width: 100%; height: 100%;
-    transform-style: preserve-3d; transition: transform .55s cubic-bezier(.2,.7,.3,1);
-  }
-  .drop.aberta .giro { transform: rotateY(180deg); }
-  .drop .face {
-    position: absolute; inset: 0; backface-visibility: hidden;
-    border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
-    background: #0a0f16;
-  }
-  .drop .face img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .drop .frente {
-    transform: rotateY(180deg); border-color: var(--gold);
-    box-shadow: 0 0 14px #f1c40f55;
-  }
-  /* A moldura toma a cor da RARIDADE — o mesmo código de cores da revelação da
-     Loja (`loja.html`), para uma UR de drop parecer a mesma coisa que uma UR de
-     pacote. Sem raridade (servidor sem a migration 0029) fica o dourado acima. */
-  .drop .frente.UR { border-color: #e8c46a; box-shadow: 0 0 20px #e8c46a88; }
-  .drop .frente.SR { border-color: #cbb7ff; box-shadow: 0 0 16px #cbb7ff66; }
-  .drop .frente.R  { border-color: #7fd0ff; box-shadow: 0 0 14px #7fd0ff55; }
-  .drop .frente.N  { border-color: #cfd6de; box-shadow: 0 0 10px #cfd6de33; }
-  /* O selo de raridade e o de novidade ficam DENTRO da face da frente: viram
-     com a carta, então não aparecem antes da revelação. */
-  .drop .rar {
-    position: absolute; top: 3px; right: 3px; font-size: 9px; font-weight: bold;
-    padding: 2px 4px; border-radius: 2px; background: #04121fdd; letter-spacing: .5px;
-  }
-  .drop .frente.UR .rar { color: #e8c46a; }
-  .drop .frente.SR .rar { color: #cbb7ff; }
-  .drop .frente.R  .rar { color: #7fd0ff; }
-  .drop .frente.N  .rar { color: #cfd6de; }
-  /* "NEW!!" — a carta que ENTROU na Coleção agora, e não a décima cópia de uma
-     que já estava lá. Quem responde isso é o servidor, antes de creditar. */
-  .drop .nova {
-    position: absolute; top: 3px; left: 3px; font-size: 9px; font-weight: 800;
-    padding: 2px 4px; border-radius: 2px; letter-spacing: .5px;
-    background: #c0392b; color: #fff; box-shadow: 0 0 10px #e74c3ccc;
-    animation: novapisca 1.1s ease-in-out infinite;
-  }
-  @keyframes novapisca {
-    0%, 100% { box-shadow: 0 0 6px #e74c3c88; }
-    50%      { box-shadow: 0 0 14px #e74c3c; }
-  }
-  /* O verso é o mesmo `.back` do tabuleiro — a carta virada do jogo, não um
-     desenho novo só para esta tela. */
-  .drop .verso .back { width: 100%; height: 100%; }
-  .drop:not(.aberta):hover .verso { border-color: var(--gold); }
-  .drop-nome {
-    font-size: 10px; color: var(--gold); margin-top: 4px; min-height: 13px;
-    max-width: 96px; line-height: 1.2;
-  }
+  /* A grade das cartas viradas mora em `web/css/revelacao.css`, junto com a
+     mecanica: eram duas telas (esta e a Loja) prometendo a mesma cerimonia ao
+     jogador e desenhando-a duas vezes, e a da Loja ja tinha ficado para tras —
+     sem virada e sem o selo de novidade. O que sobra aqui e' so' a largura da
+     carta e quantas cabem por linha, que sao diferentes nas duas: o drop mostra
+     tres ou quatro, o pacote mostra cinquenta. */
+  #end-drops { --rev-w: 96px; margin: 4px 0 16px; }
   #end-pular { font-size: 11px; padding: 5px 12px; margin-bottom: 14px; }
 
   /* ---------- popup de sorteio de moeda 3D ---------- */
@@ -918,6 +882,14 @@
 <div id="cardmenu"></div>
 
 <div class="arena">
+  <!-- RAIO-X (admin). Nasce `hidden` e so' aparece depois de o SERVIDOR dizer
+       que este perfil e' admin — o mesmo desenho do botao da Area de Teste na
+       home. Nunca aparece em multiplayer: ver o comentario do `MaoDoNpc()`. -->
+  <label class="raiox" id="raiox-campo" hidden>
+    <input type="checkbox" id="raiox">
+    <span>ver a mão do NPC</span>
+    <small id="raiox-info"></small>
+  </label>
   <div class="handrow opp" id="hand-opp"></div>
 
   <div class="rows" id="opp-field"></div>
@@ -937,16 +909,23 @@
   </div>
 </div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, hydrateDecks } from '/web/js/storage.js';
 import { getNpc, loadNpcDecks, getNpcActiveDeck, getNpcDecks, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
 import { encerrarDuelo, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
+// A revelação carta a carta — a mesma que a Loja usa na abertura de pacote.
+import { montarRevelacao } from '/web/js/revelacao.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/boards.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
 import { requireLogin, contaAtual } from '/web/js/auth.js';
+// Direto do `supabase.js`, como `builder.js` e `listas.html`: o `auth.js` não
+// reexporta o `perfilAtual`, e o caminho curto é o mesmo que as outras telas de
+// admin já usam.
+import { perfilAtual } from '/web/js/supabase.js';
 import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
 import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
 import { decidirCorrente, normalizarModo, MODOS, MODO_PADRAO } from '/web/js/correntes.js';
@@ -1459,6 +1438,42 @@ function revelarAtivacao(code, controller) {
     if (box.firstChild === cx) { box.replaceChildren(); box.hidden = true; }
     pronto();
   }, ms));
+}
+
+// ---------- raio-x: a mão do NPC (diagnóstico de admin) ----------
+//
+// Existe por uma pergunta que o log não respondia: *"o que ele tem de tão
+// brickado que não descarta, não compra e não popula o campo?"*. As linhas
+// `[npc]` dizem o que ele decidiu e por quê; com a mão à vista dá para ver se a
+// jogada que faltou existia e a regra não a viu — que é a diferença entre um bug
+// no `NpcBrain` e uma mão que realmente não tinha nada.
+//
+// A mão não vem nos eventos do duelo de propósito: `Projetar` manda `code: 0` do
+// lado do oponente, e é ele que impede a mão de vazar para quem não pediu. Aqui
+// ela vem por uma rota à parte (`POST /espiar`), só de localhost e só contra
+// NPC — contra uma pessoa o servidor recusa, e é por isso que a caixa nem
+// aparece no multiplayer.
+let maoNpc = [];           // códigos revelados, na ordem da mão
+let raioXLigado = false;
+
+async function lerMaoDoNpc() {
+  if (!raioXLigado) { maoNpc = []; return; }
+  try {
+    const j = await rpc('/espiar', {});
+    maoNpc = Array.isArray(j.mao) ? j.mao : [];
+    // O servidor recusando é informação, não silêncio: sem isto, "ele recusou"
+    // e "a mão está vazia" desenham a mesma coisa na tela.
+    $('raiox-info').textContent = j.ok ? '' : `— ${j.erro || 'indisponível'}`;
+  } catch {
+    maoNpc = [];
+    $('raiox-info').textContent = '— sem resposta do motor';
+  }
+}
+
+/** Liga/desliga e redesenha. Chamado pelo clique e depois de cada jogada. */
+async function atualizarRaioX() {
+  await lerMaoDoNpc();
+  render();
 }
 
 // ---------- comunicação com o servidor ----------
@@ -2327,6 +2342,10 @@ async function apply(j) {
       ataquePendente = null;
       limparSeta();
     }
+    // Raio-x ligado: relê a mão do NPC antes de redesenhar. Ele acabou de
+    // jogar, comprar ou descartar — mostrar a mão de antes seria pior que não
+    // mostrar nenhuma, porque parece atual.
+    if (raioXLigado) await lerMaoDoNpc();
     picked.clear();
     fecharMenuCarta();      // a pergunta mudou: o menu aberto é de outro momento
     extraPicker = null;     // idem para a escolha pendente no Extra Deck
@@ -2511,7 +2530,11 @@ async function handle(ev) {
       // Continua virada (code=0) => mantém o que tinha.
       if (alvo) { alvo.pos = ev.pos; if (ev.code) alvo.code = ev.code; }
       const nomes = { 1: 'ataque', 2: 'ataque (virada)', 4: 'defesa', 8: 'defesa (virada)' };
-      log(`${ev.code ? nameOf(ev.code) : 'carta virada'} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
+      const quemE = ev.code ? nameOf(ev.code) : 'carta virada';
+      // `flip` vem do MSG_FLIPSUMMONING: e' a Invocacao-Virar, nao uma troca de
+      // posicao qualquer — e ela merece a linha em destaque, como as invocacoes.
+      if (ev.flip) log(`🔄 Invocação-Virar: ${quemE} abre em ${nomes[ev.pos] ?? 'pos ' + ev.pos}`, true);
+      else log(`${quemE} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
       break;
     }
     case 'stats': {
@@ -2794,7 +2817,13 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
       });
     });
     if (iRepos !== undefined) {
-      opts.push({ action: 'reposition', arg: iRepos, ...rotuloReposicao(cell.pos) });
+      // Primaria quando nao ha "Ativar" disputando o destaque: numa carta cuja
+      // unica jogada e' virar/deitar, o item precisa ler como a acao daquele
+      // clique — do mesmo jeito que "Invocar" le no menu da mao.
+      opts.push({
+        action: 'reposition', arg: iRepos, primaria: !ativaveis.length,
+        ...rotuloReposicao(cell.pos),
+      });
     }
 
     // Toda carta SUA em campo abre o menu, mesmo sem jogada disponível: aí ele
@@ -2814,8 +2843,12 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
         selectedHand = null;
         const itens = opts.map((o) => ({
           texto: o.texto, icone: o.icone, primaria: o.primaria, sub: o.sub,
+          // O `sub` so' entra no LOG quando ele e' a frase do motor (qual dos
+          // dois efeitos foi ativado). No item de posicao ele e' explicacao
+          // para quem le o menu, e repeti-la em toda linha do log so' polui.
           acao: () => act(o.action, o.arg,
-                          `${o.texto} ${nameOf(cell.code)}${o.sub ? ` (${o.sub})` : ''}`),
+                          `${o.texto} ${nameOf(cell.code)}`
+                          + (o.action === 'activate' && o.sub ? ` (${o.sub})` : '')),
         }));
         if (podeVer) itens.push({ texto: 'Detalhes', icone: '🔍', acao: () => showCardDetail(cell.code) });
         abrirMenuCarta(z, virada ? `${nameOf(cell.code)} (virada)` : nameOf(cell.code), itens);
@@ -3256,9 +3289,15 @@ function abrirMenuCarta(ancora, titulo, itens, aoCancelar = null) {
     h.textContent = titulo;
     frag.append(h);
   }
-  for (const it of itens) {
+  // "Cancelar" e' um ITEM, e nao so' o clique fora: mudar de posicao e' uma
+  // jogada que gasta o turno da carta, e sair do menu precisava ser uma escolha
+  // visivel ao lado dela — nao um gesto que ninguem descobre sozinho. Entra
+  // aqui, no unico ponto por onde os dois menus (mao e campo) passam, para os
+  // dois nunca divergirem.
+  const listados = [...itens, { texto: 'Cancelar', icone: '✖', cancelar: true }];
+  for (const it of listados) {
     const b = document.createElement('button');
-    b.className = 'mi' + (it.primaria ? ' prim' : '');
+    b.className = 'mi' + (it.primaria ? ' prim' : '') + (it.cancelar ? ' cancelar' : '');
     const ic = document.createElement('span');
     ic.className = 'ic';
     ic.textContent = it.icone ?? '•';
@@ -3274,7 +3313,11 @@ function abrirMenuCarta(ancora, titulo, itens, aoCancelar = null) {
       tx.append(sub);
     }
     b.append(ic, tx);
-    b.onclick = () => { menuCancelar = null; fecharMenuCarta(); it.acao(); };
+    // Cancelar fecha SEM zerar o `menuCancelar`: e' justamente o `aoCancelar`
+    // (desfazer a mao selecionada, a zona pendente do arrasto) que precisa rodar.
+    b.onclick = it.cancelar
+      ? () => fecharMenuCarta()
+      : () => { menuCancelar = null; fecharMenuCarta(); it.acao(); };
     frag.append(b);
   }
   m.replaceChildren(frag);
@@ -3395,10 +3438,25 @@ function render() {
   midPhases.append(agora);
   $('mid').replaceChildren(midPhases);
 
-  // mão do oponente (verso)
-  const oh = document.createElement('div'); oh.style.display='contents';
+  // mão do oponente (verso — ou a arte, com o raio-x de admin ligado)
   $('hand-opp').replaceChildren(...Array.from({length: hand[1]}, (_, i) => {
-    const c=document.createElement('div'); c.className='card'; c.dataset.anchor='1:hand:'+i; c.innerHTML='<div class="back"></div>'; scaleCard(c, 1); return c;
+    const c = document.createElement('div'); c.className = 'card'; c.dataset.anchor = '1:hand:' + i;
+    // `maoNpc` pode estar mais curta que a mão: ela é buscada depois da jogada,
+    // e entre uma coisa e outra o motor pode ter comprado. A carta sem código
+    // continua de costas em vez de a fileira inteira sumir.
+    const revelada = raioXLigado ? maoNpc[i] : undefined;
+    if (revelada) {
+      c.classList.add('espiada');
+      c.innerHTML = `<img src="${ART(revelada)}" title="${nameOf(revelada)}
+segurar: ver detalhes" alt="" draggable="false">`;
+      wireLongPress(c, HOLD_MS, () => showCardDetail(revelada));
+      c.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(revelada); };
+      espiar(c, revelada);
+    } else {
+      c.innerHTML = '<div class="back"></div>';
+    }
+    scaleCard(c, 1);
+    return c;
   }));
 
   // sua mão (selecionável quando há ação disponível)
@@ -3816,62 +3874,24 @@ function renderDrops(drops) {
     return;
   }
 
-  const abertas = new Set();
-  const abrir = (i, botao, nome) => {
-    if (abertas.has(i)) return;
-    abertas.add(i);
-    botao.classList.add('aberta');
-    // O título muda junto: de "clique para revelar" para o gesto que a carta
-    // aceita depois de aberta.
-    botao.title = `${nameOf(drops[i].id)}\nsegurar: ver detalhes`;
-    nome.textContent = nameOf(drops[i].id);
-    if (abertas.size === drops.length) { pular.hidden = true; liberarSaidaDoFim(true); }
-  };
-
-  const botoes = [];
-  drops.forEach((drop, i) => {
-    const cel = document.createElement('div');
-    // A raridade vira classe da FACE da frente: ela pinta a moldura e o selo de
-    // uma vez só, e some sozinha quando o servidor não mandou raridade.
-    const rar = ['UR', 'SR', 'R', 'N'].includes(drop.raridade) ? drop.raridade : null;
-
-    const b = document.createElement('button');
-    b.className = 'drop';
-    b.title = 'clique para revelar';
-    b.innerHTML = '<div class="giro">'
-      + '<div class="face verso"><div class="back"></div></div>'
-      + `<div class="face frente${rar ? ' ' + rar : ''}"><img src="${ART(drop.id)}" alt="">`
-      + (rar ? `<span class="rar">${rar}</span>` : '')
-      + (drop.nova ? '<span class="nova">NEW!!</span>' : '')
-      + '</div></div>';
-
-    const nome = document.createElement('div');
-    nome.className = 'drop-nome';
-
-    // **Segurar amplia** — o mesmo gesto da mão, do campo, do cemitério e do
-    // Extra, com o mesmo anel de progresso (`injectHoldStyles`) e o mesmo
-    // botão direito de atalho. Só DEPOIS de revelada: segurar uma carta ainda
-    // virada abriria o detalhe dela e mataria a virada, que é a única coisa
-    // que esta tela tem para oferecer — então ali o gesto revela, como o
-    // clique, em vez de não fazer nada e ainda engolir o clique seguinte.
-    const ampliar = () => {
-      if (abertas.has(i)) showCardDetail(drop.id);
-      else abrir(i, b, nome);
-    };
-    const segurou = wireLongPress(b, HOLD_MS, ampliar);
-    b.oncontextmenu = (e) => { e.preventDefault(); ampliar(); };
-    // `segurou()` consome o gesto: sem isto, soltar depois de ampliar
-    // dispararia o clique logo atrás — e numa carta ainda virada o "segurar
-    // revela" seria seguido de um `abrir` redundante.
-    b.onclick = () => { if (segurou()) return; abrir(i, b, nome); };
-    cel.append(b, nome);
-    caixa.append(cel);
-    botoes.push({ b, nome });
+  liberarSaidaDoFim(false);
+  const rev = montarRevelacao(caixa, drops.map((d) => ({
+    id: d.id,
+    raridade: d.raridade,
+    nova: d.nova,
+  })), {
+    nomeDe,
+    arte: (id) => ART(id),
+    // Um drop traz três ou quatro cartas; sete por linha é o teto, e a grade se
+    // fecha no número que houver.
+    colunas: 7,
+    aoAmpliar: (id) => showCardDetail(id),
+    ligarGesto: (el, acao) => wireLongPress(el, HOLD_MS, acao),
+    aoTerminar: () => { pular.hidden = true; liberarSaidaDoFim(true); },
   });
 
-  liberarSaidaDoFim(false);
   pular.hidden = false;
-  pular.onclick = () => botoes.forEach((x, i) => abrir(i, x.b, x.nome));
+  pular.onclick = () => rev.revelarTudo();
 }
 
 /** Liga/desliga [novo duelo] e [voltar para a home] enquanto há carta virada. */
@@ -3999,6 +4019,22 @@ $('gv-close').onclick = () => $('gv-back').classList.remove('show');
 $('gv-back').addEventListener('click', (e) => { if (e.target === $('gv-back')) $('gv-back').classList.remove('show'); });
 $('log-fab').onclick = () => $('log').classList.toggle('show');
 
+// RAIO-X: quem pergunta se este perfil é admin é o SERVIDOR, a cada abertura —
+// e não um `admin` guardado no `localStorage`, que seria uma linha de texto que
+// qualquer um edita (a mesma decisão do botão da Área de Teste na home). A caixa
+// nasce `hidden` de propósito: apareceria piscando na tela de todo jogador no
+// intervalo entre o boot e a resposta do perfil.
+//
+// Nunca em MULTIPLAYER, e essa metade não depende de perfil nenhum: o servidor
+// recusa a mão de um humano (ver `MaoDoNpc()`), então a caixa ali seria um botão
+// que promete o que não entrega.
+$('raiox').onchange = () => { raioXLigado = $('raiox').checked; atualizarRaioX(); };
+if (!partidaId) {
+  perfilAtual()
+    .then((p) => { if (p?.admin) $('raiox-campo').hidden = false; })
+    .catch(() => { /* sem resposta = não é admin: a caixa fica escondida */ });
+}
+
 await hydrateWallet();   // carteira do projeto antes de premiar vitórias
 await hydrateDecks();    // o deck com que você vai duelar vem de decks/player/
 await hydrateCustomNpcs();
@@ -4063,5 +4099,11 @@ if (partidaId) {
 
 start();
 </script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

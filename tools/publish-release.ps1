@@ -1,4 +1,4 @@
-﻿# Gera os pacotes de atualizacao + o manifest.json e (opcionalmente) publica o
+# Gera os pacotes de atualizacao + o manifest.json e (opcionalmente) publica o
 # Release no repositorio privado de distribuicao.
 #
 #   powershell -File tools\publish-release.ps1              # DRY-RUN: so' gera em dist\release\
@@ -589,6 +589,60 @@ if (-not (Test-Path $exe)) {
     if ($doPack -and $doPack -ne $agoraCasca) {
       Falhar 'a casca (duel-server\host) mudou depois do ultimo `npm run pack`: o exe em dist\ esta velho. Rode npm run pack.'
     }
+  }
+
+  # O EXE EMBUTE O MESMO CONTEUDO QUE ESTE RELEASE PUBLICA?
+  #
+  # A digital da casca (acima) responde "o exe tem o CODIGO mais novo". Esta
+  # responde a outra metade, que ela nao ve': "o exe tem o CONTEUDO mais novo".
+  # Um `pack` rodado antes do ultimo `release:build` produz um exe que embute um
+  # game.zip mais velho que o game.zip deste mesmo Release.
+  #
+  # Isso ja' aconteceu (24/08/2026) e o estrago foi um LACO INFINITO de
+  # atualizacao: o cliente baixava o Release, trocava o exe, e o boot seguinte
+  # reinstalava a semente embutida por cima do que acabara de baixar, carimbando
+  # o marcador velho. A checagem seguinte oferecia a MESMA atualizacao. Para
+  # sempre — e o jogador ficava preso no front da data do `pack`, rodando contra
+  # um banco que ja' tinha seguido em frente.
+  #
+  # O `Payload.ExtrairPacote` nao rebaixa mais um pacote que ja' tem marcador em
+  # disco, entao o laco esta' fechado do lado do cliente. Esta trava impede de
+  # PUBLICAR o descompasso, que mesmo sem laco entrega conteudo velho a toda
+  # INSTALACAO NOVA — ela nasce sem marcador e por isso confia na semente.
+  $marcadoresPack = Join-Path $root 'dist\.cache\payload.markers'
+  if (Test-Path $marcadoresPack) {
+    $embutido = @{}
+    foreach ($linha in Get-Content $marcadoresPack) {
+      if ($linha -match '^\s*([a-z0-9_-]+)\s*=\s*(\S+)\s*$') { $embutido[$Matches[1]] = $Matches[2] }
+    }
+    $fora = @()
+    foreach ($par in @(@{ id = 'game';   zip = $zipGame },
+                       @{ id = 'cards';  zip = $zipCards },
+                       @{ id = 'engine'; zip = $zipEngine },
+                       @{ id = 'native'; zip = $zipNative })) {
+      if (-not $par.zip -or -not (Test-Path $par.zip)) { continue }
+      $agora = "$($par.id)-$((DigitalDoConteudo $par.zip).Substring(0,12))"
+      if ($embutido.ContainsKey($par.id) -and $embutido[$par.id] -ne $agora) {
+        $fora += "$($par.id): o exe embute $($embutido[$par.id]), este Release publica $agora"
+      }
+    }
+    if ($fora.Count -gt 0) {
+      foreach ($f in $fora) { Write-Host "       $f" -ForegroundColor Yellow }
+      # SO' NO -Publish. O dry-run e' JUSTAMENTE como se geram os zips que o
+      # `npm run pack` consome, entao falhar aqui trancaria a saida: o
+      # release:build morreria antes de escrever o manifest.json, e o pack
+      # seguinte nao teria o que ler ("nao achei dist\release\manifest.json").
+      # A sequencia correta e' release:build -> pack -> publish, e a trava tem de
+      # morder no ULTIMO passo, nao no primeiro.
+      if ($Publish) {
+        Falhar 'o exe em dist\ foi empacotado a partir de outro release:build. Rode npm run pack de novo e publique.'
+      }
+      Aviso 'o exe em dist\ ficou defasado - rode npm run pack antes de publicar.'
+    } else {
+      Ok 'o exe embute exatamente o conteudo deste Release'
+    }
+  } else {
+    Aviso 'dist\.cache\payload.markers nao existe - nao da para conferir se o exe embute este conteudo. Rode npm run pack.'
   }
 
   $versao = Select-String -Path (Join-Path $root 'duel-server\src\update\BuildConfig.cs') `

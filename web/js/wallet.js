@@ -17,6 +17,7 @@
  */
 
 import { req, sessao } from '/web/js/supabase.js';
+import { selo } from '/web/js/versao.js';
 
 const KEY_CACHE = 'ygo:wallet-cache';
 
@@ -51,7 +52,7 @@ function lerCache() {
   return cache;
 }
 
-const vazia = () => ({ dp: 0, collection: {}, pity: {}, urSpend: 0 });
+const vazia = () => ({ dp: 0, collection: {}, pity: {}, urPity: {} });
 
 /**
  * Traz a carteira do banco. Chame no boot, ANTES de ler qualquer coisa.
@@ -100,8 +101,8 @@ export function distinctCards() {
 /** Quantos pacotes deste booster já foram abertos (contador da SR garantida). */
 export const getPity = (key) => lerCache()?.pity?.[key] ?? 0;
 
-/** DP gasto em pacotes desde a última UR garantida. */
-export const getUrSpend = () => Number(lerCache()?.urSpend ?? 0);
+/** Pacotes DESTE booster desde a última UR (natural ou garantida). */
+export const getUrPity = (key) => lerCache()?.urPity?.[key] ?? 0;
 
 // ----------------------------------------------------------------- mutações
 
@@ -125,14 +126,34 @@ function motivo(r, padrao) {
  *
  * @returns {{ok: boolean, cartas?: Array<{id:number,rarity:string}>, error?: string}}
  */
-export async function abrirPacote(nomeDoBooster) {
+export async function abrirPacote(nomeDoBooster, quantos = 1) {
   const r = await req('rpc/abrir_pacote', {
     method: 'POST',
-    body: { p_booster: nomeDoBooster },
+    // O laço dos vários pacotes mora no SERVIDOR (migration 0044), e não aqui
+    // em N chamadas: as garantias são sequenciais (o `pity` sobe a cada pacote,
+    // a SR sai no múltiplo de 20), e dez requisições concorrentes leriam a
+    // mesma carteira e se sobrescreveriam — PERDENDO pacotes do contador. Lá é
+    // uma transação só: ou saem os dez, ou nenhum.
+    body: { p_booster: nomeDoBooster, p_qtd: Math.max(1, Math.min(10, Number(quantos) || 1)) },
   });
   if (!r.ok) return { ok: false, error: motivo(r, 'não consegui abrir o pacote') };
   guardarCache(r.dados.carteira);
-  return { ok: true, cartas: r.dados.cartas ?? [] };
+  return { ok: true, cartas: r.dados.cartas ?? [], pacotes: r.dados.pacotes ?? 1 };
+}
+
+/**
+ * Quantas vezes venci (e perdi para) cada adversário — `{ <npc>: {vitorias,
+ * derrotas} }`. NÃO são consecutivas: é o total.
+ *
+ * O `group by` é do banco (migration 0045). Um `select` direto em `duelos`
+ * funcionaria pela RLS, mas traria TODAS as linhas para o navegador contar no
+ * laço — quem tem 300 duelos baixaria 300 registros para desenhar meia dúzia
+ * de números.
+ */
+export async function vitoriasPorNpc() {
+  if (!sessao()) return {};
+  const r = await req('rpc/vitorias_por_npc', { method: 'POST', body: {} });
+  return r.ok && r.dados && typeof r.dados === 'object' ? r.dados : {};
 }
 
 /**
@@ -315,7 +336,16 @@ export async function iniciarDuelo(npcId, deckNpc) {
     body: {
       p_npc: String(npcId ?? ''),
       ...(deckNpc ? { p_deck_npc: String(deckNpc) } : {}),
+      // QUAL VERSAO ESTA PEDINDO PARA JOGAR. O banco compara com o piso
+      // (`versao_minima`, migration 0041) e recusa abaixo dele — e um cliente
+      // velho nao manda estes campos, que e' exatamente como ele e'
+      // reconhecido: vazio nao alcanca piso nenhum.
+      ...(await selo()),
     },
   });
+  // O erro do banco vem com o RECADO configurado pelo admin ("peca o
+  // instalador novo"), e quem chama mostra. Devolver `null` calado aqui faria
+  // o duelo simplesmente nao comecar, sem ninguem saber por que — que e' o
+  // sintoma de que este projeto acabou de sair.
   return r.ok ? r.dados : null;
 }

@@ -111,6 +111,9 @@
      gesto não tinha para onde mirar. Agora DECK e DROPS são abas: cada uma
      ocupa a coluna inteira, no mesmo canto de sempre. */
   .col-tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--line); }
+  /* Ver `esconder.test.mjs`: sem o guarda, a tira de abas aparecia no Deck
+     Builder do JOGADOR, onde ela nao existe (so' o modo NPC a liga). */
+  .col-tabs[hidden] { display: none; }
   .col-tabs .tab {
     flex: 1; padding: 7px 10px; font-size: 11px; letter-spacing: 1px;
     background: transparent; color: var(--dim);
@@ -122,6 +125,10 @@
   }
   .col-tabs .tab .n { color: var(--ink); font-size: 10px; }
   .aba { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  /* O pior dos sete: sem o guarda, `mostrarAba` nao escondia NADA — as duas
+     abas (DECK e DROPS) ficavam empilhadas na tela ao mesmo tempo, e o editor
+     do pool de drop aparecia ate' no Deck Builder do jogador comum. */
+  .aba[hidden] { display: none; }
 
   /* ---------- quadros de raridade do pool de drop ----------
      Um QUADRO por raridade, com moldura própria: cada um é o seu próprio alvo
@@ -520,6 +527,8 @@
       </select>
       <select id="f-sort" title="ordenar as cartas">
         <option value="">ordem: padrão</option>
+        <option value="raridade">raridade: UR &rarr; N</option>
+        <option value="raridade-asc">raridade: N &rarr; UR</option>
         <option value="atk">maior ATK</option>
         <option value="atk-asc">menor ATK</option>
         <option value="def">maior DEF</option>
@@ -633,6 +642,13 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module" src="/web/js/builder.js"></script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

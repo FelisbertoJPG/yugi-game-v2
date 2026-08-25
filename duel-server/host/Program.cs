@@ -27,6 +27,12 @@ namespace ClassicDuels.Casca
     {
         static int Main(string[] args)
         {
+            // ANTES DE QUALQUER ESCRITA. O executavel virou `WinExe` (o jogo nao
+            // abre mais janela de terminal), e um WinExe chamado de um terminal
+            // nao se anexa a ele sozinho — as suites e as sondas ficariam mudas.
+            // Ver `ConsoleDoPai`.
+            ConsoleDoPai.Anexar();
+
             // Suite da propria casca. Vem antes de tudo: nao carrega motor
             // nenhum, so' mexe em pastas descartaveis no %TEMP%.
             if (Array.IndexOf(args, "--test-casca") >= 0) return TestCasca.Run();
@@ -62,7 +68,10 @@ namespace ClassicDuels.Casca
             }
             catch (Exception e)
             {
-                CascaLog.Err("nao consegui carregar o motor do jogo: " + e.Message);
+                AvisoDaCasca.Erro("O Classic Duels nao conseguiu carregar o motor do jogo.\n\n"
+                                + e.Message + "\n\n"
+                                + "Se isto persistir, reinstale o jogo — seus decks, sua carteira e "
+                                + "sua conta nao sao tocados.");
                 return Segurar(5);
             }
 
@@ -89,7 +98,13 @@ namespace ClassicDuels.Casca
                         CascaLog.Warn("tentando de novo com o motor anterior");
                         return Motor.Invocar(Motor.CarregarEmbutido(raiz), args, raiz);
                     }
-                    catch (Exception e2) { CascaLog.Err("o motor de reserva tambem morreu: " + e2.Message); }
+                    catch (Exception e2)
+                    {
+                        AvisoDaCasca.Erro("O Classic Duels nao conseguiu abrir.\n\n"
+                                        + e2.Message + "\n\n"
+                                        + "O motor anterior tambem falhou. Reinstale o jogo — seus "
+                                        + "decks, sua carteira e sua conta nao sao tocados.");
+                    }
                 }
                 return Segurar(6);
             }
@@ -103,6 +118,11 @@ namespace ClassicDuels.Casca
         static int Segurar(int codigo)
         {
             if (!Instalacao.TemPayload) return codigo;
+            // Sem console nao ha' janela para segurar: quem ja' mostrou a mensagem
+            // foi a caixa de dialogo, e ela e' modal — esperar mais oito segundos
+            // aqui so' deixaria um processo invisivel vivo depois de o jogador ja'
+            // ter clicado em OK.
+            if (!ConsoleDoPai.TemConsole) return codigo;
             Console.WriteLine();
             Console.WriteLine("  (pressione qualquer tecla para fechar)");
             try { Console.ReadKey(true); } catch { System.Threading.Thread.Sleep(8000); }

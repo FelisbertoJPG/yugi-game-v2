@@ -50,6 +50,8 @@ namespace DuelServer
                 PacoteVolatilNaoArrastaOPesado(Sub(bancada, "7-volatilidade"));
                 RaizesSobrepostasNaoSeApagam(Sub(bancada, "8-sobreposicao"));
                 InstalacaoNovaNaoOfereceAtualizacaoFantasma(Sub(bancada, "9-fantasma"));
+                PayloadVelhoNaoRebaixaOQueOUpdaterInstalou(Sub(bancada, "9b-payload-velho"));
+                OrfaoNaoApagaOQuePacoteNovoTrouxe(Sub(bancada, "9c-orfao-novo"));
                 InstalacaoComNomeAntigoEMigrada(Sub(bancada, "10-renomeacao"));
                 MotorNovoFicaEmEstagio(Sub(bancada, "11-motor"));
                 ExeVelhoNaoFicaCongelado(Sub(bancada, "12-exe-velho"));
@@ -480,6 +482,200 @@ namespace DuelServer
             Checa(plano2.PayloadsPendentes.Count() == 2,
                   "sem o payload.markers, o fantasma reaparece (é o marcador que resolve)",
                   plano2.Resumo());
+        }
+
+
+        /// <summary>
+        /// O PAYLOAD EMBUTIDO NAO REBAIXA O QUE O UPDATER JA' INSTALOU.
+        ///
+        /// O laco infinito de 24/08/2026, e ele passou dias com jogador preso —
+        /// baixando conteudo todo boot e nunca saindo do lugar. A sequencia, lida
+        /// do `duel-server.log` de uma maquina de verdade:
+        ///
+        ///   pacote 'game' instalado (132 arquivos) — game-e8fb91c13b31  ← do Release
+        ///   executavel novo instalado — reabrindo o Classic Duels
+        ///   ===== nova sessao =====
+        ///   versao nova do jogo — atualizando os arquivos
+        ///   pacote 'game' embutido: 122 arquivos — game-7abc579bf254    ← rebaixou
+        ///   atualizacao disponivel: game + engine + 10 orfao(s)         ← recomeca
+        ///
+        /// A causa e' que o `.exe` de um Release pode embutir um `game.zip` mais
+        /// VELHO que o `game.zip` daquele mesmo Release — basta o `pack` ter
+        /// rodado antes do ultimo `release:build`. O boot seguinte via o `.versao`
+        /// diferente, concluia "versao nova do jogo" e reinstalava o payload
+        /// inteiro por cima, carimbando o marcador antigo.
+        ///
+        /// O sintoma do lado de quem joga nao era "atualizacao falhou": era o
+        /// jogo ficar PARA SEMPRE no front da data do `pack`. E como o front
+        /// continuava mudando de versao para tras e para frente, ele acabava
+        /// rodando contra um banco que ja' tinha seguido em frente.
+        ///
+        /// Nao da' para comparar as duas versoes e escolher a maior: o marcador e'
+        /// um DIGEST (`game-e8fb91c13b31`), nao um numero. O que se sabe e' quem
+        /// tem autoridade — e havendo marcador em disco, a autoridade e' o
+        /// Release.
+        /// </summary>
+        static void PayloadVelhoNaoRebaixaOQueOUpdaterInstalou(string dir)
+        {
+            var (raiz, fonte) = Cenario(dir);
+            string release = Path.Combine(dir, "release");
+            var m = Manifest.Parse(File.ReadAllText(Path.Combine(release, "manifest.json")));
+
+            // 1) O exe instala o payload dele. Instalacao nova, em dia.
+            string payloadDoExe = Path.Combine(dir, "payload.zip");
+            MontarPayload(payloadDoExe, release, m, comMarcadores: true);
+            using (var s = File.OpenRead(payloadDoExe)) Payload.Instalar(s, raiz);
+            string marcadorDoPack = UpdateEngine.MarcadorInstalado(raiz, "game");
+
+            // 2) Sai um Release NOVO — com um modulo que so' existe nele — e o
+            //    updater o aplica. Dali em diante quem manda e' este conteudo.
+            string zipGame = Path.Combine(release, "game.zip");
+            CriarZip(zipGame, new Dictionary<string, string>
+            {
+                ["web/index.html"] = "<h1>Classic Duels</h1><!-- do RELEASE NOVO -->",
+                ["web/js/deck.js"] = "// regras de construcao",
+                ["web/js/versao.js"] = "// so' existe no Release novo",
+                ["ygo-data/src/ygodb.js"] = "// api de consulta",
+                ["ygo-data/data/cards.index.json"] = "[]",
+                ["boards/oficial.json"] = "{\"name\":\"Oficial\"}"
+            });
+            int iGame = m.Payloads.FindIndex(p => p.Id == "game");
+            m.Payloads[iGame] = NovoPayload("game", zipGame, "web", "ygo-data/src", "ygo-data/data");
+            File.WriteAllText(Path.Combine(release, "manifest.json"), m.ToJson(),
+                              new UTF8Encoding(false));
+
+            var eng = NovaEngine(raiz, fonte);
+            eng.AplicarAsync(eng.Montar(eng.CarregarManifestoAsync().GetAwaiter().GetResult()))
+               .GetAwaiter().GetResult();
+
+            string marcadorDoRelease = UpdateEngine.MarcadorInstalado(raiz, "game");
+            Checa(marcadorDoRelease != marcadorDoPack,
+                  "o updater avancou o 'game' para alem do que o exe embute",
+                  $"{marcadorDoPack} -> {marcadorDoRelease}");
+
+            // 3) O EXE E' TROCADO, e o boot seguinte reinstala o payload embutido
+            //    — que agora esta' ATRASADO em relacao ao disco.
+            using (var s = File.OpenRead(payloadDoExe)) Payload.Instalar(s, raiz);
+
+            // O arquivo tem de ser comparado por CONTEUDO, e num caminho que os
+            // DOIS lados trazem: `versao.js` so' existe no Release, e extrair um
+            // zip nao apaga o que nao esta' nele — uma assercao de existencia ali
+            // passa com a guarda e sem ela, provando nada.
+            Checa(File.ReadAllText(Path.Combine(raiz, "web", "index.html")).Contains("RELEASE NOVO"),
+                  "o payload do exe NAO sobrescreveu o front que o updater instalou");
+            Checa(UpdateEngine.MarcadorInstalado(raiz, "game") == marcadorDoRelease,
+                  "o marcador continua o do Release, e nao o da data do `pack`");
+
+            var eng2 = NovaEngine(raiz, fonte);
+            var plano = eng2.Montar(eng2.CarregarManifestoAsync().GetAwaiter().GetResult());
+            Checa(plano.NadaAFazer,
+                  "e por isso o boot seguinte nao oferece a MESMA atualizacao de novo",
+                  plano.Resumo());
+
+            // PAR CONTROLE. Sem ele, um `ExtrairPacote` que simplesmente nunca
+            // extraisse nada passaria em todas as asercoes acima — e toda
+            // instalacao NOVA do jogo nasceria sem conteudo, que e' um estrago
+            // bem maior que o laco.
+            string raizNova = Path.Combine(dir, "primeira-vez", "game");
+            Directory.CreateDirectory(raizNova);
+            using (var s = File.OpenRead(payloadDoExe)) Payload.Instalar(s, raizNova);
+            Checa(File.Exists(Path.Combine(raizNova, "web", "index.html")),
+                  "PAR CONTROLE: sem marcador em disco, o payload instala normalmente");
+        }
+
+
+        /// <summary>
+        /// O ORFAO NAO PODE APAGAR O QUE O PACOTE ACABOU DE INSTALAR — e, se ja'
+        /// apagou, o pacote volta.
+        ///
+        /// O bug de 24/08/2026, e ele nao pareceu um erro de instalador. A lista
+        /// de orfaos e' montada no PLANO, contra o inventario de ANTES, e aplicada
+        /// DEPOIS de os pacotes terem sido reinstalados. Todo arquivo que o pacote
+        /// NOVO trazia e o inventario VELHO nao conhecia era instalado e apagado
+        /// segundos depois.
+        ///
+        /// Na maquina de verdade sumiram dez: `bootguard.js`, `versao.js`,
+        /// `chatdoca.js`, `chat.js`, `poolordem.js` e os testes deles. Como
+        /// `index.html` importa tres, e um `import` que da' 404 mata o
+        /// `&lt;script type="module"&gt;` inteiro, a home passou a desenhar so' o
+        /// casco estatico — *"trava numa home sem interacao e sem informacoes da
+        /// conta"*. Sem erro em lugar nenhum: o modulo que existe para mostrar a
+        /// falha na tela (`bootguard.js`) era um dos apagados.
+        ///
+        /// As DUAS metades sao provadas aqui porque uma so' nao resolve:
+        ///
+        ///   • cancelar o orfao impede que aconteca de novo;
+        ///   • a checagem de integridade CURA quem ja' perdeu os arquivos — sem
+        ///     ela o marcador continua batendo, o plano diz "tudo em dia" para
+        ///     sempre e nada traz de volta o que sumiu.
+        /// </summary>
+        static void OrfaoNaoApagaOQuePacoteNovoTrouxe(string dir)
+        {
+            var (raiz, fonte) = Cenario(dir);
+            string release = Path.Combine(dir, "release");
+            var m = Manifest.Parse(File.ReadAllText(Path.Combine(release, "manifest.json")));
+
+            var eng = NovaEngine(raiz, fonte);
+            eng.AplicarAsync(eng.Montar(m)).GetAwaiter().GetResult();
+
+            // Um Release NOVO acrescenta um modulo ao pacote 'game'.
+            string zipGame = Path.Combine(release, "game.zip");
+            CriarZip(zipGame, new Dictionary<string, string>
+            {
+                ["web/index.html"] = "<h1>Classic Duels</h1>",
+                ["web/js/deck.js"] = "// regras de construcao",
+                ["web/js/bootguard.js"] = "// a rede de seguranca do boot",
+                ["ygo-data/src/ygodb.js"] = "// api de consulta",
+                ["ygo-data/data/cards.index.json"] = "[]",
+                ["boards/oficial.json"] = "{\"name\":\"Oficial\"}"
+            });
+            int iGame = m.Payloads.FindIndex(p => p.Id == "game");
+            m.Payloads[iGame] = NovoPayload("game", zipGame, "web", "ygo-data/src", "ygo-data/data");
+            File.WriteAllText(Path.Combine(release, "manifest.json"), m.ToJson(),
+                              new UTF8Encoding(false));
+
+            // O INVENTARIO fica velho — e' o estado em que o laco do payload
+            // deixava toda maquina: o arquivo esta' no disco e o inventario nao o
+            // conhece, entao ele e' orfao aos olhos do plano.
+            string inv = Path.Combine(raiz, UpdateEngine.PastaMarcadores, "game.files");
+            File.WriteAllLines(inv, File.ReadAllLines(inv)
+                                        .Where(l => !l.EndsWith("bootguard.js")).ToArray());
+            File.WriteAllText(Path.Combine(raiz, "web", "js", "bootguard.js"), "// sobra");
+
+            var eng2 = NovaEngine(raiz, fonte);
+            var plano = eng2.Montar(eng2.CarregarManifestoAsync().GetAwaiter().GetResult());
+            Checa(plano.Orfaos.Any(o => o.Path.EndsWith("bootguard.js")),
+                  "o arquivo fora do inventario e' visto como orfao (o cenario existe)");
+
+            eng2.AplicarAsync(plano).GetAwaiter().GetResult();
+
+            Checa(File.Exists(Path.Combine(raiz, "web", "js", "bootguard.js")),
+                  "o orfao NAO foi apagado: o pacote novo o traz");
+            Checa(File.ReadAllText(Path.Combine(raiz, "web", "js", "bootguard.js"))
+                      .Contains("rede de seguranca"),
+                  "e o que ficou e' a versao do Release, nao a sobra");
+
+            // --- A CURA. Um arquivo do inventario apagado por fora (foi o que
+            //     este mesmo bug fez em producao) tem de trazer o pacote de volta,
+            //     mesmo com o marcador batendo.
+            File.Delete(Path.Combine(raiz, "web", "js", "bootguard.js"));
+
+            var eng3 = NovaEngine(raiz, fonte);
+            var plano3 = eng3.Montar(eng3.CarregarManifestoAsync().GetAwaiter().GetResult());
+            Checa(!plano3.NadaAFazer,
+                  "marcador em dia com arquivo sumido NAO e' 'tudo em dia'", plano3.Resumo());
+
+            eng3.AplicarAsync(plano3).GetAwaiter().GetResult();
+            Checa(File.Exists(Path.Combine(raiz, "web", "js", "bootguard.js")),
+                  "o pacote foi reinstalado e o arquivo voltou");
+
+            // PAR CONTROLE: com tudo no lugar, nada disto dispara. Sem ele, uma
+            // checagem que pedisse reinstalacao sempre passaria nas duas
+            // assercoes acima e faria todo boot baixar 27 MB de `cards`.
+            var eng4 = NovaEngine(raiz, fonte);
+            var plano4 = eng4.Montar(eng4.CarregarManifestoAsync().GetAwaiter().GetResult());
+            Checa(plano4.NadaAFazer,
+                  "PAR CONTROLE: instalacao intacta continua sendo 'tudo em dia'", plano4.Resumo());
         }
 
         /// <summary>Monta um `payload.zip` no mesmo formato que o `tools/pack.ps1` gera.</summary>

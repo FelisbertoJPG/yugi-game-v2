@@ -24,7 +24,7 @@ import {
   listCampaignNames, npcLevel,
 } from '/web/js/npcs.js';
 import {
-  getDP, hydrateWallet, npcsVencidos, decksVencidos,
+  getDP, hydrateWallet, npcsVencidos, decksVencidos, vitoriasPorNpc,
 } from '/web/js/wallet.js';
 import {
   carregarDrops, dropsDoDeck, chancesDe, totalDoPool,
@@ -54,6 +54,9 @@ function toast(msg) {
 let campanhas = [];        // nomes, na ordem em que aparecem
 let iCampanha = 0;
 let vencidos = new Set();  // ids que este jogador já derrotou
+// Quantas vezes venci/perdi para cada um — `{ <npc>: {vitorias, derrotas} }`.
+// NÃO são consecutivas: é o total. O `group by` é do banco (migration 0045).
+let placar = {};
 let drops = {};            // conteudo/npc-drops normalizado
 let ordemPublicada = {};   // conteudo/npc-trilha: { campanha: [id, …] }
 let deckVencido = {};      // { npcId: Set<nome de deck já derrotado> }
@@ -141,6 +144,7 @@ function mostrarPainel(npc) {
           ? '<span class="aviso">▲ avançado — lê a sua mão</span>' : '')
       + (venceuEste ? '<span style="color:var(--green,#3fd68a)">✔ este deck já foi vencido</span>'
          : venceu ? '<span style="color:var(--green,#3fd68a)">✔ adversário já vencido</span>' : '')
+      + placarDe(npc)
     + '</div>'
     + '<div class="acoes">'
       + `<button class="btn-primary" id="pn-duelar" ${temDeck ? '' : 'disabled'}>`
@@ -325,6 +329,26 @@ try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch { /* sem
  * relata "não aparece nada" não tem o que contar, e quem investiga não tem
  * onde olhar.
  */
+/**
+ * O retrospecto contra este adversário: quantas vezes venci e perdi.
+ *
+ * Some quando nunca houve duelo — um "0 × 0" antes do primeiro confronto é
+ * ruído, e a trilha já diz que o quadro está liberado.
+ *
+ * As vitórias NÃO precisam ser consecutivas: é o total, que é o número que o
+ * jogador reconhece ("já ganhei 7 do Weevil"). Um contador de sequência
+ * zeraria numa derrota e apagaria o histórico de quem está treinando.
+ */
+function placarDe(npc) {
+  const p = placar?.[npc.id];
+  const v = Number(p?.vitorias ?? 0);
+  const d = Number(p?.derrotas ?? 0);
+  if (!v && !d) return '';
+  return `<span class="placar">retrospecto: <b>${v}</b> vitória${v === 1 ? '' : 's'}`
+       + (d ? ` · <i>${d} derrota${d === 1 ? '' : 's'}</i>` : '')
+       + '</span>';
+}
+
 async function carregar() {
   await hydrateWallet();
   $('dp').textContent = `${getDP()} DP`;
@@ -332,8 +356,11 @@ async function carregar() {
   await hydrateCustomNpcs();
   await loadNpcDecks();
   let ordem;
-  [vencidos, drops, ordem, deckVencido] = await Promise.all([
+  // Tudo de uma vez: são leituras independentes, e em série somariam os
+  // tempos de ida e volta antes de a trilha aparecer.
+  [vencidos, drops, ordem, deckVencido, placar] = await Promise.all([
     npcsVencidos(), carregarDrops(), pullFile('npc-trilha'), decksVencidos(),
+    vitoriasPorNpc(),
   ]);
   ordemPublicada = (ordem && typeof ordem === 'object') ? ordem : {};
 

@@ -73,6 +73,24 @@
   .amigos-topo .n { margin-left: auto; font-size: 10px; color: var(--dim); }
 
   .amigos { flex: 1; min-height: 90px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+
+  .busca-amigo { display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+                 background: var(--panel2); border: 1px solid var(--line); padding: 3px 6px; }
+  .busca-amigo .lupa { font-size: 11px; opacity: .7; }
+  .busca-amigo input { flex: 1; background: none; border: 0; color: var(--ink);
+                       font-family: inherit; font-size: 11px; padding: 2px 0; }
+  .busca-amigo input:focus { outline: none; }
+  /* `display:flex` ganha do `[hidden]` da folha do navegador — sem este guarda a
+     caixa de resultados fica na tela vazia o tempo todo. Ver esconder.test.mjs. */
+  .busca-res { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 30vh; overflow-y: auto; }
+  .busca-res[hidden] { display: none; }
+  .busca-res .achado { display: flex; align-items: center; gap: 6px; width: 100%;
+                       background: var(--panel2); border: 1px solid var(--line);
+                       color: var(--ink); font-family: inherit; font-size: 11px;
+                       padding: 4px 6px; cursor: pointer; text-align: left; }
+  .busca-res .achado:hover { border-color: var(--gold); color: var(--gold); }
+  .busca-res .achado .mais { margin-left: auto; color: var(--dim); font-size: 10px; }
+  .busca-res .vazio { color: var(--dim); font-size: 10px; padding: 2px; }
   .amigo {
     display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
     padding: 7px 9px; background: var(--panel2); border: 1px solid var(--line);
@@ -119,6 +137,70 @@
   .notif-btn.tem { border-color: var(--gold); animation: pulsa 1.6s ease-in-out infinite; }
   .notif-btn.tem .txt { color: var(--ink); }
   .notif-btn.tem .cont { background: var(--red); color: #fff; }
+  .notif-btn .ic { font-size: 12px; }
+
+  /* ------------------------------------------------------- a doca de chats
+     Presa no rodapé e à direita da lateral, para as janelas crescerem de lado
+     sem espremer o menu. `row-reverse` é o "se gruda mais a lateral" do
+     desenho: o fluxo começa na esquerda, e as minimizadas — que o
+     `chatdoca.js` põe primeiro no DOM — acabam encostadas nela. */
+  .chatdoca {
+    position: fixed; left: var(--lateral); right: 0; bottom: 0; z-index: 60;
+    display: flex; align-items: flex-end; gap: 8px; padding: 0 10px;
+    pointer-events: none;   /* a doca é só o trilho; quem clica são as janelas */
+  }
+  .chatdoca > * { pointer-events: auto; }
+
+  .chatjanela {
+    display: flex; flex-direction: column;
+    width: 280px; height: 320px;
+    background: var(--panel); border: 1px solid var(--line); border-bottom: 0;
+  }
+  /* Minimizada = só a barra. `height:auto` em vez de `display:none` no corpo:
+     a janela continua na doca, ocupando o lugar dela na fila. */
+  .chatjanela.min { height: auto; width: 190px; }
+  .chatjanela.min .cj-corpo,
+  .chatjanela.min .cj-pe,
+  .chatjanela.min .cj-erro { display: none; }
+
+  .cj-barra { display: flex; align-items: center; gap: 6px; cursor: pointer;
+              background: var(--panel2); border-bottom: 1px solid var(--line); padding: 5px 7px; }
+  .cj-barra:hover { border-bottom-color: var(--gold); }
+  .cj-ic { font-size: 11px; }
+  .cj-tit { flex: 1; font-size: 10px; letter-spacing: 1px; color: var(--ink);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cj-n { font-size: 10px; font-weight: bold; color: transparent; }
+  .cj-n.tem { color: #fff; background: var(--red); border-radius: 8px; padding: 0 5px; }
+  .cj-min, .cj-x { background: none; border: 0; color: var(--dim); cursor: pointer;
+                   font-size: 12px; line-height: 1; padding: 0 2px; }
+  .cj-min:hover, .cj-x:hover { color: var(--gold); }
+
+  .cj-corpo { flex: 1; overflow-y: auto; padding: 6px 7px; display: flex;
+              flex-direction: column; gap: 4px; font-size: 11px; }
+  .cj-vazio { color: var(--dim); font-size: 10px; }
+  .cj-msg { line-height: 1.35; word-break: break-word; }
+  .cj-msg b { color: var(--gold); margin-right: 5px; font-weight: normal; }
+  /* A minha mensagem encosta na direita — é o que separa "eu" de "os outros"
+     numa conversa de várias pessoas sem repetir o nome em toda linha. */
+  .cj-msg.meu { align-self: flex-end; text-align: right; max-width: 90%; }
+  .cj-msg.meu b { color: var(--dim); }
+
+  .cj-erro { display: none; font-size: 10px; color: var(--red); padding: 0 7px 4px; }
+  .cj-erro.tem { display: block; }
+
+  .cj-pe { border-top: 1px solid var(--line); padding: 5px 7px; }
+  .cj-pe input { width: 100%; background: var(--panel2); border: 1px solid var(--line);
+                 color: var(--ink); font-family: inherit; font-size: 11px; padding: 4px 6px; }
+  .cj-pe input:focus { outline: none; border-color: var(--gold); }
+
+  @media (max-width: 900px) {
+    /* Na tela estreita a lateral não é fixa (ela vira um bloco no topo), então a
+       doca não pode reservar espaço para ela. E a janela encolhe: 280px não
+       cabem lado a lado num celular. */
+    .chatdoca { left: 0; }
+    .chatjanela { width: 76vw; max-width: 280px; height: 46vh; }
+    .chatjanela.min { width: auto; }
+  }
   @keyframes pulsa { 0%, 100% { box-shadow: 0 0 0 0 #e8c46a55; } 50% { box-shadow: 0 0 0 5px #e8c46a00; } }
   @media (prefers-reduced-motion: reduce) { .notif-btn.tem { animation: none; } }
 
@@ -183,8 +265,12 @@
 
   /* Ícone de canto — mesmo padrão do .log-fab do duel.html: um botão
      flutuante que abre um painel, em vez de ocupar espaço fixo na tela. */
+  /* No TOPO, e não no rodapé: o rodapé passou a ser a doca dos chats
+     (`.chatdoca`), e o atalho do deck ficava exatamente onde a primeira janela
+     abre — a de baixo cobriria a de cima, ou o contrário, dependendo do
+     `z-index`. Subir foi mais honesto que disputar a mesma faixa da tela. */
   .deck-fab {
-    position: fixed; left: calc(var(--lateral) + 16px); bottom: 16px; z-index: 20;
+    position: fixed; left: calc(var(--lateral) + 16px); top: 16px; z-index: 20;
     width: 44px; height: 44px; border-radius: 50%;
     background: var(--panel); border: 2px solid var(--line);
     font-size: 20px; display: flex; align-items: center; justify-content: center;
@@ -198,9 +284,16 @@
     padding: 0 3px; border: 1px solid var(--bg);
   }
   .deck-fab .badge.ok { background: var(--green); }
+  /* O `display:flex` acima ganha do `[hidden]` da folha do navegador — sem este
+     guarda, o selo aparecia VAZIO em cima do atalho de deck o tempo todo.
+     Ver `node web/js/esconder.test.mjs`. */
+  .deck-fab .badge[hidden] { display: none; }
 
+  /* O painel abre para BAIXO, colado no botão — ele seguiu o atalho para o
+     topo. Fosse mantido no rodapé, o clique abriria uma caixa do outro lado da
+     tela, longe de onde a pessoa clicou. */
   .deck-popup {
-    display: none; position: fixed; left: calc(var(--lateral) + 16px); bottom: 68px; z-index: 20;
+    display: none; position: fixed; left: calc(var(--lateral) + 16px); top: 68px; z-index: 20;
     width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px);
     overflow: auto; background: var(--panel); border: 2px solid var(--gold);
     padding: 14px;
@@ -226,7 +319,12 @@
      perderia na cascata (mesma especificidade) e o botao ficaria deslocado
      numa tela onde nao ha lateral nenhuma para desviar. */
   @media (max-width: 880px) {
-    .deck-fab, .deck-popup { left: 16px; }
+    /* Na tela estreita a lateral não é fixa — ela vira um bloco no TOPO —, então
+       o atalho no topo cairia por cima do cartão de perfil. Ele volta para o
+       rodapé, mas do lado DIREITO: a doca dos chats encosta na esquerda, e o
+       canto direito é o único que sobra livre nas duas pontas. */
+    .deck-fab  { left: auto; right: 16px; top: auto; bottom: 16px; }
+    .deck-popup { left: auto; right: 16px; top: auto; bottom: 68px; }
   }
 </style>
 </head>
@@ -256,16 +354,42 @@
         <h2>AMIGOS</h2>
         <span class="n" id="amigos-n"></span>
       </div>
+      <!-- A busca fica ENTRE o cabeçalho e a lista, e não numa tela à parte:
+           adicionar alguém é a mesma tarefa que olhar quem já está lá. Antes o
+           único caminho era ir ao Multiplayer e digitar a etiqueta. -->
+      <div class="busca-amigo">
+        <span class="lupa" aria-hidden="true">🔍</span>
+        <input type="text" id="busca-amigo" autocomplete="off"
+               placeholder="buscar por nome ou etiqueta…"
+               title="digite o nome (começo) ou a etiqueta (só números)">
+      </div>
+      <div class="busca-res" id="busca-res" hidden></div>
+
       <div class="amigos" id="amigos">
         <div class="vazio">carregando…</div>
       </div>
     </div>
+
+    <!-- O chat global fica ACIMA das notificações e com a mesma cara: os dois
+         são "coisas que chegam", e a lateral não deveria ter dois desenhos para
+         a mesma ideia. Minimizado, ele é só este botão — é o "ícone de globo"
+         do desenho. -->
+    <button class="notif-btn" id="btn-chat-global">
+      <span class="ic" aria-hidden="true">🌐</span>
+      <span class="txt">CHAT GLOBAL</span>
+      <span class="cont" id="chat-n">0</span>
+    </button>
 
     <button class="notif-btn" id="btn-notif">
       <span class="txt">SOLICITAÇÕES<br>NOTIFICAÇÃO</span>
       <span class="cont" id="notif-n">0</span>
     </button>
   </aside>
+
+  <!-- A DOCA dos chats. Fica FORA da lateral e presa no rodapé: as janelas
+       precisam poder crescer para a direita, lado a lado, sem espremer o menu.
+       Ver `web/js/chatdoca.js`. -->
+  <div class="chatdoca" id="chatdoca"></div>
 
   <!-- =========================================================== CONTEÚDO -->
   <main>
@@ -341,12 +465,18 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="/web/js/bootguard.js"></script>
 <script type="module">
 import { getActiveDeck, listDecks, hydrateDecks } from '/web/js/storage.js';
 import { RULES } from '/web/js/deck.js';
 import { getDP, totalCards, hydrateWallet } from '/web/js/wallet.js';
 import { requireLogin, logout, desviarParaRecuperacao } from '/web/js/auth.js';
-import { meuPerfil, amigos as listarAmigos, desafiar, meusDecks } from '/web/js/multiplayer.js';
+import { contaAtual } from '/web/js/supabase.js';
+import { montarDoca, abrirConversa, fecharTudo as fecharChats, chegouAlgo } from '/web/js/chatdoca.js';
+import {
+  meuPerfil, amigos as listarAmigos, desafiar, meusDecks,
+  buscar as buscarJogador, pedirAmizade, removerAmigo,
+} from '/web/js/multiplayer.js';
 import { vigiar, aceitar, recusar } from '/web/js/notificacoesvivo.js';
 import { baterPonto } from '/web/js/presenca.js';
 import {
@@ -354,6 +484,11 @@ import {
   caminhoDoIcone, PADRAO,
 } from '/web/js/icones.js';
 
+// A rede de seguranca deste boot mora em `/web/js/bootguard.js`, importado por
+// uma tag ACIMA desta: um `throw` em qualquer `await` daqui para o modulo
+// inteiro, e sem ele a home ficava nos "carregando…" de fabrica para sempre,
+// sem erro em lugar nenhum. Ele nao conserta causa — cada uma se guarda no
+// lugar dela; ele conserta o silencio.
 // A Site URL do projeto aponta para a raiz, entao um link de recuperacao que o
 // Supabase nao redirecionou para recuperar.html cai AQUI. Precisa vir antes do
 // requireLogin: o redirect dele para o login descartaria o fragmento da URL, e
@@ -365,8 +500,21 @@ if (desviarParaRecuperacao()) throw new Error('indo para a recuperacao');
 const username = await requireLogin();
 if (!username) throw new Error('redirecionando para login');
 
-await hydrateWallet();   // traz DP + coleção do projeto (store/users/<u>/wallet.json)
-await hydrateDecks();    // e os decks de decks/users/<u>/player/*.ydk
+// Hidratar e' encher um CACHE, e cache que falha nao e' motivo para nao ter
+// home: sem a carteira o jogador ve o ultimo DP conhecido, sem os decks ve os
+// que aquele navegador ja' tinha. Sem o `catch` era o oposto — um deck torto
+// guardado no navegador (`new Deck(d)`) ou uma gravacao recusada derrubavam a
+// TELA INTEIRA, e a home nao passava de 'carregando…'.
+//
+// `requireLogin()` acima nao ganha o mesmo tratamento de proposito: ali o
+// desfecho de nao saber quem e' o jogador e' ir para o login, nunca desenhar a
+// home de ninguem.
+async function tolerar(oque, fn) {
+  try { return await fn(); }
+  catch (e) { console.warn(`[home] ${oque} falhou; seguindo com o que ja' estava aqui`, e); return null; }
+}
+await tolerar('a carteira', hydrateWallet);   // DP + coleção
+await tolerar('os decks', hydrateDecks);      // decks/users/<u>/player/*.ydk
 
 const $ = (id) => document.getElementById(id);
 const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
@@ -465,6 +613,16 @@ document.addEventListener('keydown', (e) => {
 // acender por causa de um contador que chegou por outro caminho.
 baterPonto((n) => { $('online-n').textContent = String(n); });
 
+// A lista crua de `meus_amigos` (amigos E pedidos), como veio do banco. A busca
+// a consulta para saber o que oferecer em cada resultado.
+let amigosAgora = [];
+
+// O MEU id. O chat precisa dele para separar "eu" das outras pessoas na
+// conversa — e é a única coisa da sessão que a doca usa. Preenchido no boot,
+// abaixo; até lá, toda mensagem é desenhada como de outra pessoa, que é o erro
+// barato dos dois (o contrário mostraria o nome errado).
+let meuId = null;
+
 // --------------------------------------------------------------- amigos
 // A lista vem do banco (`meus_amigos`, migration 0034), já com `online` e já
 // ordenada — quem tem pedido pendente primeiro, depois quem está online. A
@@ -484,7 +642,10 @@ async function pintarAmigos() {
     return;
   }
 
-  const lista = (r.dados ?? []).filter((a) => a.direcao === 'amigo');
+  // A lista CRUA (com os pedidos pendentes) fica guardada: a busca precisa dela
+  // para não oferecer "adicionar" a quem já é amigo ou já tem pedido em aberto.
+  amigosAgora = r.dados ?? [];
+  const lista = amigosAgora.filter((a) => a.direcao === 'amigo');
   $('amigos-n').textContent = lista.length
     ? `${lista.filter((a) => a.online).length}/${lista.length} online` : '';
 
@@ -500,11 +661,15 @@ async function pintarAmigos() {
   for (const a of lista) {
     const b = document.createElement('button');
     b.className = 'amigo' + (a.online ? ' on' : '');
-    // Offline não é clicável: o desafio expira em 10 minutos e chamar quem não
-    // está com o jogo aberto é gastar o convite à toa.
-    b.disabled = !a.online;
-    b.title = a.online ? `desafiar ${a.usuario} para um duelo`
-                       : `${a.usuario} está offline`;
+    // O OFFLINE voltou a ser clicável (23/08/2026). Ele foi desabilitado porque
+    // desafiar quem está com o jogo fechado é gastar um convite que expira em 10
+    // minutos — e isso continua verdade: quem decide é o cartão, que só oferece
+    // "chamar" para quem está online. O que a trava fazia junto, sem querer, era
+    // impedir REMOVER um amigo offline: a única porta para isso é este clique, e
+    // ela estava fechada justamente para quem não está jogando — que é a maioria
+    // da lista na maior parte do tempo.
+    b.title = a.online ? `${a.usuario} — desafiar ou remover`
+                       : `${a.usuario} está offline — abrir para remover`;
     // O ícone do amigo vem como `icone_id` (`meus_amigos`), não como arquivo: a
     // policy de `perfis` só deixa cada um ver o próprio registro, então quem
     // cruza o id com a arte é o catálogo, que é de leitura aberta.
@@ -519,18 +684,56 @@ async function pintarAmigos() {
   caixa.replaceChildren(frag);
 }
 
-/** O cartão de "chamar para duelar", com a escolha do deck. */
+/**
+ * O cartão do amigo: chamar para duelar e/ou REMOVER da lista.
+ *
+ * Os dois moram no mesmo lugar porque a porta é a mesma — o clique no amigo. E
+ * "chamar" só aparece para quem está ONLINE: o convite expira em 10 minutos, e
+ * oferecê-lo a quem está com o jogo fechado é prometer o que não acontece.
+ * Remover vale sempre; era justamente isso que não tinha porta nenhuma antes.
+ */
 function abrirDesafio(amigo) {
   const corpo = document.createElement('div');
   corpo.className = 'detalhe';
-  corpo.innerHTML = `<div class="frase">Chamar <b></b> para um duelo.</div>`;
+  corpo.innerHTML = `<div class="frase">${amigo.online ? 'Chamar <b></b> para um duelo.'
+                                                       : '<b></b> está offline.'}</div>`;
   corpo.querySelector('b').textContent = `[${amigo.etiqueta}] ${amigo.usuario}`;
-  corpo.append(campoDeDeck());
+  if (amigo.online) corpo.append(campoDeDeck());
 
   const botoes = document.createElement('div');
   botoes.className = 'botoes';
-  botoes.innerHTML = `<button class="aceitar">chamar</button><button class="recusar">voltar</button>`;
-  botoes.querySelector('.recusar').onclick = () => abrirNotificacoes();
+  botoes.innerHTML = (amigo.online ? '<button class="aceitar">chamar</button>' : '')
+    + '<button class="conversar">abrir chat</button>'
+    + '<button class="remover">remover amigo</button>'
+    + '<button class="recusar">fechar</button>';
+  botoes.querySelector('.recusar').onclick = () => fecharCartaz();
+
+  // ABRIR CHAT vale para quem está offline também — a mensagem fica lá e ele lê
+  // quando entrar. É a diferença entre conversa e desafio: o convite de duelo
+  // expira em 10 minutos, a conversa não expira.
+  botoes.querySelector('.conversar').onclick = () => {
+    fecharCartaz();
+    abrirConversa({
+      chave: amigo.id, titulo: amigo.usuario, para: amigo.id,
+      icone: '💬', euSou: meuId,
+    });
+  };
+
+  // Remover pede confirmação: é a única ação desta lateral que DESFAZ alguma
+  // coisa, e o alvo é um botão pequeno numa lista que rola.
+  botoes.querySelector('.remover').onclick = async (e) => {
+    if (!confirm(`Remover [${amigo.etiqueta}] ${amigo.usuario} da sua lista de amigos?`)) return;
+    e.target.disabled = true;
+    const r = await removerAmigo(amigo.id);
+    e.target.disabled = false;
+    if (!r.ok) return void erro(r.erro ?? 'nao consegui remover agora');
+    // A lista vem do BANCO, então redesenhar é reler — tirar a linha na mão
+    // deixaria a tela e o servidor discordando se a remoção tivesse falhado
+    // pela metade.
+    await pintarAmigos();
+    abrirNotificacoes();
+  };
+  if (!amigo.online) { corpo.append(botoes); mostrarCartaz('AMIGO', 'ele não está com o jogo aberto agora', corpo); return; }
   botoes.querySelector('.aceitar').onclick = async (e) => {
     const deck = corpo.querySelector('select')?.value;
     if (!deck) return void erro('escolha um deck para chamar alguém');
@@ -573,6 +776,121 @@ function campoDeDeck() {
   }
   campo.append(sel);
   return campo;
+}
+
+// ---------------------------------------------------- buscar e adicionar
+//
+// A busca por NOME ou ETIQUETA, e o clique que manda o pedido. Quem responde é
+// o banco (`buscar_jogador`): nome pelo começo ou etiqueta exata, sempre sem
+// você mesmo, no máximo 20. Digitar menos de 2 caracteres não consulta nada — é
+// a mesma trava que a função tem do lado de lá, repetida aqui só para não fazer
+// a viagem.
+//
+// O resultado NÃO diz se a pessoa já é sua amiga: `buscar_jogador` responde o
+// que a policy de `perfis` permitiria a qualquer um, e cruzar isso com a sua
+// lista é trabalho de tela. Sem esse cruzamento, o botão prometeria "adicionar"
+// para quem já está na lista e o servidor devolveria um erro que ninguém pediu.
+let buscaEmAndamento = 0;
+
+async function pintarBusca() {
+  const termo = $('busca-amigo').value.trim();
+  const caixa = $('busca-res');
+
+  if (termo.length < 2) { caixa.hidden = true; caixa.replaceChildren(); return; }
+
+  // Cada digitada dispara uma consulta, e elas voltam fora de ordem. O selo diz
+  // qual é a mais recente: uma resposta velha chegando depois pintaria na tela o
+  // resultado de um termo que ninguém está mais buscando.
+  const meu = ++buscaEmAndamento;
+  const r = await buscarJogador(termo);
+  if (meu !== buscaEmAndamento) return;
+
+  caixa.hidden = false;
+  if (!r.ok) {
+    caixa.replaceChildren(Object.assign(document.createElement('div'),
+      { className: 'vazio', textContent: 'não consegui buscar agora.' }));
+    return;
+  }
+
+  // Quem já está na sua lista (amigo, pedido enviado ou recebido) não pode
+  // aparecer como "adicionar": o servidor recusaria, e o rótulo teria mentido.
+  const jaTenho = new Map((amigosAgora ?? []).map((a) => [a.id, a.direcao]));
+  const achados = r.dados ?? [];
+
+  if (!achados.length) {
+    caixa.replaceChildren(Object.assign(document.createElement('div'),
+      { className: 'vazio', textContent: `ninguém com "${termo}".` }));
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const j of achados) {
+    const estado = jaTenho.get(j.id);
+    const b = document.createElement('button');
+    b.className = 'achado';
+    b.innerHTML = '<span class="nome"></span><span class="mais"></span>';
+    b.querySelector('.nome').textContent = `[${j.etiqueta}] ${j.usuario}`;
+    b.querySelector('.mais').textContent =
+      estado === 'amigo' ? 'já é amigo'
+      : estado === 'enviado' ? 'pedido enviado'
+      : estado === 'recebido' ? 'te chamou' : '+ adicionar';
+    b.disabled = !!estado;
+    if (!estado) {
+      b.onclick = async () => {
+        b.disabled = true;
+        const p = await pedirAmizade(j.etiqueta);
+        if (!p.ok) {
+          // NA PRÓPRIA LINHA, e não pelo `erro()`: aquele escreve no
+          // `#cartaz-erro`, que só está visível com o cartaz aberto — e a busca
+          // mora na lateral. A falha ficaria invisível.
+          b.disabled = false;
+          b.querySelector('.mais').textContent = p.erro ?? 'não deu certo';
+          return;
+        }
+        b.querySelector('.mais').textContent = 'pedido enviado';
+        // Relê a lista: o pedido enviado passa a aparecer nela, e é isso que faz
+        // uma segunda busca já saber que ele existe.
+        await pintarAmigos();
+      };
+    }
+    frag.append(b);
+  }
+  caixa.replaceChildren(frag);
+}
+
+// Espera a digitada parar. Sem isto, cada tecla vira uma consulta ao banco — e a
+// busca por nome roda um `ilike` na tabela de perfis inteira.
+let buscaTimer = null;
+$('busca-amigo').addEventListener('input', () => {
+  clearTimeout(buscaTimer);
+  buscaTimer = setTimeout(pintarBusca, 250);
+});
+// Esc limpa: a caixa de resultados fica entre o cabeçalho e a lista de amigos, e
+// deixá-la aberta empurra a lista para baixo.
+$('busca-amigo').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  $('busca-amigo').value = '';
+  $('busca-res').hidden = true;
+  $('busca-res').replaceChildren();
+});
+
+// ------------------------------------------------------------------ chat
+//
+// O botão do globo é um INTERRUPTOR: aberto, minimiza; minimizado, volta. É o
+// mesmo gesto da barra da janela, e é o que o desenho pede — "senão fica
+// minimizado, com um ícone de globo".
+montarDoca($('chatdoca'), (chave, n) => {
+  if (chave === 'global') pintarSelo($('chat-n'), $('btn-chat-global'), n);
+});
+
+$('btn-chat-global').onclick = () => abrirConversa({
+  chave: 'global', titulo: 'CHAT GLOBAL', para: null, icone: '🌐', euSou: meuId,
+});
+
+/** O selo de não lidas, no mesmo desenho do de notificações. */
+function pintarSelo(alvo, botao, n) {
+  alvo.textContent = String(n ?? 0);
+  botao.classList.toggle('tem', (n ?? 0) > 0);
 }
 
 // --------------------------------------------------------- notificações
@@ -783,6 +1101,7 @@ render();
 // O perfil é lido UMA vez e reaproveitado: ele dá o nome, a etiqueta e o meu
 // `icone_id`, e pedir de novo seria uma segunda ida de rede pelo mesmo dado.
 const meuPerfilAgora = await meuPerfil().catch(() => null);
+meuId = (await contaAtual().catch(() => null))?.id ?? null;
 if (meuPerfilAgora?.etiqueta) $('eu-etiqueta').textContent = `[${meuPerfilAgora.etiqueta}]`;
 if (meuPerfilAgora?.usuario) {
   $('eu-nome').textContent = meuPerfilAgora.usuario;
@@ -808,7 +1127,16 @@ pintarMeuIcone(meuPerfilAgora?.icone_id ?? null);
 
 meusDecks().then((d) => { decksDoBanco = d; });
 pintarAmigos();
-vigiar(pintarNotificacoes);
+// O segundo argumento é o chat: `mensagens` chega pelo MESMO canal, e a doca
+// relê por conta dela quando avisada. Sem isto o chat funcionaria só pela
+// releitura de 8s — que é a rede de segurança, não o caminho principal.
+vigiar(pintarNotificacoes, () => chegouAlgo());
+
+// Sair leva as janelas junto: elas são `position: fixed` e sobreviveriam à
+// navegação da SPA que não existe — mas o `fecharTudo` também para os relógios
+// de releitura, que continuariam consultando o banco de uma tela que ninguém
+// está mais vendo.
+window.addEventListener('pagehide', () => fecharChats());
 
 // A presença dos amigos expira em 2 minutos no banco, então a lista precisa ser
 // relida de tempos em tempos — o Realtime avisa de amizade nova, nunca de
@@ -823,5 +1151,11 @@ try {
   $('foot').textContent = `sua Coleção: ${totalCards()} cartas`;
 }
 </script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
 </body>
 </html>

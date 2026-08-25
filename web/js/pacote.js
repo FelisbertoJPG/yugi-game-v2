@@ -8,9 +8,9 @@
  *
  * **A regra é a do SERVIDOR, não a do front.** Quem sorteia o pacote é
  * `abrir_pacote()` (migration 0004/0023), e ele NÃO renormaliza os pesos entre
- * as raridades que o booster tem: ele rola os 706/252/38/4 fixos e, quando a
+ * as raridades que o booster tem: ele rola os 662/237/80/21 fixos e, quando a
  * raridade sorteada está vazia, DESCE pela cascata até achar uma com carta. Um
- * booster sem UR não dá 0% de UR e "sobe" o resto proporcionalmente — os 0,4%
+ * booster sem UR não dá 0% de UR e "sobe" o resto proporcionalmente — os 2,1%
  * da UR viram SR, que é outra distribuição.
  *
  * Isso é diferente do drop do NPC (`drops.js`), que renormaliza de verdade — lá
@@ -25,13 +25,39 @@ export const RARIDADES = ['UR', 'SR', 'R', 'N'];
  * Peso de cada raridade no sorteio, em MILÉSIMOS (somam 1000). O mesmo número
  * está no `abrir_pacote()` do banco, que é quem manda.
  *
- * A SR já foi 100 em 1000. Com 5 cartas por pacote isso dava ~1 SR a cada 2
- * pacotes: o jogador FECHAVA a lista de SR de um booster antes de tirar a
- * primeira UR, e a raridade perdia o sentido. Com 38 e a garantia a cada 20, o
- * mesmo investimento rende ~11. O que saiu de SR foi para R (240→252) e N
- * (700→706): o pacote não fica mais pobre, fica menos inflacionado no topo.
+ * A conta que importa é por PACOTE, não por carta: são 5 cartas, e o que o
+ * jogador sente é "quantos pacotes até sair uma UR". Com peso p por carta, a
+ * chance de pelo menos uma no pacote é 1-(1-p)^5.
+ *
+ * **O ALVO É POR PACOTE; o peso é por CARTA.** Os dois não são a mesma coisa e
+ * a diferença é de 5x — confundi-los é o erro mais fácil de cometer aqui. Para
+ * uma chance-alvo `a` por pacote, o peso sai da conta inversa:
+ *
+ *     1-(1-p)^5 = a   →   p = 1 - (1-a)^(1/5)
+ *
+ * UR a 10% por pacote → p = 1 - 0,90^0,2 = 2,085% → peso **21**.
+ *
+ *            por carta     por pacote      1 a cada
+ *   UR   4 →  21   0,4% → 2,1%    1,98% → 10,07%   50,4 → 9,9 pacotes
+ *   SR  38 →  80   3,8% → 8,0%   17,61% → 34,09%    5,7 → 2,9 pacotes
+ *   R  252 → 237
+ *   N  706 → 662
+ *
+ * O que saiu de N e R manteve a proporção entre os dois, então o pacote não
+ * fica mais pobre embaixo — fica mais rico em cima.
+ *
+ * **A SR FICA EM 80.** Ela já foi 100 e caiu para 38 porque o jogador FECHAVA a
+ * lista de SR de um booster antes de tirar a primeira UR — o problema era a
+ * RAZÃO entre as duas, não o número da SR. Com a UR a 21 saem ~3,4 SR por UR,
+ * contra as ~8,8 de antes: a SR não corre mais na frente.
+ *
+ * **O PISO É DE 30 PACOTES** e dispara em ~4% dos casos: ele é a rede de quem
+ * tem azar de verdade, não o caminho normal. O número certo depende da taxa —
+ * com a UR a 22,6%/pacote (uma versão que chegou a existir) um piso de 20 caía
+ * para 0,59% e virava decoração. Ao mexer numa das duas, olhe a outra:
+ * `node web/js/economia.test.mjs` imprime essa porcentagem a cada rodada.
  */
-export const PACK_ODDS = { N: 706, R: 252, SR: 38, UR: 4 };
+export const PACK_ODDS = { N: 662, R: 237, SR: 80, UR: 21 };
 
 /**
  * Para onde a raridade sorteada CAI quando o booster não tem carta nenhuma

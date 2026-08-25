@@ -24,7 +24,8 @@ export function estaVirada(pos) {
 }
 
 /**
- * O rótulo do menu para esta posição.
+ * O rótulo do menu para esta posição — `texto`, `icone` e a segunda linha
+ * (`sub`), que é o que separa "virar" de "mudar" para quem não joga há anos.
  *
  *   virada → vira para cima em ATAQUE (a Invocação-Virar);
  *   defesa face-up → levanta em ATAQUE;
@@ -36,7 +37,10 @@ export function estaVirada(pos) {
  */
 export function rotuloReposicao(pos) {
   const p = Number(pos) || 0;
-  if (estaVirada(p)) return { texto: 'Virar para Ataque', icone: '🔄' };
-  if (p & 0x4) return { texto: 'Mudar para Ataque', icone: '⚔️' };
-  return { texto: 'Mudar para Defesa', icone: '🛡️' };
+  if (estaVirada(p)) {
+    return { texto: 'Virar para Ataque', icone: '🔄',
+             sub: 'Invocação-Virar: a carta abre com a face para cima, em Ataque' };
+  }
+  if (p & 0x4) return { texto: 'Mudar para Ataque', icone: '⚔️', sub: 'levanta o monstro deitado' };
+  return { texto: 'Mudar para Defesa', icone: '🛡️', sub: 'deita o monstro' };
 }

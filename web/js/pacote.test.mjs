@@ -7,9 +7,9 @@
  * achando que a UR vem numa taxa que ela não vem.
  *
  * O ponto que mais erra é a CASCATA: o servidor não renormaliza os pesos entre
- * as raridades presentes; ele rola os 706/252/38/4 fixos e desce (ou sobe) até
+ * as raridades presentes; ele rola os 662/237/80/21 fixos e desce (ou sobe) até
  * achar uma gaveta com carta. Um booster sem UR não tem 0% de UR "diluído no
- * resto": os 0,4% dela viram SR.
+ * resto": os 2,1% dela viram SR.
  */
 import { chancesDoPacote, totalDoPacote, PACK_ODDS, RARIDADES, CASCATA } from './pacote.js';
 
@@ -35,29 +35,29 @@ for (const r of RARIDADES)
 
 console.log('\n=== booster completo: os pesos crus, sem redistribuicao ===');
 eq(chancesDoPacote(cards({ UR: [1], SR: [2], R: [3], N: [4] })),
-   { UR: 0.4, SR: 3.8, R: 25.2, N: 70.6 },
+   { UR: 2.1, SR: 8, R: 23.7, N: 66.2 },
    'com as quatro gavetas cheias, cada uma vale o proprio peso');
 
 console.log('\n=== gaveta vazia: a chance CAI pela cascata, nao se dilui ===');
 // Sem UR, os 4 milesimos dela vao para a SR (CASCATA.UR = [UR, SR, R, N]).
 eq(chancesDoPacote(cards({ SR: [2], R: [3], N: [4] })),
-   { UR: 0, SR: 4.2, R: 25.2, N: 70.6 },
-   'sem UR, os 0,4% dela viram SR (4,2%) — o R e o N nao mudam');
-// Sem SR, os 38 da SR descem para R (CASCATA.SR = [SR, R, N, UR]).
+   { UR: 0, SR: 10.1, R: 23.7, N: 66.2 },
+   'sem UR, os 2,1% dela viram SR (10,1%) — o R e o N nao mudam');
+// Sem SR, os 80 da SR descem para R (CASCATA.SR = [SR, R, N, UR]).
 eq(chancesDoPacote(cards({ UR: [1], R: [3], N: [4] })),
-   { UR: 0.4, SR: 0, R: 29, N: 70.6 },
-   'sem SR, os 3,8% dela descem para R (29%)');
-// Sem N, os 706 da N sobem para R (CASCATA.N = [N, R, SR, UR]).
+   { UR: 2.1, SR: 0, R: 31.7, N: 66.2 },
+   'sem SR, os 8,0% dela descem para R (31,7%)');
+// Sem N, os 662 da N sobem para R (CASCATA.N = [N, R, SR, UR]).
 eq(chancesDoPacote(cards({ UR: [1], SR: [2], R: [3] })),
-   { UR: 0.4, SR: 3.8, R: 95.8, N: 0 },
-   'sem N, os 70,6% dela sobem para R (95,8%)');
+   { UR: 2.1, SR: 8, R: 89.9, N: 0 },
+   'sem N, os 66,2% dela sobem para R (89,9%)');
 
 console.log('\n=== a renormalizacao INGENUA seria outra coisa ===');
 // Este é o teste que existe para nao "consertar" a conta copiando o drops.js:
-// renormalizando, um booster sem UR daria SR = 38/996 = 3,8%. O servidor da 4,2%.
+// renormalizando, um booster sem UR daria SR = 80/979 = 8,2%. O servidor da 10,1%.
 const semUr = chancesDoPacote(cards({ SR: [2], R: [3], N: [4] }));
-t(semUr.SR !== 3.8,
-  'sem UR, a SR NAO e\' 3,8% — renormalizar (como o drop do NPC faz) mentiria aqui');
+t(semUr.SR !== 8,
+  'sem UR, a SR NAO e\' 8,0% — renormalizar (como o drop do NPC faz) mentiria aqui');
 
 console.log('\n=== so uma gaveta: ela leva os 100% ===');
 eq(chancesDoPacote(cards({ N: [4, 5, 6] })), { UR: 0, SR: 0, R: 0, N: 100 },

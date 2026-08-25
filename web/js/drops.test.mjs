@@ -398,11 +398,76 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
 
   // O icone e configurado POR DECK, como o pool: e o que faz o deck dificil
   // valer a pena.
+  //
+  // Esta asserticao era `assert.ok(d)` — ela so' conferia que a funcao devolveu
+  // ALGUMA coisa, e passava com o icone ficando pelo caminho. Foi assim que o
+  // bug abaixo viveu: um teste com o nome certo, cobrindo metade do que promete.
   t('o icone tambem vale por deck', () => {
     const cfg = { para_dox: { decks: { 'Labirinto': { quantidade: 0, pool: {}, icones: ['x'], chanceIcone: 3 } } } };
     const d = dropsDoDeck(normalizarDrops(cfg), 'para_dox', 'Labirinto');
     assert.deepEqual(normalizarDrops(cfg).para_dox.decks['Labirinto'].icones, ['x']);
-    assert.ok(d);
+    assert.deepEqual(d.icones, ['x'], 'o icone tem de CHEGAR em quem pediu a configuracao');
+    assert.equal(d.chanceIcone, 3);
+  });
+
+  // O CICLO COMPLETO, que e' onde o defeito morava: o que o editor salva tem de
+  // voltar igual quando ele reabre o deck.
+  //
+  // O relato: *"tive que salvar 2x; voltei ao deck e o icone nao estava
+  // selecionado com a taxa dele"*. A causa era o `dropsDoDeck` remontar a
+  // configuracao campo a campo (`{ quantidade, pool }`), deixando o icone para
+  // tras — e o objeto continuava parecendo certo. O estrago nao parava em
+  // "nao mostrou": a aba DROPS carrega dali, entao o icone voltava como
+  // "nenhum selecionado" e o SALVAMENTO SEGUINTE apagava do banco o que estava
+  // gravado.
+  t('o que o editor salva volta INTEIRO quando ele reabre o deck', () => {
+    // exatamente o objeto que `builder.js` grava
+    const salvo = {
+      panik: {
+        decks: {
+          'Dark Illusions': {
+            quantidade: 2,
+            pool: { UR: [1], SR: [], R: [], N: [2, 3] },
+            icones: ['panik-sombra'],
+            chanceIcone: 5,
+          },
+        },
+      },
+    };
+
+    const lido = dropsDoDeck(normalizarDrops(salvo), 'panik', 'Dark Illusions');
+    assert.equal(lido.quantidade, 2);
+    assert.deepEqual(lido.pool.N, [2, 3]);
+    assert.deepEqual(lido.icones, ['panik-sombra'], 'o icone voltou vazio — o editor o apagaria no proximo salvamento');
+    assert.equal(lido.chanceIcone, 5, 'a taxa voltou zerada — idem');
+  });
+
+  // A reserva por NPC segue a mesma regra: quem configurou o icone no NPC (e nao
+  // num deck) tem de ve-lo de volta igual.
+  t('a reserva por NPC tambem devolve o icone', () => {
+    const cfg = { panik: { quantidade: 1, pool: { N: [9] }, icones: ['a', 'b'], chanceIcone: 7 } };
+    const lido = dropsDoDeck(normalizarDrops(cfg), 'panik', 'um deck sem pool proprio');
+    assert.deepEqual(lido.icones, ['a', 'b']);
+    assert.equal(lido.chanceIcone, 7);
+  });
+
+  // PAR CONTROLE: quem NAO tem icone nao pode ganhar os campos do nada. Sem esta
+  // metade, um `dropsDoDeck` que devolvesse `icones: []` sempre passaria em tudo
+  // acima — e o editor mostraria "0 icones a 0%" onde nao ha' configuracao
+  // nenhuma.
+  t('par CONTROLE: sem icone configurado, os campos nao aparecem', () => {
+    const cfg = { panik: { decks: { 'So Carta': { quantidade: 1, pool: { N: [5] } } } } };
+    const lido = dropsDoDeck(normalizarDrops(cfg), 'panik', 'So Carta');
+    assert.equal('icones' in lido, false);
+    assert.equal('chanceIcone' in lido, false);
+  });
+
+  // E a lista dos OUTROS decks nao pode vazar para dentro da configuracao de um:
+  // ela nao e' prêmio, e o editor a gravaria de volta aninhada em si mesma.
+  t('a lista dos outros decks nao entra na configuracao devolvida', () => {
+    const cfg = { panik: { quantidade: 1, pool: { N: [5] }, decks: { X: { quantidade: 1, pool: { N: [6] } } } } };
+    const reserva = dropsDoDeck(normalizarDrops(cfg), 'panik', 'deck sem pool');
+    assert.equal('decks' in reserva, false);
   });
 }
 // ------------------------------------------- o quadro do icone e' VISIVEL

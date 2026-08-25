@@ -68,5 +68,17 @@ t('VIRADA é exatamente 0x2|0x8', VIRADA === (0x2 | 0x8));
 t('posição 0 devolve um rótulo válido',
   !!rotuloReposicao(0).texto && !!rotuloReposicao(undefined).texto);
 
+// A segunda linha do item do menu (`sub`) e' o que separa "virar" de "mudar"
+// para quem nao joga ha anos: os tres textos curtos sao parecidos de proposito
+// (todos falam de ataque/defesa), entao sem ela o menu nao explica nada.
+t('todo rotulo traz a segunda linha (sub)',
+  [ATAQUE, VIRADA_ATK, DEFESA, VIRADA_DEF].every((p) => !!rotuloReposicao(p).sub));
+
+t('a virada e a unica que se anuncia como Invocacao-Virar',
+  rotuloReposicao(VIRADA_DEF).sub.includes('Invocação-Virar')
+  && rotuloReposicao(VIRADA_ATK).sub.includes('Invocação-Virar')
+  && !rotuloReposicao(ATAQUE).sub.includes('Invocação-Virar')
+  && !rotuloReposicao(DEFESA).sub.includes('Invocação-Virar'));
+
 console.log(`\n  ${ok} passaram, ${falhou} falharam`);
 process.exit(falhou ? 1 : 0);

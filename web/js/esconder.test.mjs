@@ -37,6 +37,9 @@ const t = (nome, fn) => {
 
 const DIR = new URL('../', import.meta.url);
 const PAGINAS = readdirSync(DIR).filter((f) => f.endsWith('.html')).sort();
+const MODULOS = readdirSync(new URL('js/', DIR))
+  .filter((f) => f.endsWith('.js'))
+  .map((f) => readFileSync(new URL(`js/${f}`, DIR), 'utf8'));
 
 /** O conteúdo de todos os `<style>` de uma página, junto. */
 const estilos = (html) =>
@@ -45,25 +48,48 @@ const estilos = (html) =>
 /** Tira comentários de CSS: um seletor comentado não vale como guarda. */
 const semComentarios = (css) => css.replace(/\/\*[\s\S]*?\*\//g, ' ');
 
-/**
- * Os ids que ALGUÉM esconde: o atributo escrito no markup, ou um
- * `.hidden = …` no script apontando para aquele id.
- */
-function idsEscondidos(html) {
-  const ids = new Set();
+/** As CLASSES de cada id, lidas do markup. */
+function classesPorId(html) {
+  const mapa = new Map();
+  for (const m of html.matchAll(/<[a-zA-Z][^>]*>/g)) {
+    const tag = m[0];
+    const id = tag.match(/\sid="([^"]+)"/);
+    if (!id) continue;
+    const cls = tag.match(/\sclass="([^"]+)"/);
+    mapa.set(id[1], cls ? cls[1].split(/\s+/).filter(Boolean) : []);
+  }
+  return mapa;
+}
 
-  // <div id="x" ... hidden> — em qualquer ordem dentro da tag
+/**
+ * Os ids escondidos por SCRIPT, em qualquer arquivo — as páginas e os módulos
+ * de `web/js/`.
+ *
+ * Os módulos entraram depois, e por um caso real: `mostrarAba` mora em
+ * `builder.js` e esconde `#aba-deck` / `#aba-drops`, que ganham `display:flex`
+ * da classe `.aba` em `deck.html`. Trocar de aba não escondia nada — as duas
+ * ficavam na tela ao mesmo tempo —, e a varredura não via porque olhava só o
+ * `<script>` inline da página. Um teste de ausência que lê metade dos arquivos
+ * dá a mesma falsa segurança que não ler nenhum.
+ */
+function idsEscondidosPorScript(fontes) {
+  const ids = new Set();
+  for (const texto of fontes) {
+    for (const m of texto.matchAll(/\$\(\s*'([^']+)'\s*\)\.hidden\s*=/g)) ids.add(m[1]);
+    for (const m of texto.matchAll(/getElementById\(\s*'([^']+)'\s*\)\.hidden\s*=/g)) ids.add(m[1]);
+  }
+  return ids;
+}
+
+/** Os ids escondidos pelo ATRIBUTO, no markup desta página. */
+function idsEscondidosNoMarkup(html) {
+  const ids = new Set();
   for (const m of html.matchAll(/<[a-zA-Z][^>]*>/g)) {
     const tag = m[0];
     if (!/\shidden(\s|=|>|\/)/.test(tag)) continue;
     const id = tag.match(/\sid="([^"]+)"/);
     if (id) ids.add(id[1]);
   }
-
-  // $('x').hidden = …   /   getElementById('x').hidden = …
-  for (const m of html.matchAll(/\$\(\s*'([^']+)'\s*\)\.hidden\s*=/g)) ids.add(m[1]);
-  for (const m of html.matchAll(/getElementById\(\s*'([^']+)'\s*\)\.hidden\s*=/g)) ids.add(m[1]);
-
   return ids;
 }
 
@@ -87,10 +113,24 @@ function regrasComDisplay(css) {
   return fora;
 }
 
+/**
+ * Um seletor simples (`#id` ou `.classe`) virado em fonte de regex, com a borda
+ * que impede `#end` de casar dentro de `#end-icone`. Nada é escapado além do
+ * ponto da classe: id e classe aqui são sempre `[\w-]+`.
+ */
+function escapa(alvo) {
+  const marca = alvo[0] === '#' ? '#' : '\\.';
+  return marca + alvo.slice(1) + '(?![\\w-])';
+}
+
 // --------------------------------------------------------------- a varredura
 
 t('todo id escondido que ganha `display` tem o guarda [hidden]', () => {
   const culpados = [];
+  const porScript = idsEscondidosPorScript([
+    ...PAGINAS.map((p) => readFileSync(new URL(p, DIR), 'utf8')),
+    ...MODULOS,
+  ]);
 
   for (const pagina of PAGINAS) {
     const html = readFileSync(new URL(pagina, DIR), 'utf8');
@@ -104,23 +144,49 @@ t('todo id escondido que ganha `display` tem o guarda [hidden]', () => {
     const guardaGeral = regras.some((r) => r.none && /^\[hidden\]$/.test(r.seletor));
     if (guardaGeral) continue;
 
-    const escondidos = idsEscondidos(html);
+    const classes = classesPorId(html);
+    // O id conta como escondido quando o atributo esta' no markup DESTA pagina,
+    // ou quando QUALQUER script (inline ou modulo) o esconde — e, nesse segundo
+    // caso, so' se o id existir aqui: dois ids iguais em paginas diferentes sao
+    // elementos diferentes.
+    const escondidos = new Set([
+      ...idsEscondidosNoMarkup(html),
+      ...[...porScript].filter((id) => classes.has(id)),
+    ]);
 
     for (const id of escondidos) {
-      // Alguma regra NOSSA dá display a este id sem falar de [hidden]?
-      const dando = regras.filter((r) =>
-        !/\[hidden\]/.test(r.seletor)
-        && new RegExp(`#${id}(?![\\w-])`).test(r.seletor)
-        // `#pai #filho` / `#pai .x` estiliza outra coisa; só conta quando o id
-        // é o ALVO, isto é, o último elemento do seletor.
-        && r.seletor.split(',').some((s) => new RegExp(`#${id}(?![\\w-])[^ >+~]*$`).test(s.trim())));
-      if (!dando.length) continue;
+      // Os SELETORES que podem alcançar este elemento: o id dele e cada uma das
+      // CLASSES dele.
+      //
+      // A classe entrou depois, e por um caso real: o "voltar para a versão
+      // anterior" de `atualizando.html` é `<div class="acoes" id="linha-voltar"
+      // hidden>`, e quem lhe dá `display:flex` é a regra `.acoes` — nenhuma
+      // regra cita `#linha-voltar`. A varredura olhava só o id, passou, e o
+      // botão ficou VISÍVEL em toda atualização, inclusive quando não havia
+      // backup nenhum para restaurar. Um teste de ausência que olha só metade
+      // dos caminhos dá exatamente a falsa segurança que ele existe para evitar.
+      const alvos = [`#${id}`, ...(classes.get(id) ?? []).map((c) => `.${c}`)];
 
-      const guardado = regras.some((r) => r.none
-        && new RegExp(`#${id}(?![\\w-])\\[hidden\\]`).test(r.seletor));
+      // O guarda vale vindo por QUALQUER um dos caminhos: `#id[hidden]` resolve
+      // mesmo quando o `display` veio da classe, e `.classe[hidden]` resolve
+      // para todos os elementos daquela classe de uma vez.
+      const guardado = alvos.some((a) =>
+        regras.some((r) => r.none && new RegExp(`${escapa(a)}\\[hidden\\]`).test(r.seletor)));
       if (guardado) continue;
 
-      culpados.push(`${pagina}  #${id}  —  ${dando[0].seletor} { display: … }`);
+      for (const alvo of alvos) {
+        // Alguma regra NOSSA dá display a este alvo sem falar de [hidden]?
+        // Só conta quando o alvo é o ÚLTIMO elemento do seletor: `#pai #filho`
+        // e `#pai .x` estilizam outra coisa.
+        const dando = regras.filter((r) =>
+          !/\[hidden\]/.test(r.seletor)
+          && r.seletor.split(',').some((s) =>
+               new RegExp(`${escapa(alvo)}[^ >+~]*$`).test(s.trim())));
+        if (!dando.length) continue;
+
+        culpados.push(`${pagina}  #${id}  —  ${dando[0].seletor} { display: … }`);
+        break;
+      }
     }
   }
 
@@ -145,12 +211,29 @@ t('a varredura reconhece o caso ruim quando ele existe', () => {
   const regras = regrasComDisplay(semComentarios(estilos(ruim)));
   assert.equal(regras.length, 1);
   assert.ok(!regras[0].none);
-  assert.ok(idsEscondidos(ruim).has('x'));
+  assert.ok(idsEscondidosNoMarkup(ruim).has('x'));
 
   const bom = `<style>#x { display: flex; } #x[hidden] { display: none; }</style><div id="x" hidden></div>`;
   const r2 = regrasComDisplay(semComentarios(estilos(bom)));
   assert.ok(r2.some((r) => r.none && /#x\[hidden\]/.test(r.seletor)));
 });
+
+// Os DOIS caminhos que a varredura ganhou depois, cada um vindo de um caso real.
+// Sem estas asserticoes, "nenhum culpado" voltaria a nao provar nada no dia em
+// que alguem simplificasse a busca.
+t('a varredura enxerga o display que vem da CLASSE', () => {
+  const html = `<style>.caixa { display: flex; }</style><div class="caixa" id="x" hidden></div>`;
+  assert.deepEqual(classesPorId(html).get('x'), ['caixa']);
+  const regras = regrasComDisplay(semComentarios(estilos(html)));
+  assert.ok(regras.some((r) => r.seletor === '.caixa' && !r.none));
+});
+
+t('a varredura enxerga o `.hidden =` que mora num MODULO', () => {
+  const modulo = `export function f() { $('x').hidden = true; }`;
+  assert.ok(idsEscondidosPorScript([modulo]).has('x'));
+  assert.ok(MODULOS.length >= 5, `so' ${MODULOS.length} modulo(s) em web/js/`);
+});
+
 
 console.log(`\n  ${pass} passaram, ${fail} falharam`);
 process.exit(fail === 0 ? 0 : 1);

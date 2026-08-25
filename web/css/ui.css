@@ -108,15 +108,33 @@ input:focus, select:focus { outline: 1px solid var(--blue); }
    segunda linha. Aqui fica só a cor e de que lado cada tipo encosta. */
 .bl-badge {
   position: absolute; z-index: 3; font-size: 8px; line-height: 1;
-  padding: 1px 3px; border-radius: 2px; font-weight: bold; background: #04121fd0;
+  padding: 1px 3px; font-weight: bold; background: #04121fd0;
   pointer-events: none;   /* o selo nunca rouba o clique da carta */
 }
-.bl-badge.bl-limit  { left: 2px;  color: var(--red); }
+/* Colado no canto: o raio some do lado que encosta na borda e fica só no canto
+   de dentro. Arredondar os quatro cantos de uma etiqueta grudada deixa uma
+   falha clara entre ela e a borda da carta — que é o respiro que o selo
+   ganhou sem querer quando nasceu com 2px de folga. */
+.bl-badge.bl-limit, .bl-badge.bl-group  { border-radius: 0 2px 2px 0; }
+.bl-badge.bl-points { border-radius: 2px 0 0 2px; }
+.bl-badge.bl-limit  { left: 0;  color: var(--red); }
 /* A BANIDA é a única que proíbe a carta inteira: fundo cheio em vez de só a
    letra colorida, para não se confundir com um L1/L2 de relance. */
 .bl-badge.bl-ban    { background: var(--red); color: #1a0508; }
-.bl-badge.bl-group  { left: 2px;  color: var(--gold); }
-.bl-badge.bl-points { right: 2px; color: var(--blue); }
+.bl-badge.bl-group  { left: 0;  color: var(--gold); }
+.bl-badge.bl-points { right: 0; color: var(--blue); }
+
+/* **Depois das regras de lado, e isso não é arrumação.** `.bl-dir` e
+   `.bl-limit` têm a MESMA especificidade (0,2,0), então quem vem por último
+   ganha: com esta regra acima, o `left: 0` do `.bl-limit` sobrescreveria o
+   `left: auto` daqui, a etiqueta ficaria com `left` E `right` ao mesmo tempo e
+   esticaria pela largura inteira da carta.
+
+   Ela troca o lado do selo do limite — o caso real é a carta revelada da Loja,
+   onde o `NEW!!` ocupa o canto esquerdo. O raio de canto vai junto: sem isso a
+   etiqueta encosta na borda direita com o arredondado virado para fora, e sobra
+   a mesma falha que o respiro de 2px deixava. */
+.bl-badge.bl-dir { left: auto; right: 0; border-radius: 2px 0 0 2px; }
 
 /* ---------- avisos ---------- */
 .banner {

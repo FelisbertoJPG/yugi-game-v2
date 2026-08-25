@@ -379,9 +379,22 @@ function showReveal(booster, pulls) {
     dez.disabled = getDP() < price * 10;
   };
 
-  // O canto DIREITO da carta revelada já tem a raridade, então os pontos da
-  // banlist descem uma linha; o esquerdo está livre e recebe o [L1]/[L2].
-  const selos = (id) => selosDaBanlist(banlist, id, { hasTopRight: true });
+  // Os DOIS cantos de cima da carta revelada podem estar ocupados: a raridade
+  // fica sempre à direita, e o `NEW!!` à esquerda **só quando a carta é
+  // inédita**. Sem olhar o `nova`, o [L1] caía por baixo do NEW!! e a etiqueta
+  // que existe para dizer o limite ficava ilegível justamente na carta que o
+  // jogador acabou de ganhar.
+  //
+  // O `desvio` é 17 porque o NEW!! da revelação é maior que os selos da
+  // miniatura do Deck Builder (vai de 3px a 16px).
+  //
+  // Na carta NOVA o [L1] TROCA DE LADO em vez de descer: o `NEW!!` mora no
+  // canto esquerdo, e a raridade fica logo abaixo dela do outro lado. Sai de
+  // graça porque o `NEW!!` só existe aqui — no Deck Builder, onde a banlist é
+  // lida o tempo todo, o selo fica sempre à esquerda.
+  const selos = (id, item) => selosDaBanlist(banlist, id, {
+    hasTopLeft: !!item?.nova, hasTopRight: !!item?.raridade, desvio: 17,
+  });
 
   const rev = montarRevelacao($('reveal-cards'), pulls.map((p) => ({
     id: p.id,

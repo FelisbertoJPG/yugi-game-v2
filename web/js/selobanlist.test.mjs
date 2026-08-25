@@ -87,20 +87,64 @@ t('o id e comparado como TEXTO — a chave do mapa vem de JSON', () => {
   assert.match(selosDaBanlist(BL, '100'), />L1</);
 });
 
-t('o canto ja ocupado empurra o selo para a segunda linha', () => {
-  const livre = selosDaBanlist(BL, 100, {});
-  const ocupado = selosDaBanlist(BL, 100, { hasTopLeft: true });
-  assert.match(livre, /top:2px/);
-  assert.match(ocupado, /top:13px/);
-  // Sem isto o [L1] cai por cima do selo de carta customizada (Deck Builder) ou
-  // do ✔ de "voce tem" (as gavetas da Loja).
-  assert.notEqual(livre, ocupado);
+t('o selo fica COLADO no canto — sem respiro entre a borda e a etiqueta', () => {
+  // Ele nasceu com 2px de folga, para acompanhar os vizinhos da miniatura, e do
+  // lado de quem olha aquilo virou um respiro estranho. Colado e' tambem o que
+  // a contagem de copias (`.thumb .count`) sempre fez.
+  assert.match(selosDaBanlist(BL, 100, {}), /top:0px/);
+  assert.match(selosDaBanlist(BL, 300, {}), /top:0px/);
 });
 
-t('limite e grupo na MESMA carta se empilham, nao se sobrepoem', () => {
+t('com o canto do limite ocupado, ele TROCA DE LADO — e continua colado', () => {
+  // O caso real e' a carta revelada da Loja: o `NEW!!` mora no canto esquerdo.
+  // Empilhar debaixo dele espremeria a etiqueta do limite justamente na carta
+  // que o jogador acabou de ganhar; trocar de lado a mantem colada.
+  const trocado = selosDaBanlist(BL, 100, { hasTopLeft: true });
+  assert.match(trocado, /bl-dir/);
+  assert.match(trocado, /top:0px/);
+});
+
+t('com os DOIS cantos ocupados nao ha para onde trocar: desce pelo desvio', () => {
+  const desce = selosDaBanlist(BL, 100, { hasTopLeft: true, hasTopRight: true, desvio: 17 });
+  assert.doesNotMatch(desce, /bl-dir/, 'trocou para um lado que tambem esta ocupado');
+  assert.match(desce, /top:17px/);
+});
+
+t('o DESVIO e da tela: o vizinho da Loja e maior que o do builder', () => {
+  // Na miniatura o selo de cima vai de 2px a 14px; na carta revelada o NEW!! vai
+  // de 3px a 16px. Um numero so' serviria para uma das duas, e o erro e' mudo —
+  // as duas etiquetas se sobrepoem e a de baixo fica ilegivel.
+  const dois = { hasTopLeft: true, hasTopRight: true };
+  assert.match(selosDaBanlist(BL, 100, { ...dois }), /top:14px/);
+  assert.match(selosDaBanlist(BL, 100, { ...dois, desvio: 17 }), /top:17px/);
+});
+
+t('limite e grupo se empilham pelo PASSO, nao pelo desvio', () => {
+  // A primeira versao multiplicava a linha pelo desvio, e o SEGUNDO selo de um
+  // canto livre saia a 14px em vez de 11 — tres pixels de buraco no meio de
+  // duas etiquetas que deviam estar coladas uma na outra.
   const dois = selosDaBanlist({ cardLimits: { 7: 1 }, cardGroups: { 7: 2 } }, 7);
-  assert.match(dois, /top:2px/);
-  assert.match(dois, /top:13px/);
+  assert.match(dois, /top:0px/);
+  assert.match(dois, /top:11px/);
+  assert.doesNotMatch(dois, /top:14px/);
+});
+
+t('limite e grupo trocam de lado JUNTOS', () => {
+  // Separa-los deixaria "2 copias somando as duas cartas" num canto e o "L1" da
+  // mesma carta no outro.
+  const dois = selosDaBanlist({ cardLimits: { 7: 1 }, cardGroups: { 7: 2 } }, 7,
+                              { hasTopLeft: true });
+  assert.equal((dois.match(/bl-dir/g) ?? []).length, 2);
+  assert.match(dois, /top:0px/);
+  assert.match(dois, /top:11px/);
+});
+
+t('limite a esquerda e pontos a direita nao se atrapalham', () => {
+  // Sao COLUNAS diferentes: os dois podem estar colados no topo sem colidir.
+  const html = selosDaBanlist({ cardLimits: { 9: 1 }, cardPoints: { 9: 5 } }, 9, {});
+  assert.match(html, /bl-limit[^>]*top:0px/);
+  assert.match(html, /bl-points[^>]*top:0px/);
+  assert.doesNotMatch(html, /bl-points[^>]*bl-dir/, 'os pontos nunca trocam de lado');
 });
 
 t('o rotulo humano: 0 e BANIDA, 1 Limitada, 2 Semilimitada', () => {
@@ -231,6 +275,21 @@ t('e o SELO tambem nao depende dele', () => {
             'o selo voltou a depender do checkbox — o jogador monta o deck sem ver [L1]');
 });
 
+t('a Loja desvia o selo do NEW!!, que ocupa o MESMO canto', () => {
+  // `.rev-nova` e' `top:3px; left:3px` — exatamente onde o [L1] vai. Sem olhar
+  // o `nova` de cada carta, a etiqueta do limite ficava por baixo do NEW!!
+  // justamente na carta que o jogador acabou de ganhar.
+  assert.ok(/hasTopLeft: !!item\?\.nova/.test(loja),
+            'a Loja nao desvia o selo quando a carta e NOVA — as duas etiquetas se sobrepoem');
+  assert.ok(/hasTopRight: !!item\?\.raridade/.test(loja),
+            'a Loja da a raridade como sempre presente — numa carta sem ela o selo '
+            + 'desceria a toa em vez de encostar no canto');
+  const css = readFileSync(new URL('../css/revelacao.css', import.meta.url), 'utf8');
+  const nova = css.match(/\.rev-nova\s*\{[^}]*\}/s);
+  assert.ok(nova && /left:\s*3px/.test(nova[0]),
+            'o NEW!! saiu do canto esquerdo — o desvio da Loja precisa ser revisto');
+});
+
 t('a Loja desenha o selo nas cartas reveladas e nas gavetas', () => {
   assert.ok(/selosDaBanlist/.test(loja), 'a Loja nao desenha selo nenhum');
   // Nas duas telas dela, e nao so' numa: quem abre o pacote e quem olha
@@ -241,12 +300,20 @@ t('a Loja desenha o selo nas cartas reveladas e nas gavetas', () => {
 
 t('e o CSS do selo e' + ' compartilhado, nao copia de uma tela', () => {
   const ui = readFileSync(new URL('../css/ui.css', import.meta.url), 'utf8');
-  for (const c of ['.bl-badge', '.bl-limit', '.bl-group', '.bl-points']) {
+  for (const c of ['.bl-badge', '.bl-limit', '.bl-group', '.bl-points', '.bl-dir']) {
     assert.ok(ui.includes(c), `${c} nao esta' em ui.css`);
   }
   // A folha da Loja e a da Trilha nao redefinem o selo: duas copias da mesma
   // cor se desencontram, e a mesma regra apareceria vermelha numa tela e
   // dourada na outra.
+  // A ORDEM importa: `.bl-dir` e `.bl-limit` tem a MESMA especificidade (0,2,0),
+  // entao quem vem por ULTIMO ganha. Com o `.bl-dir` antes, o `left: 0` do
+  // `.bl-limit` sobrescreve o `left: auto` dele — a etiqueta fica com `left` E
+  // `right` ao mesmo tempo e estica pela largura inteira da carta. Nada acusa:
+  // e' CSS valido, e so' aparece na carta NOVA de um pacote.
+  assert.ok(ui.indexOf('.bl-badge.bl-dir') > ui.indexOf('.bl-badge.bl-limit  {'),
+            '.bl-dir esta ANTES das regras de lado — a troca nao pega e o selo estica');
+
   const deckHtml = readFileSync(new URL('../deck.html', import.meta.url), 'utf8');
   assert.ok(!/\.thumb\s+\.bl-badge\s*\{/.test(deckHtml),
             'o deck.html voltou a ter a sua propria copia do selo');

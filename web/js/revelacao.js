@@ -138,7 +138,9 @@ export function montarRevelacao(alvo, itens, {
       // com a carta, em vez de aparecer sobre o verso e entregar antes da hora
       // que aquela carta e' limitada. Os cantos ja' ocupados sao a raridade (a
       // direita) e o NEW!! — dai' o `hasTopRight` de quem chama.
-      +   (selos ? selos(item.id) : '')
+      // O ITEM inteiro, e não só o id: quem desenha o selo precisa saber se
+      // aquela carta é NOVA, porque o `NEW!!` ocupa o mesmo canto do [L1].
+      +   (selos ? selos(item.id, item) : '')
       + '</span></span>';
 
     const nome = document.createElement('div');

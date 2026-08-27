@@ -12,10 +12,68 @@ npm run dev                  # front estático em http://localhost:8080 (Node pu
 cd duel-server && dotnet run -- --serve   # motor de duelo em http://localhost:8770
 
 node web/js/deck.test.mjs    # 33 testes das regras de construção de deck
-node web/js/banlist.test.mjs # 24 testes da banlist (Ponto/Banlist/Lista compartilhada)
+node web/js/banlist.test.mjs # 29 testes da banlist (Ponto/Banlist/Lista compartilhada)
+                             # e da FRASE do problema (`textoDoProblema`), que
+                             # agora tem DOIS leitores: o Deck Builder, que
+                             # bloqueia o salvar, e a porta do duelo, que
+                             # bloqueia a partida. Duas frases escritas em
+                             # lugares diferentes recusariam a mesma carta com
+                             # dois motivos, conforme onde o jogador esbarrasse
+                             # nela
+node web/js/portadoduelo.test.mjs # 10 testes da PORTA DO DUELO. O relato: *"o
+                             # player ta conseguindo duelar com um deck que
+                             # possui mais de uma copia de cards limitados"*.
+                             # `salvar_deck` sempre cobrou a banlist — mas o
+                             # duelo NAO passa por ele: `chosenDeck()` le o deck
+                             # do localStorage e manda as cartas direto para o
+                             # motor local, e o unico servidor no caminho
+                             # (`iniciar_duelo`) recebia so' o NOME do deck. O
+                             # builder recusava salvar, o banco recusava gravar,
+                             # e o deck ficava so' naquele navegador — de onde o
+                             # duelo o carregava normalmente.
+                             # Sao DUAS camadas, e este arquivo guarda a de ca':
+                             # a PORTA (`podeDuelar`, em duel.html) existe para o
+                             # aviso dizer O QUE esta' errado; ela le a copia
+                             # local da banlist e por isso so' sabe ACRESCENTAR
+                             # um motivo, nunca dar permissao (copia velha deixa
+                             # passar, e ai' quem responde e' o servidor). A
+                             # FECHADURA e' `iniciar_duelo` (migration 0047),
+                             # que recebe as CARTAS e recusa.
+                             # O que ele mais guarda e' a ORDEM: uma trava que
+                             # roda depois do `/start` nao e' trava, e' aviso — o
+                             # duelo ja' esta' na tela — e nada acusaria, porque
+                             # o texto seria o mesmo. Cobre tambem o registro do
+                             # duelo vindo ANTES do motor (o que conserta de
+                             # quebra a parede de versao e o teto por hora, que
+                             # eram descobertos com o duelo ja' rolando e viravam
+                             # premio negado no fim, sem explicacao)
 node web/js/automontagem.test.mjs  # 18 testes da Auto montagem (curva, ritual, fusão)
 node web/js/ponte.test.mjs   # 14 testes da perspectiva do multiplayer (virar a mesa)
-node web/js/correntes.test.mjs # 16 testes do modo das correntes (desligado/auto/sempre)
+node web/js/correntes.test.mjs # 17 testes do modo das correntes (desligado/auto/sempre)
+node web/js/batalha.test.mjs # 16 testes dos CINCO momentos do ataque. No
+                             # Yu-Gi-Oh a batalha nao e' um instante: declara-se
+                             # o ataque escolhendo quem ataca e em quem, o alvo
+                             # com a face para baixo ABRE, uma janela de resposta
+                             # permite impedir o golpe, os corpos colidem e so'
+                             # entao o dano e' calculado. A tela mostrava um
+                             # instante so'.
+                             # O motor sempre mandou as fronteiras — o que
+                             # faltava era traduzi-las (ver `--test-etapa-dano`,
+                             # que as MEDE no motor; as sequencias deste arquivo
+                             # sao as de la', nao inventadas).
+                             # A regra erra CALADA nos dois sentidos: momento
+                             # velho promete "responda ao ataque" numa janela em
+                             # que nao ha ataque nenhum, e momento que morre cedo
+                             # apaga a seta no meio da etapa de dano.
+                             # E o CALCULO tem duas armadilhas que mostram um
+                             # numero plausivel: o ataque DIRETO tambem manda
+                             # MSG_BATTLE (com o lado do defensor zerado — quem
+                             # o desenhar poe na tela um adversario de 0 de ATK
+                             # apanhando), e um monstro DEITADO luta pela DEF,
+                             # entao mostrar o ATK dele anuncia "1700 x 1400"
+                             # numa batalha que o motor resolveu como 1700 x 1200
+                             # — e o resultado deixa de fechar com os numeros a'
+                             # vista
 node web/js/filavisoes.test.mjs # 9 testes da fila de visões (concorrência do multiplayer:
                              # a visão que chega no meio da aplicação da anterior)
 node web/js/drops.test.mjs   # 59 testes do drop por DECK (pool por raridade, a % de cada
@@ -254,6 +312,25 @@ node web/js/poolordem.test.mjs # 15 testes da ORDENAÇÃO do pool de cartas — 
                              # guardam o resto: toda tela com `#f-sort` oferece
                              # a raridade, e nenhuma voltou a ter cópia própria
                              # da regra
+node web/js/vistoem.test.mjs # 22 testes do "VISTO POR ÚLTIMO" da lista de
+                             # amigos — a tradução do carimbo de presença
+                             # (`meus_amigos.visto_em`, migration 0049) para uma
+                             # linha. As três decisões erram CALADAS: o carimbo
+                             # que não veio (cliente novo contra servidor sem a
+                             # 0049) viraria "Invalid Date" na tela, uma frase
+                             # que parece uma data — aqui é `null`, e a linha
+                             # não aparece; "ontem" é dia de CALENDÁRIO e não 24
+                             # horas, então às 00:30 uma conta por
+                             # milissegundos diria "hoje" sobre 23:50 da véspera
+                             # (e o avesso: às 01:00, 26 horas atrás é
+                             # ANTEONTEM); e a conta entre as meias-noites
+                             # LOCAIS é o que atravessa horário de verão — um
+                             # dia de 23h ou 25h — sem escorregar um dia.
+                             # As datas do teste são construídas com o
+                             # construtor LOCAL, nunca com string ISO em UTC:
+                             # a função responde no fuso de quem lê, e uma
+                             # string fixa passaria aqui e falharia noutra
+                             # máquina
 node web/js/sessao.test.mjs   # 16 testes de ONDE a sessão do jogador é guardada
                              # (a caixa "manter login nesta máquina"). Marcada,
                              # a sessão vai para o `localStorage` e sobrevive a
@@ -298,6 +375,47 @@ node web/js/esconder.test.mjs # varre TODA página de web/ **e todo módulo de
                              # drop aparecia até no Deck Builder do jogador
                              # comum). Hoje ela segue os dois caminhos, e cada
                              # um tem asserção própria provando que ela os vê
+node web/js/atalhos.test.mjs # varre TODA página de web/ e todo módulo de
+                             # web/js/ atrás de UMA armadilha: o **atalho de
+                             # propriedade que referencia uma variável que não
+                             # existe**. `{ nomeDe }` parece uma chave e é uma
+                             # LEITURA de variável — sintaxe válida, nada acusa
+                             # ao salvar nem ao carregar a página, e o
+                             # `ReferenceError` só aparece no instante em que
+                             # aquela linha executa. Se a linha mora num caminho
+                             # raro, ela viaja para produção.
+                             # Este projeto pagou DUAS vezes: `{ turno }` onde a
+                             # variável se chama `turn` (o duelo morria na
+                             # primeira janela de corrente), e `{ nomeDe }` onde
+                             # a função se chama `nameOf` — este segundo só
+                             # estourava ao VENCER um adversário COM pool de
+                             # drop, e a linha quebrada fica entre
+                             # `liberarSaidaDoFim(false)` e
+                             # `$('end-overlay').hidden = false`: a tela de fim
+                             # nunca aparecia, os dois botões de saída ficavam
+                             # desligados, e o prêmio já estava creditado no
+                             # servidor. Vitória sem saída.
+                             # A varredura é estreita de propósito (só o atalho
+                             # sozinho numa linha, a forma exata dos dois casos
+                             # reais) e escopo-cega: basta o nome existir no
+                             # arquivo. Em troca, zero falso positivo — varredura
+                             # que grita à toa deixa de ser lida. Prova também
+                             # que RECONHECE o caso ruim
+node web/js/fimduelo.test.mjs # 7 testes da TELA DE FIM DE DUELO, a menos
+                             # exercitada do jogo: só aparece quando o duelo
+                             # acaba, e a parte com prêmio só quando você VENCE
+                             # alguém com pool de drop. As funções são FATIADAS
+                             # do `duel.html` (nunca copiadas — uma cópia
+                             # passaria a valer por si) e rodam com o
+                             # `montarRevelacao` de verdade e um DOM de mentira.
+                             # Guarda a CONSEQUÊNCIA que o jogador sentiu, e que
+                             # qualquer exceção naquele trecho reproduz: o
+                             # overlay aparece, o nome da carta chega à
+                             # revelação, e os botões de saída VOLTAM quando a
+                             # última carta abre. Com o par CONTROLE de quem
+                             # PERDE e de quem vence sem pool — os dois seguem
+                             # verdes mesmo com o bug, que é exatamente por que
+                             # ele só aparecia contra adversário com drop
 npm run icones:check         # todo ícone do catálogo tem arte? A imagem mora na
                              # coluna `imagem` (0039) e a coluna é nullable de
                              # propósito, então o banco aceita a linha sem ela —
@@ -307,8 +425,25 @@ npm run data:check           # integridade do banco de cartas (5 checagens)
 npm run conteudo:check       # o que o admin editou chegou ao BANCO? (conteudo,
                              # decks de NPC e tabuleiros, disco x Supabase).
                              # Edicao que fica so' em disco nao existe pra ninguem
-npm run boosters:check       # cruza os boosters PUBLICADOS com a lista ativa —
-                             # acusa carta que o jogador compra e não pode jogar
+npm run boosters:check       # **`cartas_obteniveis()` enxerga tudo mesmo?** As
+                             # três portas por onde uma carta chega ao jogador —
+                             # booster, Deck Estrutural e pool de drop de NPC —
+                             # são varridas AQUI por conta própria e comparadas
+                             # com a varredura do SERVIDOR (migration 0048).
+                             # Ele não pergunta mais "a carta do booster está na
+                             # lista?": desde a 0048 isso é tautologia, porque
+                             # `lista_ativa()` já devolve a lista publicada MAIS
+                             # as obteníveis — e relatório que só sabe dizer
+                             # "sim" deixa de ser lido.
+                             # A pergunta que sobrou é a que erra CALADA: a SQL
+                             # varre JSON editado por painel, e uma forma nova
+                             # de dado (um pool aninhado de outro jeito, um
+                             # campo renomeado) a faz devolver de menos sem nada
+                             # acusar — e as cartas voltam a ser entregues e
+                             # injogáveis. É a ÚNICA duplicação legítima do
+                             # projeto: a de um conferidor, cujo trabalho é
+                             # discordar. Acusa também id que o jogo entrega e
+                             # não existe no banco de cartas
 npm run data:build           # regenera ygo-data/data a partir do cards.cdb (precisa de Python 3)
 
 npm run duel:build           # para o servidor e compila o duel-server
@@ -343,7 +478,10 @@ duel-server.exe --cobertura <arquivo.ydk>
 
 node tools/bancada-visual.mjs # gera bancada.html na raiz: as animacoes da mesa
                              # (seta de ataque, numero de dano/cura, brilho de
-                             # entrada em campo) rodando num quadro de mentira,
+                             # entrada em campo e a FAIXA DA BATALHA — os tres
+                             # passos do ataque, a frase de quem ataca quem e os
+                             # dois numeros do calculo) rodando num quadro de
+                             # mentira,
                              # sem servidor e sem login — dois cliques no
                              # arquivo. As funcoes sao FATIADAS do duel.html por
                              # marcadores, nunca copiadas: uma copia passaria a
@@ -654,7 +792,7 @@ própria regra dizia. Cada caso tem par CONTROLE, e os dois duelos reais no fim
 provam que a lista chega ao cérebro com os dois lados dentro e com o
 `controller` certo),
 `--test-armory` (Armory Call: qual equipamento vem do deck e em quem ele entra),
-`--test-caos` (o pacote **CAOS** do Yugi — 21 asserções. O relato: *"ele preferiu
+`--test-caos` (o pacote **CAOS** do Yugi — 46 asserções. O relato: *"ele preferiu
 invocar um Lustro Negro em vez de usar Magician of Black Chaos + Chaos Scepter =
 combo pra banir meu ritual pra sempre; ia tirar 2 cards do meu campo, do jeito
 que fez tirou apenas 1"*. A **Chaos Scepter Blast** só liga com um **Mago Nv8+**
@@ -687,7 +825,91 @@ Lustro Negro (Nv8 GUERREIRO) e os rituais dos dois, e escolheu o Guerreiro, de
 > magia, ela Invoca Especialmente do DECK um dos magos do Caos — é o próprio
 > texto dela (`SalvaSeDestruida`), e a diferença está na ZONA. Só quando ela NÃO
 > está ativável: havendo o corpo, banir uma carta do campo dele vale mais que a
-> espera. Com a mesma folga de zona da regra da armadilha, e pelo mesmo motivo.),
+> espera. Com a mesma folga de zona da regra da armadilha, e pelo mesmo motivo.
+>
+> **A TERCEIRA metade (26/08/2026): a Espada virada contra o próprio NPC.** O
+> relato: *"npc brain usou o Chaos Scepter Blast no próprio monstro (esse monstro
+> ele tomou controle meu — pegou do meu GY) e era de ATK maior no campo (2900)"*.
+> O `duel-server.log` da sessão mostra o caminho inteiro — Monster Reborn traz um
+> 2900 do cemitério do JOGADOR, o NPC ataca com ele, e na janela seguinte
+> `[npc] chain -> ativa 15256925 em resposta`, que é a linha mais crua do
+> arquivo: **ativar sem critério nenhum**.
+>
+> Eram QUATRO portas, e cada uma sozinha bastava para o estrago:
+>
+> - **a Espada nunca teve regra de Main Phase.** `DestroiMonstro`/`DestroiSt`
+>   exigem `Duel.Destroy` no script e ela usa `Duel.Remove`, então nenhuma regra
+>   a enxergava. Hoje é a 5.505, reconhecida por `BaneDoCampo` (banir é mais
+>   forte que destruir: não volta e nem se identifica), com a mesma trava da
+>   remoção — só sai se há o que tirar do campo DELE;
+> - **a janela de corrente genérica**, que ativa qualquer carta "em resposta". O
+>   efeito é `EVENT_FREE_CHAIN`, então a janela abre SEMPRE — inclusive com o
+>   campo dele vazio, que é quando a única coisa que ela alcança é o próprio NPC.
+>   Hoje há a quarta trava dessa família (ao lado da que guarda a Dark Factory):
+>   *carta que tira do CAMPO alcançando os dois lados não sai numa janela em que
+>   o campo dele está vazio*. O alcance sai do Lua — `LOCATION_ONFIELD,
+>   LOCATION_ONFIELD` (os dois lados) contra `0,LOCATION_ONFIELD` (só o dele) —,
+>   o mesmo idioma de PAR que o `Trava` e o `ReforcoMeuCampo` já leem;
+> - **a regra do "corpo de graça" da janela de corrente, que é a armadilha do
+>   Templo do Mako outra vez.** O banco marca a Espada como INVOCAÇÃO ESPECIAL
+>   (0x100000) por causa do efeito de ser DESTRUÍDA, e a regra lia isso como
+>   "esta carta põe corpo em campo". Ativar não põe corpo nenhum — bane 1 carta.
+>   O Templo foi resolvido por uma lista de ids; esta é lida da carta
+>   (`SalvaSeDestruida`, o mesmo leitor que decide baixá-la), então vale para a
+>   próxima com essa forma. **Foi o teste que achou esta porta**, não a leitura
+>   do código;
+> - **e a regra 5.375 do Main Phase** ("qualquer carta que ponha corpo em
+>   campo"), que lê o MESMO bit e vem ANTES da 5.505, então vencia: com o campo
+>   do NPC vazio ela dizia *"põe corpo em campo — estou sem monstro"* sobre uma
+>   carta que TIRA do campo. Mesma exclusão, mesmo leitor. **Esta quem achou foi
+>   o `--cobertura`**, depois de as outras três estarem fechadas — é literalmente
+>   para isso que aquele relatório existe: procurar ausência lendo código é como
+>   o buraco passa.
+>
+> E o ALVO, que erra igual e calado: a lista dela mistura MONSTRO e
+> MAGIA/ARMADILHA dos DOIS lados, e nenhum ramo do `DecideSelect` a reconhecia —
+> o "alvo em campo" só olha `MZONE` e só dispara quando o oponente tem MONSTRO.
+> Sem monstro dele, tudo caía no critério genérico: maior ATK, **sem perguntar de
+> quem é a carta**. É a mesma família do Inseto Devorador de Homens do
+> `--test-alvos`, por um buraco que aquela correção não fechou. Hoje a marca
+> `_remocaoDeCampo` leva a informação que a seleção não teria — que aquela
+> pergunta é uma remoção — e mira o lado dele: monstro primeiro, pela ameaça de
+> AGORA; só S/T dele, a mais pesada. O último degrau (ele não tem nada na lista)
+> não devia acontecer e existe porque o motor JÁ pediu a resposta: aí paga com a
+> MINHA carta mais barata, nunca com a melhor.
+>
+> Os pares CONTROLE guardam cada porta: o Raigeki, que tira do campo mas só do
+> lado dele; o Dark Hole, que alcança os dois lados mas DESTRÓI (e já tem regra);
+> o Magician of Dark Illusion, que continua sendo corpo de graça de verdade; e a
+> mesma lista de alvos sem a marca, que cai no genérico e bane o meu 2900 — sem
+> ele, "baniu a carta dele" não provaria que alguém escolheu.
+>
+> **A QUINTA porta, no mesmo dia: a magia de USO ÚNICO.** Fechadas as quatro, o
+> relato seguinte foi *"ele usou num card de adição meu, que naturalmente só tem
+> 1 uso, a Summoner's Art — foi gastar uma potencial defesa contra uma ameaça"*.
+> O log de novo, inteiro:
+>
+> ```
+> [rpc] /respond activate arg=1                      <- o jogador ativa a busca
+> [npc] chain -> ativa 15256925 em resposta
+> [npc] remocao de campo: bane 79816536 do lado DELE
+> ```
+>
+> Uma Magia **Normal com a face para CIMA** na zona só está ali porque está
+> RESOLVENDO neste instante: banir não impede o efeito (o motor já a ativou) e
+> ela ia para o cemitério sozinha. A trava perguntava *"ele tem ALGUMA carta?"* —
+> e a Summoner's Art ocupava uma zona. A pergunta certa é *"ele tem alguma que
+> VALHA a remoção?"*, e a diferença entre as duas é **PERMANÊNCIA**: vale um
+> monstro dele, uma carta VIRADA dele (incógnita, mas fica) ou uma magia que FICA
+> em campo (contínua/equipamento/campo — `DatabaseManager.FicaEmCampo`). Não vale
+> a Normal aberta. Sem essa distinção o NPC pagava a carta principal de remoção
+> do deck para não conseguir nada, e ficava sem ela para a ameaça de verdade.
+>
+> O mesmo vale para o ALVO (`ValorDeBanirSt`), e ali o erro era calado do mesmo
+> jeito: a ordenação por `Peso` empata em 0 tudo que não está na tabela de
+> ameaça — inclusive a magia que está resolvendo — e levava a primeira da lista.
+> O par CONTROLE é a MESMA zona com um Toon World no lugar da busca: a Espada
+> sai, e mira nele.),
 `--test-condenado` (o **CORPO CONDENADO** — Instant Fusion e Ready Fusion põem
 uma Fusão em campo que **não pode atacar** e é **destruída na End Phase deste
 turno**. O buraco tinha três metades: **atacar** já estava segura e não precisou
@@ -812,12 +1034,88 @@ tipo, que precisa FICAR em campo — os dois pares controle são a **Sogen**, qu
 reforça os dois lados, e o **Union Attack**, que reforça só os meus mas é de uma
 vez só, e reforço de um turno depende de escolher o turno, coisa que o cérebro
 não sabe fazer. **Foolish Burial**: sozinha é perda de carta, então a condição é
-a MÃO — ter uma reanimação para o corpo enterrado. **Shifting Shadows**: não muda
+o PAR — uma reanimação para o corpo enterrado (a segunda razão, o deck, mora em
+`--test-enterro`). **Shifting Shadows**: não muda
 um ponto de ATK, apaga o que o outro lado já sabia sobre qual carta está em qual
 zona; num deck de cartas setadas é disso que o duelo vive. Ela tem duas jogadas
 separadas pela LOCALIZAÇÃO da oferta — da mão é pô-la em campo, do campo é o
 efeito que custa 300 LP —, e o par controle é o piso de LP: perder o duelo para
 esconder de qual zona é o muro seria o pior negócio possível),
+`--test-enterro` (**enterrar para usar depois** — o Foolish Burial. O pedido foi
+*"quando ele abrir com Foolish Burial, adiantar o envio de material do deck pro
+GY pra usar posteriormente"*, com o deck **Yugi Chaos** de exemplo: ele leva TRÊS
+Foolish de propósito, para mandar os Dark Magician of Chaos ao cemitério e
+alcançá-los pelos três Monster Reborn. São duas metades, e as duas erram CALADAS.
+> **QUANDO** — a regra exigia a reanimação na MÃO. Num deck de 40 com três
+> Reborn, ter as duas metades juntas é sorte e não plano: na prática a carta
+> ficava na mão a partida inteira. Hoje a segunda razão é o **DECK** — enterrar
+> cedo é ADIANTAR, o corpo espera no cemitério a carta que vem. Não é "ativar
+> sempre": deck sem reanimação nenhuma continua guardando a carta, e esse é o par
+> CONTROLE. Quem responde "o que tem no meu deck" é a DECKLIST do próprio NPC
+> (`ListaDoDeck`, em `InteractiveDuel`), que não passa pelo `npcLeitura` porque
+> não é leitura escondida — ninguém precisa de permissão para saber o que pôs no
+> próprio deck — e vem VAZIA do lado do jogador. É a lista de CONSTRUÇÃO, não o
+> que sobrou dentro do deck: seguir cada carta que deixa `LOCATION_DECK` seria
+> encanamento novo para uma diferença que sempre cai para o lado barato.
+>
+> **O QUE — a pergunta que manda.** *"Este monstro pode ser Invocado
+> Especialmente do cemitério pelo efeito da carta que o traz de volta? Se sim,
+> envia; se não, busca o próximo alvo válido."* São DUAS metades, e as duas erram
+> caladas:
+>
+> - **o motor deixa?** O critério genérico do `DecideSelect` é "maior ATK
+>   impresso", e nesse deck o maior ATK é o **Black Luster Soldier** (3000), um
+>   monstro de RITUAL. Ritual, fusão, sincro, xyz e os "nomi" só saem do
+>   cemitério se tiverem sido corretamente invocados ANTES — e quem foi do deck
+>   direto para lá nunca foi. Quem responde é
+>   `DatabaseManager.VoltaDoCemiterio`, por dois sinais: o TIPO (pega classes
+>   inteiras e vale para a carta sem Lua no disco) e o `EnableReviveLimit` do
+>   script, que pega o "nomi" avulso — o mesmo Gate Guardian que o cérebro já
+>   protegia por ID, uma carta de cada vez;
+> - **a MINHA reanimação alcança?** O **Birthright** e o **Swing of Memories**
+>   (os dois vendidos em booster) só trazem monstro NORMAL; o **Eternal Soul** só
+>   o Dark Magician, pelo nome; o **Dark Magic Veil** só Mago DARK. Num deck
+>   assim, enterrar o Dark Magician of Chaos é rasgar o corpo e a carta. Quem
+>   responde é `DatabaseManager.ExigenciaDaReanimacao`, lendo a função-filtro de
+>   UMA linha do Lua da reanimação — a forma das 20 do pool de hoje. As
+>   constantes (`TYPE_NORMAL`, `RACE_SPELLCASTER`, `CARD_DARK_MAGICIAN`…) saem do
+>   `constant.lua` do PRÓPRIO jogo, nunca copiadas: duas fontes para a mesma
+>   verdade se desencontram na primeira atualização do banco. **Filtro que o
+>   leitor não entende fica `Legivel = false` e a carta sai do plano** (o Master
+>   of Chaos filtra por uma função à parte) — fingir que aceita tudo é a promessa
+>   que enterra um corpo que ela nunca traria.
+>
+> Nos dois lados o erro é o mesmo silêncio: a carta vai para o cemitério, o motor
+> está certo, e a reanimação seguinte simplesmente NÃO A OFERECE.
+>
+> **A NECESSIDADE do momento** decide entre os alvos válidos, e cada razão só
+> pesa na carência dela — fora dela, o critério continua sendo o maior ATK, senão
+> a regra atropela (um corpo de 900 que põe carta na mão passaria na frente de um
+> de 3000 numa mesa em que nada aperta):
+>
+> | preciso de | quando | quem ganha |
+> |---|---|---|
+> | **Campo** | ele tem monstro que eu não supero | quem **QUEBRA** o campo dele ao voltar; não havendo, quem mais **SEGURA** — `max(ATK, DEF)`, e é aí que uma parede de 0/3000 vence um 2000 de ATK |
+> | **Carta** | mesa calma e mão de ≤2 depois de gastar esta carta | quem volta **GERANDO CARTA** |
+> | **Corpo** | nada apertando | o maior ATK, como sempre |
+>
+> Quebrar vem antes de segurar pela mesma razão da regra 5.55: a remoção resolve
+> de vez, a parede só adia. O que o corpo faz ao voltar sai de
+> `AoVoltarDoCemiterio`, e a trava é `EVENT_SPSUMMON_SUCCESS` — o **Breaker the
+> Magical Warrior** destrói uma magia ao ser Invocado, mas só por
+> `EVENT_SUMMON_SUCCESS`: revivido, ele volta MUDO. Sem essa metade o cérebro
+> enterraria o Breaker achando que enterrava uma remoção. *LIMITE CONHECIDO: não
+> amarra a categoria ao efeito exato que o gatilho dispara — o Dark Magician of
+> Chaos tem dois e conta como as duas coisas. O erro máximo é preferir um alvo
+> bom a outro alvo bom.*
+>
+> Os pares CONTROLE são o teste: a MESMA oferta com a mesa mudada, três vezes
+> (900×3000 pela mão, 2600×3000 pela ameaça, 800/2000×1700/1000 pela parede) —
+> é isso que prova que quem decidiu foi a necessidade, e não a carta. Mais o
+> MESMO deck trocando só a reanimação (Birthright→Monster Reborn muda o alvo de
+> volta para o do Caos), e a mesma lista sem a marca da regra, que cai no
+> genérico e escolhe o Lustro. E os duelos reais são QUATRO embaralhamentos:
+> fixar um seed viraria falha alheia no dia em que o embaralhamento mudasse),
 `--test-trava` (as magias de TRAVA — as **Espadas**. O relato foi *"ele está
 perdendo e mesmo assim não usa a Swords of Concealing Light"*, e não era critério
 errado: era a AUSÊNCIA de qualquer critério. As duas Espadas vêm com
@@ -833,6 +1131,35 @@ cérebro (ele tem monstro que meu campo não supera), e vem DEPOIS da remoção 
 as duas resolvem o mesmo problema, mas a remoção resolve para sempre e a trava
 tem prazo. Cobre os dois pares controle, a ordem contra o Raigeki, e um duelo
 real, que é o único que prova que a carta chega a `activatable`),
+`--test-etapa-dano` (a **ETAPA DE DANO** — o fluxo do ataque, medido. O relato
+foi *"a fase de batalha e a etapa de dano não estão bem definidas: no Yu-Gi-Oh
+declara-se o ataque, escolhe-se quem ataca e em quem, o monstro virado flipa,
+abre uma janela de respostas, os cards colidem e só então vem o cálculo de
+dano"*. O motor faz tudo isso — e mandava **três** dessas fronteiras para o
+vazio: `MSG_ATTACK_DISABLED (112)`, `MSG_DAMAGE_STEP_START (113)` e
+`MSG_DAMAGE_STEP_END (114)` não tinham `case` nenhum. O laço de mensagens anda
+pelo tamanho declarado de cada uma, então elas eram puladas **em silêncio**, sem
+erro e sem log, e a tela via o ataque como UM instante: a seta aparecia e o
+resultado já estava na mesa.
+> A sequência que o teste mede — e que o front agora desenha — é:
+> `attack → damagestep:inicio → pos (o alvo virado ABRE) → battle (1700 x 1400)
+> → damagestep:fim`. A virada do alvo acontecer **dentro** da etapa de dano não
+> é detalhe de regra: é a única chance de a tela mostrar a carta antes do golpe.
+> O par CONTROLE é o ataque **direto**, que não tem alvo para virar nem com quem
+> colidir e mesmo assim abre e fecha a etapa de dano — e que, **medido**, TAMBÉM
+> manda MSG_BATTLE, com o lado do defensor zerado.
+> O terceiro duelo é o ataque **ANULADO**: o jogador baixa uma Negate Attack, o
+> NPC ataca, e a janela de resposta chega com `chainTriggerKind = "attack"` e o
+> código do ATACANTE. Eram as duas metades que faltavam — sem o gatilho, a única
+> frase honesta na janela mais importante do duelo era a da fase (*"seu oponente
+> está indo para a Battle Step"*), no exato instante em que um monstro dele vinha
+> para cima do seu; sem o `attackcancel`, anular um ataque é indistinguível, na
+> tela, de um ataque que ninguém declarou — a seta some, nenhum LP muda, e quem
+> gastou a carta não vê nada acontecer.
+> Para o `NpcBrain` o gatilho novo **não muda nada, de propósito**: `ValeNegar`
+> só sabe medir invocação, magia e armadilha, então um ataque cai no "não sei
+> avaliar" e ele continua sem gastar negação ali — que é o que já acontecia
+> quando o gatilho vinha vazio),
 `--test-flip` (a **Invocação-Virar**. Ela é o único jeito de abrir um monstro
 setado, e não emitia evento nenhum para a tela: o `ocgcore` NÃO manda
 MSG_POS_CHANGE numa flip summon — ele troca a posição sozinho
@@ -1072,16 +1399,42 @@ publicar um Release. Qual lista vale no servidor sai do `listId` da banlist
 Só admin publica (RLS `eh_admin()`); a chave da lista tem que casar
 `^lista[a-z0-9-]{0,31}$`, e o editor já gera o slug assim.
 
-> **O Booster Builder monta do banco INTEIRO, não do pool da lista.** Nada
-> impede pôr num booster uma carta que a Lista 1 não conhece — e o estrago é
-> silencioso e caro: o jogador paga DP, abre a carta, ela entra na Coleção e
-> aparece no Deck Builder; só na hora de **salvar** o deck é que
-> `salvar_deck` diz "não está na lista permitida". Depois de mexer nos
-> boosters, rode `npm run boosters:check` (lê o BANCO, não o espelho em
-> `store/` — que envelhece e dizia estar tudo certo). Foi assim que De-Spell,
+> **O que o jogo ENTREGA, o jogo ACEITA** (migration 0048). O Booster Builder
+> monta do banco INTEIRO, não do pool da lista, e nada impede pôr num booster
+> uma carta que a Lista 1 não conhece. O estrago era silencioso e caro: o
+> jogador paga DP, abre a carta, ela entra na Coleção e aparece no Deck
+> Builder; só na hora de **salvar** o deck é que `salvar_deck` dizia "não está
+> na lista permitida".
+>
+> A resposta era um relatório (`npm run boosters:check`) e a disciplina de
+> rodá-lo — e não funcionou: no dia da 0048 havia **10 cartas** obteníveis e
+> injogáveis no banco, nove delas dos pacotes de NPC (Shifting Shadows, Dark
+> Factory of More Production, Multiplication of Ants, Insect Neglect…). O
+> jogador vencia o Panik, ganhava a carta e não montava deck com ela.
+>
+> Hoje é INVARIANTE, não tarefa: `lista_ativa()` devolve a lista publicada
+> **mais** `cartas_obteniveis()` — os ids que aparecem em qualquer booster,
+> Deck Estrutural ou pool de drop de NPC. Acrescentar a carta em qualquer uma
+> das três portas já a faz contar na lista, sem passo nenhum.
+>
+> **Calculada na leitura, nunca gravada.** Materializá-la dentro de
+> `conteudo/lista1` criaria estado que envelhece — e que o próximo "salvar" do
+> editor de listas apagaria, porque ele republica o array resolvido inteiro.
+> Assim ela é auto-curativa: tirar a carta do booster tira da lista no mesmo
+> instante. E ela **não entra na FONTE** (`conteudo/cardlists`, o que o editor
+> edita): lá ficam só as escolhas de quem administra, senão a carta viraria
+> escolha à mão e sair do booster deixaria de tirá-la da lista.
+>
+> **Uma implementação só.** A tela não refaz a conta — ela LÊ
+> `rpc/cartas_obteniveis` (`hydrateCardLists`, em `cardlists.js`) e alimenta
+> `inLista1`. Uma segunda conta no navegador divergiria em silêncio da que
+> `salvar_deck` usa, e o sintoma seria o pior tipo: o Deck Builder deixando
+> montar e o banco recusando salvar, cada tela certa pela sua conta.
+>
+> Antes de pôr uma carta nova numa das três portas, confira que o efeito roda
+> — é para isso que serve `--test-cartas-booster`. Foi assim que De-Spell,
 > Ritual Cage, Birthright e Swing of Memories apareceram vendidas e injogáveis
-> — hoje estão na Lista 1, com `--test-cartas-booster` provando que os efeitos
-> rodam.
+> a primeira vez.
 
 `web/js/banlist.js` é uma camada **opcional** por cima da lista escolhida
 (`banlist.listId`) — não mexe nas regras oficiais de `deck.js` (min/max, 3
@@ -1468,10 +1821,38 @@ batidas por janela, então uma pode se perder inteira sem ninguém piscar entre
 online e offline.
 
 > `visto_em` **não vaza**: a policy de `perfis` só deixa cada um ver o próprio
-> registro, então a presença sai por dois caminhos estreitos — o booleano
-> `online` que `meus_amigos()` (security definer) devolve **dos seus amigos**, e
-> o número agregado de `bater_ponto()`. Conferido: uma conta comum autenticada
-> enxerga 1 perfil, o dela.
+> registro, então a presença sai por dois caminhos estreitos — o que
+> `meus_amigos()` (security definer) devolve **dos seus amigos**, e o número
+> agregado de `bater_ponto()`. Conferido: uma conta comum autenticada enxerga 1
+> perfil, o dela.
+
+**"Visto por último"** (migration 0049). `meus_amigos()` passou a devolver
+também o `visto_em` cru, e não só o booleano `online` — a lateral dizia OFFLINE
+para quase todo mundo quase o tempo todo, sem separar quem fechou o jogo há
+cinco minutos de quem não entra há três semanas, que são decisões diferentes na
+hora de chamar para duelar, mandar mensagem ou remover alguém. Aparece no
+**tooltip** do amigo na lista e como uma linha no **cartão** que o clique abre.
+
+> Isto ALARGA a presença de propósito: antes saía um booleano, agora sai o
+> instante. Continua valendo só para quem é **amigo** (a função junta por
+> `amizades`) — `buscar_jogador` não devolve isto e a policy de `perfis` segue
+> fechada.
+
+> **A frase é do cliente, o carimbo é do servidor** (`web/js/vistoem.js`, sem
+> DOM e com teste). Calcular a presença no navegador é o defeito que fez o
+> `online` nascer no banco — dois relógios discordando, cada um certo pela sua
+> conta —, e um "há 3 dias" medido localmente erra do mesmo jeito, com o erro
+> crescendo em vez de expirar. O que o cliente faz é só traduzir o instante para
+> a hora LOCAL de quem lê. Erra calado de três jeitos: carimbo ausente (servidor
+> anterior à 0049) vira `null`, e não a frase "Invalid Date" na tela; "ontem" é
+> dia de CALENDÁRIO, não 24 horas (às 00:30, 23:50 foi ontem, e uma conta por
+> milissegundos diria "hoje"); e a conta entre meias-noites locais atravessa
+> horário de verão sem escorregar um dia.
+
+> **Quem está ONLINE não ganha a frase na lista**, só no cartão: o carimbo dele
+> é de no máximo dois minutos atrás, e a lateral é estreita — uma segunda linha
+> por amigo empurraria para fora da tela justamente os que estão online, que vêm
+> primeiro na ordem.
 
 **Notificações em tempo real** (`notificacoes.js` + `notificacoesvivo.js` +
 `realtime.js`). Desafio para duelar e pedido de amizade viram uma lista só; o

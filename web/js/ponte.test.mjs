@@ -123,7 +123,8 @@ t('visao vazia ou nula nao explode', () => {
 t('a tabela de campos cobre TODOS os que o motor emite', () => {
   // Se o `InteractiveDuel` ganhar um evento com um campo de jogador novo, ele
   // tem de entrar aqui — senão a carta aparece do lado errado, sem erro nenhum.
-  for (const c of ['player', 'controller', 'fromCtrl', 'winner', 'chainTriggerPlayer']) {
+  for (const c of ['player', 'controller', 'fromCtrl', 'winner', 'chainTriggerPlayer',
+                   'atkCtrl', 'defCtrl']) {
     assert.ok(CAMPOS_DE_JOGADOR.includes(c), `campo "${c}" saiu da tabela do espelho`);
   }
 });
@@ -140,6 +141,35 @@ t('o GATILHO da corrente vira (quem ativou a carta que abriu a janela)', () => {
   assert.equal(v.question.player, 0, 'a janela e minha');
   assert.equal(v.question.chainTriggerPlayer, 1, 'quem ativou foi o ADVERSARIO');
   assert.equal(v.question.chainTriggerCode, 55144522, 'o codigo da carta nao e jogador');
+});
+
+t('o ATAQUE vira: quem ataca, quem apanha e o ataque DIRETO', () => {
+  // A seta e a faixa da batalha acham as duas cartas por `atkCtrl`/`defCtrl`, e
+  // eles nunca estiveram na tabela: o segundo jogador via a seta sair da carta
+  // errada. No ataque DIRETO e' pior — `pontosDoAtaque` mira a mao pelo
+  // `atkCtrl`, entao o golpe dele apontava para a PROPRIA mao.
+  const v = espelharVisao({
+    events: [{ type: 'attack', atkCtrl: 1, atkSeq: 2, defCtrl: 0, defSeq: 4, direct: false },
+             { type: 'attack', atkCtrl: 1, atkSeq: 0, defCtrl: 0, defSeq: 0, direct: true }],
+  }, 1);
+  assert.equal(v.events[0].atkCtrl, 0, 'quem atacou fui EU');
+  assert.equal(v.events[0].defCtrl, 1, 'quem apanhou foi o adversario');
+  assert.equal(v.events[0].atkSeq, 2, 'a ZONA nao vira — so o dono dela');
+  assert.equal(v.events[0].defSeq, 4);
+  assert.equal(v.events[1].atkCtrl, 0, 'o ataque direto tambem e meu');
+  assert.equal(v.events[1].direct, true, 'e continua sendo direto');
+});
+
+t('as fronteiras da ETAPA DE DANO passam intactas (nao nomeiam jogador)', () => {
+  // `damagestep` e `attackcancel` sao os dois eventos novos da batalha, e
+  // nenhum tem campo de jogador: espelhar tem de ser um no-op. O teste existe
+  // para o dia em que um deles ganhar um — a leitura aqui e' a lista de cima.
+  const v = espelharVisao({
+    events: [{ type: 'damagestep', etapa: 'inicio' }, { type: 'attackcancel' },
+             { type: 'damagestep', etapa: 'fim' }],
+  }, 1);
+  assert.deepEqual(v.events, [{ type: 'damagestep', etapa: 'inicio' }, { type: 'attackcancel' },
+                              { type: 'damagestep', etapa: 'fim' }]);
 });
 
 t('espelhar DUAS vezes volta ao original (a operacao e simetrica)', () => {

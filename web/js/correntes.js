@@ -58,16 +58,26 @@ export function normalizarModo(valor) {
  * **Esta janela é de um momento que importa?** Devolve o motivo (para o log) ou
  * `null` quando é janela de rotina.
  *
- * Os quatro momentos são os que o Master Duel usa no modo Auto. Os dois
- * primeiros o motor já entrega de graça: o `chainTrigger*` diz o que abriu a
- * janela (ver `InteractiveDuel.MarcaGatilho`). O ataque a tela acompanha pelo
- * evento `attack`, que chega logo antes da janela. O quarto é a End Phase do
- * oponente — a hora clássica do Mystical Space Typhoon baixado.
+ * Os quatro momentos são os que o Master Duel usa no modo Auto. Os TRÊS
+ * primeiros o motor entrega de graça: o `chainTrigger*` diz o que abriu a
+ * janela (ver `InteractiveDuel.MarcaGatilho`), e a declaração de ataque entrou
+ * nele — antes ela era o único momento sem nome, e a janela mais importante do
+ * duelo (Mirror Force, Waboku, Negate Attack) chegava rotulada como uma
+ * mudança de fase. O quarto é a End Phase do oponente — a hora clássica do
+ * Mystical Space Typhoon baixado.
+ *
+ * `ataqueDeclarado` ficou como reserva para o motor que ainda não manda o
+ * gatilho de ataque (um cliente com o `engine` atrasado). Quem o alimenta é o
+ * momento do ataque em `batalha.js`, e não uma bandeira própria: a bandeira
+ * antiga só era apagada na virada do TURNO, então bastava um ataque para toda
+ * janela seguinte daquele turno — inclusive as da Main Phase 2 — se anunciar
+ * como resposta a um ataque que já tinha acabado.
  */
 export function momentoDaJanela(pergunta, { turno = 0, fase = 0, ataqueDeclarado = false } = {}) {
   const p = pergunta || {};
   if (p.chainTriggerKind === 'activation') return 'uma carta foi ativada';
   if (p.chainTriggerKind === 'summon') return 'uma invocação está em andamento';
+  if (p.chainTriggerKind === 'attack') return 'um ataque foi declarado';
   if (ataqueDeclarado) return 'um ataque foi declarado';
   if (turno === 1 && fase === FASE_END) return 'o turno do oponente vai acabar';
   return null;

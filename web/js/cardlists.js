@@ -35,6 +35,7 @@
  */
 import {
   inLista1, aplicarLista1, fonteDaLista1, restaurarLista1,
+  aplicarObteniveis, ehObtenivel,
   LISTA1_TIPOS, LISTA1_SPELLTRAP,
 } from './lista1.js';
 import { pullFileEx, pushFileGuardado } from './projectstore.js';
@@ -73,7 +74,16 @@ function normalizarLista(bruta) {
   };
 }
 
-/** Filtro puro (sem efeito nenhum), a partir de tipos + ids. */
+/**
+ * Filtro puro (sem efeito nenhum), a partir de tipos + ids.
+ *
+ * **Puro também quer dizer SEM as obteníveis** — quem as acrescenta é
+ * `comFiltro`, abaixo. É esta função que `resolverLista` usa para publicar o
+ * array em `conteudo/<id>`, e as obteníveis não podem entrar ali: a união é
+ * feita pelo servidor a cada leitura (`lista_ativa()`), e gravá-las no
+ * resultado publicado faria a carta continuar valendo depois de sair do
+ * booster — o oposto de "automático".
+ */
 function construirFiltro(lista) {
   const ids = new Set(lista.ids);
   const tipos = new Set(lista.tipos);
@@ -84,13 +94,20 @@ function construirFiltro(lista) {
  * Instala uma lista. A Lista 1 é a exceção: em vez de um filtro novo ela
  * ALIMENTA a `inLista1` de sempre, que meia dúzia de módulos importa direto —
  * assim o import continua valendo e a hidratação chega a todos eles de uma vez.
+ *
+ * As duas pontas somam as OBTENÍVEIS (o que está em booster, Deck Estrutural ou
+ * pool de drop): a `inLista1` já as consulta por dentro, e para as outras listas
+ * o `||` aqui faz o mesmo. Vale para qualquer lista porque a regra é do jogo, e
+ * não desta ou daquela lista: se o jogo entrega a carta, a lista que governa tem
+ * de aceitá-la — senão o jogador paga por uma carta que não pode jogar.
  */
 function comFiltro(lista) {
   if (lista.id === 'lista1') {
     aplicarLista1({ tipos: lista.tipos, ids: lista.ids });
     return { ...lista, filter: inLista1 };
   }
-  return { ...lista, filter: construirFiltro(lista) };
+  const base = construirFiltro(lista);
+  return { ...lista, filter: (card) => base(card) || ehObtenivel(card.id) };
 }
 
 function padrao() {
@@ -118,11 +135,35 @@ aplicarListas(padrao());
 let leuODisco = false;
 
 /**
+ * **As cartas que o jogo entrega**, na resposta do SERVIDOR.
+ *
+ * `cartas_obteniveis()` (migration 0048) varre os boosters, os Decks
+ * Estruturais e os pools de drop de NPC. Ela é a MESMA conta que `lista_ativa()`
+ * usa para recusar um deck em `salvar_deck` e na porta do duelo — por isso é
+ * lida, e não refeita aqui. Duas contas divergiriam em silêncio, e o sintoma
+ * seria o pior tipo: o Deck Builder deixando montar e o banco recusando salvar,
+ * cada tela certa pela sua conta.
+ *
+ * `null` quando a leitura não alcançou o servidor: aí ficam valendo as
+ * obteníveis da última vez, e não uma lista vazia — sumir com elas offline
+ * esconderia do jogador cartas que ele tem na Coleção.
+ */
+async function puxarObteniveis() {
+  const r = await req('rpc/cartas_obteniveis', { method: 'POST', body: {} });
+  return r.ok && Array.isArray(r.dados) ? r.dados : null;
+}
+
+/**
  * Traz as listas publicadas (Supabase, com queda para `store/cardlists.json`).
  * Chame no boot de toda página que filtra pelo pool — sem isto a página usa o
  * padrão de fábrica e discorda do servidor.
  */
 export async function hydrateCardLists() {
+  // ANTES de qualquer saída: as obteníveis valem mesmo quando não há lista
+  // publicada nenhuma, e todas as saídas abaixo são `return false`.
+  const obt = await puxarObteniveis();
+  if (obt) aplicarObteniveis(obt);
+
   const { alcancou, data } = await pullFileEx(CHAVE);
   leuODisco = alcancou;
   if (!alcancou || !data) return false;

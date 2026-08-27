@@ -329,13 +329,31 @@ export async function decksVencidos() {
  * Abre o registro do duelo. `deckNpc` é o NOME do deck do adversário — é ele
  * que decide, no servidor, de que pool o drop sai e qual deck a vitória
  * destranca. Sem ele o servidor cai no pool do NPC, como antes.
+ *
+ * `cartas` é o MAIN + EXTRA que o motor vai receber, uma entrada por cópia.
+ * É por ele que a banlist finalmente alcança o duelo (`iniciar_duelo`,
+ * migration 0047): `salvar_deck` sempre cobrou a regra, mas o duelo não passa
+ * por ele — o deck sai do `localStorage` e vai direto para o motor local, e o
+ * único servidor no caminho recebia só o NOME do deck. Recusar salvar e deixar
+ * jogar é a regra existindo nas duas pontas erradas.
+ *
+ * Devolve `{ id, erro }`, e não o id solto: o `erro` é o RECADO do banco — a
+ * parede de versão configurada pelo admin ("peça o instalador novo") ou a carta
+ * que está acima do teto. Ele era jogado fora aqui, e o duelo simplesmente não
+ * era registrado: a partida rodava inteira e o prêmio era recusado no fim, sem
+ * ninguém saber por quê.
  */
-export async function iniciarDuelo(npcId, deckNpc) {
+export async function iniciarDuelo(npcId, deckNpc, cartas) {
   const r = await req('rpc/iniciar_duelo', {
     method: 'POST',
     body: {
       p_npc: String(npcId ?? ''),
       ...(deckNpc ? { p_deck_npc: String(deckNpc) } : {}),
+      // As cartas do deck do JOGADOR. Só vão quando há alguma: mandar uma lista
+      // vazia diria ao banco "vou jogar com deck nenhum", e ele leria isso como
+      // um deck em regra — o contrário de omitir, que faz o servidor conferir o
+      // que estiver SALVO com aquele nome.
+      ...(cartas?.length ? { p_cartas: cartas.map(Number) } : {}),
       // QUAL VERSAO ESTA PEDINDO PARA JOGAR. O banco compara com o piso
       // (`versao_minima`, migration 0041) e recusa abaixo dele — e um cliente
       // velho nao manda estes campos, que e' exatamente como ele e'
@@ -343,9 +361,5 @@ export async function iniciarDuelo(npcId, deckNpc) {
       ...(await selo()),
     },
   });
-  // O erro do banco vem com o RECADO configurado pelo admin ("peca o
-  // instalador novo"), e quem chama mostra. Devolver `null` calado aqui faria
-  // o duelo simplesmente nao comecar, sem ninguem saber por que — que e' o
-  // sintoma de que este projeto acabou de sair.
-  return r.ok ? r.dados : null;
+  return { id: r.ok ? r.dados : null, erro: r.ok ? null : (r.error || 'nao consegui registrar o duelo') };
 }

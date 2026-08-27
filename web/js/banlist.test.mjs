@@ -4,7 +4,7 @@
  *   node web/js/banlist.test.mjs
  */
 import {
-  defaultBanlist, validateBanlist,
+  defaultBanlist, validateBanlist, textoDoProblema,
   addRule, removeRule, assignCardToRule, unassignCard, cardsInRule,
 } from './banlist.js';
 import assert from 'node:assert/strict';
@@ -206,6 +206,33 @@ t('normalize reconstrói regras de uma banlist salva sem `rules` (compat)', () =
 });
 t('defaultBanlist traz listId = "lista1"', () => {
   assert.equal(defaultBanlist().listId, 'lista1');
+});
+
+console.log('\n=== a frase do problema (a MESMA no builder e na porta do duelo) ===');
+const nome = (id) => ({ 10667321: 'Card Destruction', 5053103: 'Battle Ox' })[id] ?? String(id);
+
+t('teto: diz a carta, quantas tem e quantas cabem', () => {
+  assert.equal(textoDoProblema({ type: 'limit', card: 10667321, count: 3, limit: 1 }, nome),
+               'Card Destruction tem 3 cópias (máximo 1)');
+});
+t('teto ZERO e a carta BANIDA, e nao "maximo 0 copias"', () => {
+  // Banida não é o degrau abaixo de Limitada: "máximo 0" faria o jogador
+  // procurar a versão permitida de uma carta que não pode estar no deck.
+  assert.equal(textoDoProblema({ type: 'limit', card: 10667321, count: 1, limit: 0 }, nome),
+               'Card Destruction está BANIDA');
+});
+t('ponto e grupo tambem tem frase', () => {
+  assert.match(textoDoProblema({ type: 'points', spent: 12, budget: 10 }, nome), /12\/10 pontos/);
+  assert.match(textoDoProblema({ type: 'group', group: 2, count: 3, cards: [10667321, 5053103] }, nome),
+               /Card Destruction e Battle Ox dividem 2 cópias, e o deck tem 3/);
+});
+t('sem nome resolvido, sai o CODIGO — nunca um nome inventado', () => {
+  assert.equal(textoDoProblema({ type: 'limit', card: 42, count: 2, limit: 1 }),
+               '42 tem 2 cópias (máximo 1)');
+});
+t('problema desconhecido devolve vazio (a tela nao mostra linha em branco com lixo)', () => {
+  assert.equal(textoDoProblema(null), '');
+  assert.equal(textoDoProblema({ type: 'coisa-nova' }), '');
 });
 
 console.log(`\n${pass} passaram, ${fail} falharam\n`);

@@ -94,6 +94,9 @@ namespace DuelServer
         readonly NpcBrain _npc;
         readonly bool _npcEnabled;
 
+        /// <summary>A DECKLIST com que o NPC entrou no duelo — ver <see cref="ListaDoDeck"/>.</summary>
+        readonly uint[] _npcDeckList;
+
         /// <summary>
         /// MULTIPLAYER: os dois lados são gente, e ninguém joga por ninguém.
         ///
@@ -134,6 +137,34 @@ namespace DuelServer
             _gatilhoKind = kind;
             _gatilhoCode = BitConverter.ToUInt32(d, o + 1) & 0x7FFFFFFF;
             _gatilhoPlayer = d[o + 5] <= 1 ? d[o + 5] : -1;
+        }
+
+        /// <summary>
+        /// O gatilho da DECLARACAO DE ATAQUE — o unico que nao sai da propria
+        /// mensagem.
+        ///
+        /// O MSG_ATTACK nao traz codigo nenhum: sao dois `loc_info`
+        /// (`ctrl loc seq pos`), e so'. Quem sabe QUAL carta esta' naquela zona
+        /// e' o modelo de campo que este parser ja' mantem (`_board`), entao o
+        /// codigo vem de la'.
+        ///
+        /// Sem isto a janela de resposta ao ataque chegava ao front SEM gatilho,
+        /// e a unica frase honesta que sobrava era a da mudanca de fase: *"Seu
+        /// oponente esta' indo para a Battle Step — deseja ativar uma carta?"*,
+        /// no exato momento em que um monstro dele vinha para cima do seu. E'
+        /// a janela mais importante do duelo (Mirror Force, Waboku, Negate
+        /// Attack, Sakuretsu) e era a unica sem nome.
+        ///
+        /// Para o `NpcBrain` isto NAO muda nada de proposito: `ValeNegar` so'
+        /// sabe medir invocacao, magia e armadilha, entao um gatilho de ataque
+        /// cai no "nao sei avaliar" e ele continua sem gastar negacao ali —
+        /// exatamente o que ja' acontecia quando o gatilho vinha vazio.
+        /// </summary>
+        void MarcaGatilhoDoAtaque(byte atkCtrl, int atkSeq)
+        {
+            _gatilhoKind = "attack";
+            _gatilhoCode = _board.TryGetValue((atkCtrl, atkSeq), out var quem) ? quem.code : 0u;
+            _gatilhoPlayer = atkCtrl <= 1 ? atkCtrl : -1;
         }
 
         /// <summary>
@@ -179,7 +210,7 @@ namespace DuelServer
             // mensagens que o motor manda ANTES da janela: MSG_SUMMONING /
             // MSG_SPSUMMONING (invocação em andamento) e MSG_CHAINING (carta
             // que acabou de ser ativada).
-            public string chainTriggerKind = "";  // "summon" | "activation" | ""
+            public string chainTriggerKind = "";  // "summon" | "activation" | "attack" | ""
             public uint chainTriggerCode;         // a carta invocada/ativada
             public int chainTriggerPlayer = -1;   // de quem é (−1 = não sei)
             public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
@@ -367,6 +398,9 @@ namespace DuelServer
                                  fieldSpellController);
             _doisHumanos = doisHumanos;
             _npcEnabled = npc && !doisHumanos;
+            // Sem `npcDeck` o oponente joga com o SEU deck — a mesma regra da
+            // linha acima, e por isso a lista tem de seguir a mesma escolha.
+            _npcDeckList = npcDeck ?? deck ?? Array.Empty<uint>();
             _npc = new NpcBrain(_s.Cards, FaceUpMonsters, m => Log.Info($"[npc] {m}"),
                                 npcLeitura ? HandOf : HandHonesta,
                                 StCountOf, FaceUpMonstersPos, SetStCountOf, FaceUpStOf, LpOf,
@@ -381,7 +415,11 @@ namespace DuelServer
                                 // Fusion). Como o ATK ao vivo, nao e' leitura
                                 // escondida: o corpo esta' com a face para cima e
                                 // um humano tambem sabe que ele some na End Phase.
-                                CorpoCondenado);
+                                CorpoCondenado,
+                                // A decklist do PRÓPRIO NPC. Também não depende
+                                // do `npcLeitura`: ninguém precisa de permissão
+                                // para saber o que pôs no próprio deck.
+                                ListaDoDeck);
             Log.Info($"[npc] nivel: {(npcLeitura ? "AVANCADO (le a mao e as cartas baixadas)" : "iniciante (so' o que esta com a face para cima)")}");
             // `DuelSession` já colocou a carta no motor (antes de OCG_StartDuel),
             // mas isso não gera MSG_MOVE — o front só sabe de campo por evento.
@@ -437,6 +475,20 @@ namespace DuelServer
         /// que existe alguma coisa ali, o que `SetStCountOf` já conta).</summary>
         IReadOnlyList<uint> SetStHonesto(int player) =>
             player == HUMAN ? Array.Empty<uint>() : SetStOf(player);
+
+        /// <summary>
+        /// **A decklist do PRÓPRIO NPC** — o que ele pôs no deck, não o que
+        /// sobrou dentro dele.
+        ///
+        /// Não passa pelo `npcLeitura` e nem por isso é leitura escondida: todo
+        /// jogador conhece o próprio deck, e é com isso que se decide adiantar um
+        /// Foolish Burial ("o meu deck tem três Monster Reborn"). Do lado do
+        /// JOGADOR devolve vazio, sempre — a decklist do outro é a única coisa
+        /// aqui que nem o NPC avançado pode ver, porque não existe mesa nenhuma
+        /// de onde ela se deduza.
+        /// </summary>
+        IReadOnlyList<uint> ListaDoDeck(int player) =>
+            player == HUMAN ? Array.Empty<uint>() : _npcDeckList;
 
         /// <summary>Zonas de magia/armadilha ocupadas de um jogador.</summary>
         int StCountOf(int player) => player >= 0 && player <= 1 ? _st[player] : 0;
@@ -1220,21 +1272,50 @@ namespace DuelServer
                     }
                     break;
                 }
-                case 110: // MSG_ATTACK — quem ataca quem
+                case 110: // MSG_ATTACK — a DECLARAÇÃO: quem ataca quem
                 {
                     // atacante{ctrl(1)loc(1)seq(4)pos(4)} + alvo{...}
+                    byte atkCtrl = d[o + 1];
+                    int atkSeq = BitConverter.ToInt32(d, o + 3);
                     ev.Add(new
                     {
                         type = "attack",
-                        atkCtrl = d[o + 1], atkLoc = d[o + 2],
-                        atkSeq = BitConverter.ToInt32(d, o + 3),
+                        atkCtrl, atkLoc = d[o + 2], atkSeq,
                         defCtrl = d[o + 11], defLoc = d[o + 12],
                         defSeq = BitConverter.ToInt32(d, o + 13),
                         direct = d[o + 12] == 0,   // sem localização = ataque direto
                     });
+                    // A janela de resposta que abre DEPOIS desta mensagem está
+                    // respondendo a este ataque — e era a única sem nome.
+                    MarcaGatilhoDoAtaque(atkCtrl, atkSeq);
                     break;
                 }
-                case 111: // MSG_BATTLE — o resultado do combate
+                // MSG_ATTACK_DISABLED (112) — o ataque foi ANULADO (Negate
+                // Attack, Waboku, um monstro que impede a batalha). Um byte só.
+                //
+                // Sem ele o ataque anulado é indistinguível, na tela, de um
+                // ataque que ninguém declarou: a seta some, o MSG_BATTLE nunca
+                // chega, nenhum LP muda e o duelo segue. Quem gastou a carta não
+                // vê nada acontecer, e quem foi impedido não sabe por quê.
+                case 112:
+                    ev.Add(new { type = "attackcancel" });
+                    LimpaGatilho();
+                    break;
+                // MSG_DAMAGE_STEP_START (113) / MSG_DAMAGE_STEP_END (114) — a
+                // ETAPA DE DANO, medida com `--probe-battle`: um byte cada, e o
+                // 113 chega DEPOIS da janela de resposta à declaração.
+                //
+                // São elas que separam os dois momentos que a tela juntava. É
+                // dentro deste par que o alvo virado abre (o `pos`), que o
+                // MSG_BATTLE traz o cálculo e que o MSG_DAMAGE cobra o LP —
+                // então uma janela de corrente aqui dentro NÃO é mais a resposta
+                // à declaração, e prometer que é seria mentir na hora de decidir.
+                case 113: ev.Add(new { type = "damagestep", etapa = "inicio" }); break;
+                case 114:
+                    ev.Add(new { type = "damagestep", etapa = "fim" });
+                    LimpaGatilho();
+                    break;
+                case 111: // MSG_BATTLE — o CÁLCULO DE DANO, já resolvido
                 {
                     // Cada lado: loc(10) + atk(4) + def(4) + destruido(1) = 19 bytes.
                     // O motor já resolveu tudo; aqui é só para a tela contar o que houve.

@@ -255,6 +255,15 @@
   .detalhe { border: 1px solid var(--line); background: var(--panel2); padding: 14px; }
   .detalhe .frase { font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
   .detalhe .frase b { color: var(--gold); }
+  /* O "visto por último" do cartão do amigo. Fica ACIMA do seletor de deck e
+     abaixo da frase, porque é contexto da decisão que os botões oferecem, e
+     não uma das opções. */
+  .detalhe .presenca { font-size: 11px; color: var(--dim); margin: -6px 0 12px;
+                       display: flex; align-items: center; gap: 6px; }
+  .detalhe .presenca::before { content: ''; width: 6px; height: 6px; border-radius: 50%;
+                               background: var(--dim); flex: none; }
+  .detalhe .presenca.on { color: var(--green); }
+  .detalhe .presenca.on::before { background: var(--green); }
   .detalhe .campo { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 11px; color: var(--dim); }
   .detalhe .campo select { flex: 1; min-width: 0; }
   .botoes { display: flex; gap: 8px; }
@@ -479,6 +488,7 @@ import {
 } from '/web/js/multiplayer.js';
 import { vigiar, aceitar, recusar } from '/web/js/notificacoesvivo.js';
 import { baterPonto } from '/web/js/presenca.js';
+import { textoVistoEm } from '/web/js/vistoem.js';
 import {
   meusIcones, escolherIcone, artesDe,
   caminhoDoIcone, PADRAO,
@@ -668,8 +678,17 @@ async function pintarAmigos() {
     // impedir REMOVER um amigo offline: a única porta para isso é este clique, e
     // ela estava fechada justamente para quem não está jogando — que é a maioria
     // da lista na maior parte do tempo.
-    b.title = a.online ? `${a.usuario} — desafiar ou remover`
-                       : `${a.usuario} está offline — abrir para remover`;
+    // O "visto por último" entra aqui e no cartão, e não como uma linha fixa na
+    // lista: a lateral é estreita e a lista rola, então uma segunda linha por
+    // amigo empurraria para fora da tela justamente os que estão online (que
+    // vêm primeiro). Quem está ONLINE não ganha a frase — o carimbo dele é de
+    // no máximo dois minutos atrás, e "visto hoje às 15:00" ao lado de um selo
+    // verde escrito ONLINE só disputa a atenção com ele.
+    const visto = a.online ? null : textoVistoEm(a.visto_em);
+    b.title = a.online
+      ? `${a.usuario} — desafiar ou remover`
+      : visto ? `${a.usuario} — visto por último ${visto} · abrir para remover`
+              : `${a.usuario} está offline — abrir para remover`;
     // O ícone do amigo vem como `icone_id` (`meus_amigos`), não como arquivo: a
     // policy de `perfis` só deixa cada um ver o próprio registro, então quem
     // cruza o id com a arte é o catálogo, que é de leitura aberta.
@@ -698,6 +717,30 @@ function abrirDesafio(amigo) {
   corpo.innerHTML = `<div class="frase">${amigo.online ? 'Chamar <b></b> para um duelo.'
                                                        : '<b></b> está offline.'}</div>`;
   corpo.querySelector('b').textContent = `[${amigo.etiqueta}] ${amigo.usuario}`;
+
+  // VISTO POR ÚLTIMO. É aqui que ele mais vale: "OFFLINE" é a resposta para
+  // quase todo mundo quase o tempo todo, e não separa quem fechou o jogo há
+  // cinco minutos de quem não entra há três semanas — que são decisões
+  // diferentes na hora de chamar para duelar, mandar mensagem ou remover.
+  //
+  // O carimbo vem do BANCO (`meus_amigos.visto_em`, migration 0049), nunca de
+  // uma conta local: a policy de `perfis` não deixa o navegador ler o
+  // `visto_em` de ninguém, e mesmo que deixasse, "há 3 dias" medido contra o
+  // relógio da máquina teria o mesmo defeito que fez o `online` nascer no
+  // servidor — dois clientes discordando, cada um certo pela sua conta.
+  //
+  // Sem carimbo (servidor anterior à 0049) a linha simplesmente não aparece:
+  // `textoVistoEm` devolve `null` em vez de "Invalid Date".
+  const quando = textoVistoEm(amigo.visto_em);
+  if (amigo.online || quando) {
+    const presenca = document.createElement('div');
+    presenca.className = 'presenca' + (amigo.online ? ' on' : '');
+    presenca.textContent = amigo.online
+      ? `online agora · visto por último ${quando ?? 'há pouco'}`
+      : `visto por último ${quando}`;
+    corpo.append(presenca);
+  }
+
   if (amigo.online) corpo.append(campoDeDeck());
 
   const botoes = document.createElement('div');

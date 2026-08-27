@@ -15,7 +15,9 @@ import assert from 'node:assert/strict';
 import {
   CARD_LISTS, getCardList, aplicarListas, fonteDasListas, resolverLista,
 } from './cardlists.js';
-import { inLista1, LISTA1_SPELLTRAP, LISTA1_TIPOS, fonteDaLista1 } from './lista1.js';
+import {
+  inLista1, LISTA1_SPELLTRAP, LISTA1_TIPOS, fonteDaLista1, aplicarObteniveis,
+} from './lista1.js';
 
 let pass = 0, fail = 0;
 const t = (name, fn) => {
@@ -162,6 +164,69 @@ t('lista sem id é descartada', () => {
   assert.equal(CARD_LISTS[0].id, 'lista1');
   padrao();
 });
+
+console.log('\n=== o que o jogo ENTREGA, o jogo aceita (booster/estrutural/drop) ===');
+
+// Uma carta real que NÃO está na Lista 1 de fábrica: Dark Factory of More
+// Production, que estava num pool de drop do NPC e era injogável. É um dos 10
+// casos que existiam de verdade no banco no dia desta mudança.
+const OBTIDA = { id: 9064354, t: 'T', tl: 'Normal Trap' };
+
+t('carta fora da lista, mas ENTREGUE pelo jogo, passa a valer', () => {
+  padrao();
+  aplicarObteniveis([]);
+  assert.equal(inLista1(OBTIDA), false, 'o teste precisa começar com ela fora');
+  aplicarObteniveis([OBTIDA.id]);
+  assert.equal(inLista1(OBTIDA), true,
+    'carta de booster/drop continua recusada — é o bug que isto conserta');
+  aplicarObteniveis([]);
+});
+
+t('par CONTROLE: carta que o jogo NÃO entrega continua fora', () => {
+  // Sem este par, um `inLista1` que dissesse "sim" para tudo passaria no de
+  // cima e abriria o pool inteiro.
+  padrao();
+  aplicarObteniveis([OBTIDA.id]);
+  assert.equal(inLista1({ id: 999999999, t: 'T', tl: 'Normal Trap' }), false);
+  aplicarObteniveis([]);
+});
+
+t('vale para QUALQUER lista, não só a Lista 1', () => {
+  aplicarObteniveis([OBTIDA.id]);
+  aplicarListas([{ id: 'lista2', label: 'Lista 2', tipos: [], ids: [] }]);
+  assert.equal(getCardList('lista2').filter(OBTIDA), true);
+  aplicarObteniveis([]);
+  padrao();
+});
+
+t('a FONTE não engole as obteníveis (senão tirar do booster não tiraria da lista)', () => {
+  // `fonteDaLista1()` é o que o editor lê para salvar de volta. Se a carta
+  // entrasse ali, ela viraria escolha à mão e ficaria na lista PARA SEMPRE —
+  // que é o oposto de "automático".
+  padrao();
+  const antes = fonteDaLista1().ids.length;
+  aplicarObteniveis([OBTIDA.id]);
+  assert.equal(fonteDaLista1().ids.length, antes, 'a obtenível vazou para a fonte');
+  assert.equal(fonteDaLista1().ids.includes(OBTIDA.id), false);
+  aplicarObteniveis([]);
+});
+
+t('e a lista RESOLVIDA publicada também não as engole', () => {
+  // `resolverLista` publica `conteudo/<id>`, que o servidor lê. A união é feita
+  // por `lista_ativa()` a cada leitura; gravá-las aqui faria a carta continuar
+  // valendo depois de sair do booster — e ninguém perceberia.
+  padrao();
+  const semObt = resolverLista(fonteDaLista1Completa(), CARTAS);
+  aplicarObteniveis([OBTIDA.id]);
+  const comObt = resolverLista(fonteDaLista1Completa(), CARTAS);
+  assert.deepEqual(comObt, semObt, 'a obtenível vazou para a lista publicada');
+  assert.equal(comObt.includes(OBTIDA.id), false);
+  aplicarObteniveis([]);
+});
+
+function fonteDaLista1Completa() {
+  return { id: 'lista1', ...fonteDaLista1() };
+}
 
 console.log(`\n${pass} passaram, ${fail} falharam\n`);
 process.exit(fail ? 1 : 0);

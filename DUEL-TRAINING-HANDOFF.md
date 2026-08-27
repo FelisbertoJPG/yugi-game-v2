@@ -581,6 +581,19 @@ Duas coisas que mudam o *como se joga*, não o que é jogado:
   Battle Phase — deseja ativar uma carta?". **`chainTriggerPlayer` nomeia jogador**,
   então entrou em `CAMPOS_DE_JOGADOR` (`web/js/ponte.js`): sem espelhar, o
   segundo jogador do multiplayer leria a frase com os lados trocados.
+- **A DECLARAÇÃO DE ATAQUE virou gatilho** (`chainTriggerKind = "attack"`), e era
+  o último momento sem nome: a janela mais importante do duelo — Mirror Force,
+  Waboku, Negate Attack, Sakuretsu — caía na frase da fase, *"seu oponente está
+  indo para a Battle Step"*, no exato instante em que um monstro dele vinha para
+  cima do seu. O código sai do `_board` (o MSG_ATTACK não traz nenhum).
+  Para o `NpcBrain` isso **não muda nada, de propósito**: `ValeNegar` só sabe
+  medir invocação, magia e armadilha, então um ataque cai no *"gatilho que não
+  sei avaliar"* e ele continua sem gastar negação ali — o mesmo desfecho de
+  quando o gatilho vinha vazio.
+- `atkCtrl` e `defCtrl` (MSG_ATTACK) **também** entraram em `CAMPOS_DE_JOGADOR`,
+  e nunca tinham estado lá: são por eles que a seta acha as duas zonas e a faixa
+  da batalha nomeia as duas cartas. Sem espelhar, o segundo jogador via a seta
+  sair da carta errada — e no ataque **direto** ela apontava para a própria mão.
 
 ## 4. Protocolo ocgcore (edo9300, DLL 11.0) — DECIFRADO empiricamente
 
@@ -688,10 +701,47 @@ Fluxo do ataque: `attack (índice<<16|1)` → o motor pede o **alvo** num
 `SELECT_CARD (15)` (entradas de **14 bytes** aqui: as 10 usuais + posição) →
 responde-se com o formato normal de seleção → o combate resolve.
 
-**MSG_ATTACK (110):** atacante`{ctrl(1)loc(1)seq(4)pos(4)}` + alvo`{...}`.
+**MSG_ATTACK (110):** atacante`{ctrl(1)loc(1)seq(4)pos(4)}` + alvo`{...}`. É a
+**DECLARAÇÃO**, e não traz código nenhum — só as duas zonas. Quem sabe qual carta
+está em cada uma é o modelo de campo do parser (`_board`), e é de lá que sai o
+código do atacante para o gatilho da janela (`MarcaGatilhoDoAtaque`).
 **MSG_BATTLE (111):** por lado, `loc(10) atk(4) def(4) destruido(1)` = 19 bytes.
 Traz ATK/DEF dos dois e quem morreu — o motor já resolveu tudo, isto é só relato.
 Dano, destruição e ida ao cemitério vêm de graça (MSG_DAMAGE + MSG_MOVE).
+
+**A ETAPA DE DANO tem fronteiras, e elas são mensagens.** Três, de **1 byte**
+cada, que ficaram anos sem tradução — o laço anda pelo tamanho declarado, então
+mensagem sem `case` é pulada **em silêncio**:
+
+| id | mensagem | o que é |
+|---|---|---|
+| 112 | `MSG_ATTACK_DISABLED` | o ataque foi **anulado** (Negate Attack, Waboku) |
+| 113 | `MSG_DAMAGE_STEP_START` | abriu a Etapa de Dano |
+| 114 | `MSG_DAMAGE_STEP_END` | fechou a Etapa de Dano |
+
+A sequência abaixo é MEDIDA (`--probe-battle` e `--test-etapa-dano`), não
+suposta — e é ela que dá ritmo à tela:
+
+```
+contra monstro virado:  110 attack → 113 → MSG_POS_CHANGE (o alvo ABRE)
+                                   → 111 battle → 114
+ataque direto:          110 attack → 113 → 111 battle → 91 damage → 114
+ataque anulado:         110 attack → [SELECT_CHAIN] → 112, e nada mais
+```
+
+Três coisas que só aparecem quando se olha o buffer cru:
+
+- **o alvo virado abre DENTRO da etapa de dano**, entre o 113 e o MSG_BATTLE.
+  Não é detalhe de regra: é a única chance de a tela mostrar a carta antes do
+  golpe;
+- **o ataque DIRETO também manda MSG_BATTLE**, com o lado do defensor **zerado**.
+  Quem desenhar o defensor só porque o evento chegou põe na tela um adversário de
+  0 de ATK apanhando;
+- entre o 113 e o MSG_BATTLE o core emite `MSG_HINT` com `HINT_EVENT` e os
+  marcadores dos sub-passos (24, 40, 41, 42, 43, 44 — na ordem exata da etapa de
+  dano oficial). Eles **não** são traduzidos: os números vêm do `strings.conf` do
+  ygopro, que este projeto não tem, e batizá-los de cabeça seria inventar texto
+  para a tela. As três mensagens acima já delimitam tudo o que a tela precisa.
 
 **SELECT_CHAIN (16):** `type(1) player(1) speCount(1) forced(1) hintTiming(4)
 hintOutro(4) count(4)` + entrada de **23 bytes**:

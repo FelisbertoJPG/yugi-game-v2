@@ -468,11 +468,23 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-panik") >= 0)
                 return TestPanik.Run(streamingAssets);
 
+            // ENTERRAR PARA USAR DEPOIS: o Foolish Burial ADIANTADO (a reanimacao
+            // ainda no deck) e o corpo escolhido pelo que VOLTA do cemiterio, e
+            // nao pelo maior ATK — que no deck Yugi Chaos e' um Ritual.
+            if (Array.IndexOf(args, "--test-enterro") >= 0)
+                return TestEnterro.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-trava") >= 0)
                 return TestTrava.Run(streamingAssets);
 
             if (Array.IndexOf(args, "--test-flip") >= 0)
                 return TestFlip.Run(streamingAssets);
+
+            // A ETAPA DE DANO: declaracao -> janela de resposta -> o alvo virado
+            // abre -> colisao -> calculo. As tres fronteiras que o motor manda e
+            // ninguem traduzia (MSG_ATTACK_DISABLED, DAMAGE_STEP_START/END).
+            if (Array.IndexOf(args, "--test-etapa-dano") >= 0)
+                return TestEtapaDano.Run(streamingAssets);
 
             if (Array.IndexOf(args, "--test-armory") >= 0)
                 return TestArmory.Run(streamingAssets);

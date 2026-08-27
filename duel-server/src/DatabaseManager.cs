@@ -300,7 +300,34 @@ public class DatabaseManager : IDisposable
     const uint CATEGORY_PRO_CEMITERIO = 0x4;
 
     /// <summary>Bits de "esta carta FICA em campo" no `type` (os mesmos do ocgcore).</summary>
-    const uint TYPE_CONTINUO = 0x20000, TYPE_CAMPO = 0x80000;
+    const uint TYPE_CONTINUO = 0x20000, TYPE_CAMPO = 0x80000, TYPE_EQUIP = 0x40000;
+
+    /// <summary>
+    /// **Esta magia/armadilha FICA na zona depois de resolver?** Contínua,
+    /// equipamento ou de campo ficam; a NORMAL vai embora sozinha.
+    ///
+    /// A distinção decide se vale gastar uma remoção nela. Uma Normal com a face
+    /// para CIMA na zona de magia é, por definição, uma carta que está resolvendo
+    /// AGORA — banir ou destruir ali não impede o efeito (o motor já a ativou) e
+    /// ainda queima a remoção numa carta que ia para o cemitério de qualquer
+    /// jeito. Foi o relato: o NPC baniu a **Summoner's Art** do jogador, uma
+    /// busca de uso único, no meio da própria resolução.
+    /// </summary>
+    public bool FicaEmCampo(uint code)
+    {
+        var st = Stats(code);
+        return !st.IsMonster
+            && (st.Type & (TYPE_CONTINUO | TYPE_CAMPO | TYPE_EQUIP)) != 0;
+    }
+
+    /// <summary>
+    /// Os tipos que NUNCA voltam do cemitério por conta própria — ver
+    /// <see cref="VoltaDoCemiterio"/>. É regra do jogo, não do script: um Ritual
+    /// e os três do Extra Deck só podem ser Invocados Especialmente do cemitério
+    /// se tiverem sido corretamente invocados antes.
+    /// </summary>
+    const uint TYPE_FUSAO = 0x40, TYPE_RITUAL = 0x80, TYPE_SINCRO = 0x2000,
+               TYPE_XYZ = 0x800000, TYPE_LINK = 0x4000000;
 
     /// <summary>O que o efeito de uma carta faz, do ponto de vista de quem decide jogá-la.</summary>
     public readonly struct PerfilDeEfeito
@@ -562,6 +589,385 @@ public class DatabaseManager : IDisposable
               && lua.Contains("IsPreviousLocation(LOCATION_SZONE)")
               && lua.Contains("SpecialSummon");
         _salvaCache[code] = r;
+        return r;
+    }
+
+    private readonly System.Collections.Generic.Dictionary<uint, bool> _voltaCache = new();
+
+    /// <summary>
+    /// **Este monstro consegue voltar do CEMITÉRIO?**
+    ///
+    /// A pergunta nasceu do Foolish Burial: mandar um corpo do deck para o
+    /// cemitério só vale se ele puder sair de lá depois. E há uma classe inteira
+    /// que não pode — quem tem *limite de reanimação* ("não pode ser Invocado por
+    /// Invocação-Especial, exceto por..."): um Ritual, um monstro do Extra Deck,
+    /// o Gate Guardian. Todos precisam ter sido corretamente invocados ANTES, e
+    /// quem foi do deck direto para o cemitério nunca foi.
+    ///
+    /// O erro é CALADO, e é o pior tipo: a carta vai para o cemitério, o motor
+    /// está certo, e o Monster Reborn seguinte simplesmente **não a oferece**.
+    /// Nada acusa — só o combo que nunca fecha.
+    ///
+    /// Dois sinais, e cada um pega o que o outro não pega:
+    ///
+    ///   • o TIPO (Ritual e os três do Extra Deck). Vale mesmo para a carta que
+    ///     não tem Lua nenhum no disco, porque a restrição é do motor;
+    ///   • `EnableReviveLimit` no Lua da própria carta, que é como o `ocgcore`
+    ///     escreve o limite quando ele é da CARTA e não do tipo. É ele que pega o
+    ///     **Gate Guardian** — que este projeto já protegia, uma carta de cada vez
+    ///     e por ID (ver `ValorDescarte`, no `NpcBrain`).
+    ///
+    /// Carta sem script e sem tipo proibido responde SIM, que é o caso comum e o
+    /// certo: a esmagadora maioria dos monstros volta. Aqui o silêncio do banco
+    /// **não** é o erro barato de sempre — dizer "não volta" por falta de
+    /// informação faria o cérebro recusar todo alvo bom.
+    /// </summary>
+    public bool VoltaDoCemiterio(uint code)
+    {
+        if (_voltaCache.TryGetValue(code, out bool hit)) return hit;
+        var st = Stats(code);
+        bool r = st.IsMonster
+              && (st.Type & (TYPE_RITUAL | TYPE_FUSAO | TYPE_SINCRO | TYPE_XYZ | TYPE_LINK)) == 0
+              && !LuaDaCarta(code).Contains("EnableReviveLimit");
+        _voltaCache[code] = r;
+        return r;
+    }
+
+    // ================= O QUE UMA REANIMACAO ACEITA TRAZER DE VOLTA =============
+    //
+    // "O monstro pode ser Invocado Especialmente do cemitério pelo efeito da
+    // carta que o traz de volta?" Sem essa pergunta, enterrar um corpo é apostar:
+    // o **Birthright** e o **Swing of Memories** só trazem monstro NORMAL, o
+    // **Eternal Soul** só o Dark Magician, o **Dark Magic Veil** só Mago DARK — e
+    // um Foolish Burial que enterre o corpo errado gasta a carta e o corpo, sem
+    // erro nenhum na tela: a reanimação simplesmente não o oferece depois.
+    //
+    // Quem responde é o Lua da própria carta, e o formato é uniforme nas 20
+    // reanimações do pool de hoje: uma função-filtro de UMA linha
+    //
+    //     function s.filter(c,e,tp)
+    //         return c:IsType(TYPE_NORMAL) and c:IsCanBeSpecialSummoned(e,0,tp,false,false)
+    //     end
+    //
+    // O `IsCanBeSpecialSummoned` é o marcador (e é ele que o motor usa para
+    // aplicar o limite de reanimação — a parte que <see cref="VoltaDoCemiterio"/>
+    // aproxima); o resto da linha é a exigência.
+
+    /// <summary>Uma FORMA que a reanimação aceita. Campo em 0/vazio = não exige.</summary>
+    public sealed class FormaDeReanimacao
+    {
+        public uint Tipo { get; init; }
+        public uint Raca { get; init; }
+        public uint Atributo { get; init; }
+        public int NivelMax { get; init; }
+        public uint[] Codigos { get; init; } = System.Array.Empty<uint>();
+
+        public bool Serve(CardStats st) =>
+            st.IsMonster
+            && (Tipo == 0 || (st.Type & Tipo) != 0)
+            && (Raca == 0 || (st.Race & Raca) != 0)
+            && (Atributo == 0 || (st.Attribute & Atributo) != 0)
+            && (NivelMax == 0 || st.Level <= NivelMax)
+            && (Codigos.Length == 0 || System.Array.IndexOf(Codigos, st.Code) >= 0);
+    }
+
+    /// <summary>
+    /// O que uma carta de reanimação exige do alvo. <see cref="Legivel"/> falso é
+    /// a resposta HONESTA de "não sei ler este filtro" — e quem pergunta tem de
+    /// tratá-la como "não conte com esta carta", nunca como "aceita tudo".
+    /// </summary>
+    public sealed class ExigenciaDeReanimacao
+    {
+        public bool Legivel { get; init; }
+        public FormaDeReanimacao[] Formas { get; init; } = System.Array.Empty<FormaDeReanimacao>();
+
+        /// <summary>Esta reanimação consegue trazer ESTE monstro de volta?</summary>
+        public bool Alcanca(CardStats st)
+        {
+            if (!Legivel) return false;
+            foreach (var f in Formas) if (f.Serve(st)) return true;
+            return false;
+        }
+    }
+
+    private System.Collections.Generic.Dictionary<string, long> _constantes;
+
+    /// <summary>
+    /// **As constantes nomeadas do próprio jogo** — `TYPE_NORMAL`,
+    /// `RACE_SPELLCASTER`, `ATTRIBUTE_DARK`, `CARD_DARK_MAGICIAN`… — lidas dos
+    /// `constant.lua` que viajam junto com os 21 mil scripts.
+    ///
+    /// Copiá-las para cá seria uma segunda fonte para a mesma verdade, que é o
+    /// erro que este projeto já pagou: as duas se desencontram na primeira
+    /// atualização do banco, e o filtro passaria a recusar a carta certa em
+    /// silêncio. −1 = desconhecida, e quem pergunta trata isso como "não sei ler".
+    /// </summary>
+    private long Constante(string nome)
+    {
+        if (_constantes == null)
+        {
+            _constantes = new System.Collections.Generic.Dictionary<string, long>();
+            foreach (string arquivo in new[]
+                     { "constant.lua", "card_counter_constants.lua", "archetype_setcode_constants.lua" })
+            {
+                string p = Path.Combine(_sa ?? "", "YGODemo", "script", arquivo);
+                if (!File.Exists(p)) continue;
+                try
+                {
+                    foreach (System.Text.RegularExpressions.Match m in
+                             System.Text.RegularExpressions.Regex.Matches(
+                                 File.ReadAllText(p),
+                                 @"(?m)^\s*([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*$"))
+                    {
+                        string v = m.Groups[2].Value;
+                        long n = v.StartsWith("0x") || v.StartsWith("0X")
+                            ? Convert.ToInt64(v.Substring(2), 16)
+                            : long.Parse(v);
+                        _constantes[m.Groups[1].Value] = n;
+                    }
+                }
+                catch { /* ilegivel = as constantes daquele arquivo nao existem */ }
+            }
+        }
+        return _constantes.TryGetValue(nome, out long hit) ? hit : -1;
+    }
+
+    /// <summary>Um número literal ou uma constante nomeada do jogo. −1 = não sei.</summary>
+    private long Valor(string bruto)
+    {
+        string s = bruto.Trim();
+        if (s.Length == 0) return -1;
+        if (s.StartsWith("0x") || s.StartsWith("0X"))
+            return long.TryParse(s.Substring(2), System.Globalization.NumberStyles.HexNumber,
+                                 System.Globalization.CultureInfo.InvariantCulture, out long h) ? h : -1;
+        if (long.TryParse(s, out long d)) return d;
+        return System.Text.RegularExpressions.Regex.IsMatch(s, @"^[A-Z][A-Z0-9_]*$") ? Constante(s) : -1;
+    }
+
+    /// <summary>A função-filtro de UMA linha, que é a forma de todas as 20
+    /// reanimações do pool. O `end` na linha seguinte é o que separa o filtro de
+    /// um `s.target` de várias linhas — que também cita `IsCanBeSpecialSummoned`
+    /// e não é filtro nenhum.</summary>
+    private static readonly System.Text.RegularExpressions.Regex FILTRO_DE_UMA_LINHA =
+        new(@"function\s+s\.\w+\(\s*c\b[^)]*\)\s*\r?\n[ \t]*return\s+([^\r\n]+?)\s*\r?\n[ \t]*end\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private readonly System.Collections.Generic.Dictionary<uint, ExigenciaDeReanimacao> _reanimaCache = new();
+
+    /// <summary>
+    /// **O que esta reanimação exige do alvo**, lido do Lua dela.
+    ///
+    /// Uma carta pode ter mais de uma FORMA (a Magician Navigation traz o Dark
+    /// Magician por um efeito e um Mago DARK Nv≤7 por outro): servem todas, e
+    /// basta o alvo casar com uma.
+    ///
+    /// **Qualquer termo que o leitor não conheça derruba a carta inteira para
+    /// `Legivel = false`** — o Master of Chaos filtra por `s.attfilter(c)`, uma
+    /// função à parte, e a Maiden of White usa `or`. Fingir que essas aceitam
+    /// tudo faria o cérebro enterrar um corpo que elas nunca trariam de volta,
+    /// que é exatamente o estrago que esta função existe para impedir. Aqui o
+    /// silêncio é o erro barato de sempre: uma carta a menos no plano.
+    ///
+    /// LIMITE CONHECIDO: o leitor não distingue de ONDE cada forma invoca. A
+    /// Magician Navigation traz o Dark Magician da mão ou do DECK por um efeito e
+    /// só o Mago DARK vem do cemitério — a união aceita os dois. Quem já filtrou
+    /// "esta carta alcança o cemitério" é o `Perfil().ReanimaDoCemiterio`, e
+    /// dentro de uma carta que alcança, a folga é de uma forma a mais.
+    /// </summary>
+    public ExigenciaDeReanimacao ExigenciaDaReanimacao(uint code)
+    {
+        if (_reanimaCache.TryGetValue(code, out var hit)) return hit;
+
+        var formas = new System.Collections.Generic.List<FormaDeReanimacao>();
+        bool legivel = true;
+        string lua = LuaDaCarta(code);
+
+        foreach (System.Text.RegularExpressions.Match m in FILTRO_DE_UMA_LINHA.Matches(lua))
+        {
+            string expr = m.Groups[1].Value;
+            if (!expr.Contains("IsCanBeSpecialSummoned")) continue;
+            var forma = LerForma(expr);
+            if (forma == null) { legivel = false; break; }
+            formas.Add(forma);
+        }
+
+        // Nenhum filtro reconhecido numa carta que reanima = nao sei o que ela
+        // traz. E' o caso do Stardust Dragon (que so' devolve a si mesmo) e de
+        // toda carta cujo alvo mora dentro de um `s.target` de varias linhas.
+        var r = new ExigenciaDeReanimacao
+        {
+            Legivel = legivel && formas.Count > 0,
+            Formas = formas.ToArray(),
+        };
+        _reanimaCache[code] = r;
+        return r;
+    }
+
+    /// <summary>Uma forma, lida da linha do `return`. `null` = termo desconhecido.</summary>
+    private FormaDeReanimacao LerForma(string expr)
+    {
+        // Sem `or` e sem agrupamento: a estrutura tem de ser uma corrente de
+        // `and`, senao o leitor estaria adivinhando a logica em vez de le-la.
+        if (expr.Contains(" or ") || expr.Contains("not ")) return null;
+
+        uint tipo = 0, raca = 0, atributo = 0;
+        int nivelMax = 0;
+        var codigos = new System.Collections.Generic.List<uint>();
+
+        foreach (string bruto in System.Text.RegularExpressions.Regex.Split(expr, @"\s+and\s+"))
+        {
+            string termo = bruto.Trim();
+            var t = System.Text.RegularExpressions.Regex.Match(termo, @"^c:(\w+)\((.*)\)$");
+            if (!t.Success) return null;
+            string fn = t.Groups[1].Value;
+            string args = t.Groups[2].Value;
+
+            switch (fn)
+            {
+                // O marcador (o motor resolve o limite de reanimacao) e os
+                // termos que nao restringem NADA para quem pergunta daqui: o
+                // alvo ja' e' do proprio NPC e ja' esta' no cemiterio.
+                case "IsCanBeSpecialSummoned":
+                case "IsControler":
+                case "IsMonster":
+                    break;
+
+                case "IsRitualMonster": tipo |= (uint)Math.Max(0, Constante("TYPE_RITUAL")); break;
+
+                case "IsType":      if (!Acumula(args, ref tipo)) return null; break;
+                case "IsRace":      if (!Acumula(args, ref raca)) return null; break;
+                case "IsAttribute": if (!Acumula(args, ref atributo)) return null; break;
+
+                case "IsLevelBelow":
+                {
+                    long n = Valor(args);
+                    if (n <= 0) return null;
+                    nivelMax = nivelMax == 0 ? (int)n : Math.Min(nivelMax, (int)n);
+                    break;
+                }
+
+                case "IsCode":
+                {
+                    foreach (string a in args.Split(','))
+                    {
+                        long n = Valor(a);
+                        if (n <= 0) return null;   // table.unpack(...) e afins
+                        codigos.Add((uint)n);
+                    }
+                    break;
+                }
+
+                default: return null;   // termo que eu nao sei ler
+            }
+        }
+
+        return new FormaDeReanimacao
+        {
+            Tipo = tipo, Raca = raca, Atributo = atributo,
+            NivelMax = nivelMax, Codigos = codigos.ToArray(),
+        };
+    }
+
+    /// <summary>Soma os bits de `IsType(A)` / `IsType(A,B)` no acumulador.</summary>
+    private bool Acumula(string args, ref uint destino)
+    {
+        foreach (string a in args.Split(','))
+        {
+            long n = Valor(a);
+            if (n <= 0) return false;
+            destino |= (uint)n;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// **Esta reanimação consegue trazer este monstro de volta do cemitério?**
+    /// As duas metades: o motor deixa (<see cref="VoltaDoCemiterio"/>) e o filtro
+    /// do Lua dela aceita.
+    /// </summary>
+    public bool ReanimacaoAlcanca(uint reanimacao, uint alvo) =>
+        VoltaDoCemiterio(alvo) && ExigenciaDaReanimacao(reanimacao).Alcanca(Stats(alvo));
+
+    /// <summary>
+    /// O idioma do Lua para "o efeito alcança o campo dos DOIS lados": o par de
+    /// localizações numa chamada só (`LOCATION_ONFIELD,LOCATION_ONFIELD`). Quem
+    /// só alcança o outro lado escreve `0,LOCATION_ONFIELD` — e é essa a
+    /// diferença que decide se a carta pode virar contra quem a ativou.
+    ///
+    /// É o mesmo idioma que o `Trava` e o `ReforcoMeuCampo` já leem, com o
+    /// `SetTargetRange`: alcance é sempre um PAR, e ler só metade dele é como o
+    /// alvo errado aparece.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex CAMPO_DOS_DOIS_LADOS =
+        new(@"LOCATION_(?:ONFIELD|MZONE|SZONE)\s*,\s*LOCATION_(?:ONFIELD|MZONE|SZONE)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// **Esta carta tira uma carta do CAMPO e alcança os DOIS lados?**
+    ///
+    /// Existe para uma pergunta só, e ela é da janela de corrente: com o campo do
+    /// oponente vazio, a única coisa que uma carta assim alcança sou EU. Foi o
+    /// relato — o NPC reviveu um monstro de 2900 com o Monster Reborn, atacou com
+    /// ele, e na janela seguinte baniu esse mesmo 2900 com a Chaos Scepter Blast.
+    /// </summary>
+    public bool TiraDoCampoDosDoisLados(uint code)
+    {
+        string lua = LuaDaCarta(code);
+        return (lua.Contains("Duel.Remove(") || lua.Contains("Duel.Destroy("))
+            && CAMPO_DOS_DOIS_LADOS.IsMatch(lua);
+    }
+
+    /// <summary>
+    /// **Esta carta BANE uma carta do campo** (não destrói) — a classe que nenhum
+    /// bit do <see cref="PerfilDeEfeito"/> enxerga.
+    ///
+    /// `DestroiMonstro`/`DestroiSt` exigem `Duel.Destroy` no script, e a Chaos
+    /// Scepter Blast usa `Duel.Remove`. O resultado é que ela não entrava em regra
+    /// nenhuma do Main Phase: a única coisa que chegava a ativá-la era a regra
+    /// GENÉRICA da janela de corrente ("ativa em resposta"), que não tem critério
+    /// nenhum — nem sobre a hora, nem sobre o alvo.
+    ///
+    /// Banir é mais forte que destruir (a carta não volta e nem se identifica),
+    /// então ela merecia regra própria, não o reflexo de uma janela.
+    /// </summary>
+    public bool BaneDoCampo(uint code)
+    {
+        string lua = LuaDaCarta(code);
+        return lua.Contains("Duel.Remove(") && CAMPO_DOS_DOIS_LADOS.IsMatch(lua);
+    }
+
+    private readonly System.Collections.Generic.Dictionary<uint, (bool recurso, bool quebra)> _aoVoltarCache = new();
+
+    /// <summary>
+    /// **O que este corpo FAZ quando volta ao campo** — além de ser um corpo.
+    ///
+    /// São as duas razões, fora o ATK, para preferir um alvo a outro na hora de
+    /// enterrar: ele **gera recurso** (põe carta na minha mão) ou ele **quebra o
+    /// campo** dele (destrói/bane). A terceira razão — virar parede — não se lê
+    /// no Lua: é o statline, e mora no `NpcBrain`.
+    ///
+    /// A trava é `EVENT_SPSUMMON_SUCCESS`, e ela não é formalidade: o **Breaker
+    /// the Magical Warrior** destrói uma magia ao ser Invocado, mas só por
+    /// `EVENT_SUMMON_SUCCESS` — revivido pelo Monster Reborn ele volta MUDO, sem
+    /// contador e sem efeito. Sem esta metade, o cérebro enterraria o Breaker
+    /// achando que estava enterrando uma remoção.
+    ///
+    /// LIMITE CONHECIDO: não amarra a categoria ao efeito EXATO que o gatilho
+    /// dispara. O Dark Magician of Chaos tem dois — põe uma magia do cemitério na
+    /// mão (gatilho de invocação) e bane o que destrói em batalha —, e aqui ele
+    /// conta como as duas coisas. O erro máximo é preferir um alvo bom a outro
+    /// alvo bom; ler o grafo de efeitos do Lua para desempatar isso seria pagar
+    /// um interpretador por uma preferência.
+    /// </summary>
+    public (bool recurso, bool quebra) AoVoltarDoCemiterio(uint code)
+    {
+        if (_aoVoltarCache.TryGetValue(code, out var hit)) return hit;
+        string lua = LuaDaCarta(code);
+        var r = lua.Contains("EVENT_SPSUMMON_SUCCESS")
+            ? (recurso: lua.Contains("CATEGORY_TOHAND") || lua.Contains("Duel.Draw"),
+               quebra:  lua.Contains("CATEGORY_DESTROY") || lua.Contains("CATEGORY_REMOVE"))
+            : (false, false);
+        _aoVoltarCache[code] = r;
         return r;
     }
 

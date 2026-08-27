@@ -51,6 +51,11 @@ namespace DuelServer
             // ausencia que da' falso positivo deixa de ser lido.
             new("com duas viradas minhas",  new[] { MYSTICAL_ELF, PETIT_MOTH }, new[] { BATTLE_OX },
                 viradas: true),
+            // Esta mesa continua sendo necessaria depois de a regra 5.56 ganhar
+            // a segunda razao (a reanimacao que ainda esta' no DECK): a sonda
+            // monta o `NpcBrain` sem `listaDoDeckOf`, entao aqui o NPC nao
+            // conhece deck nenhum e so' a MAO responde. Tirar a acompanhante
+            // faria o Foolish Burial voltar a ser reportado como buraco.
             new("com reanimacao na mao",    new[] { MYSTICAL_ELF }, new[] { BATTLE_OX },
                 acompanha: MONSTER_REBORN),
             // Racas VARIADAS do meu lado. Terceiro falso positivo medido: uma

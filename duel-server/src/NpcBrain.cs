@@ -664,6 +664,20 @@ namespace DuelServer
         readonly DatabaseManager _cards;
         readonly Func<int, IReadOnlyList<uint>> _fieldOf;   // monstros face-up em campo
         readonly Func<int, IReadOnlyList<uint>> _handOf;    // cartas na mão de um jogador
+        /// <summary>
+        /// **A DECKLIST do próprio NPC** — o que o deck dele contém.
+        ///
+        /// Não é leitura escondida e por isso não passa pelo `npcLeitura`: todo
+        /// jogador conhece o próprio deck, e é com isso que se decide adiantar um
+        /// Foolish Burial ("o meu deck tem três Monster Reborn"). Do lado do
+        /// JOGADOR vem vazia sempre — a decklist do outro é a única coisa aqui
+        /// que nem o NPC avançado pode ver.
+        ///
+        /// É a lista de CONSTRUÇÃO, não o que sobrou dentro do deck; ver o limite
+        /// conhecido na regra 5.56. Sem quem informe vem vazia, e aí nenhuma
+        /// regra que dependa dela dispara — o comportamento de antes.
+        /// </summary>
+        readonly Func<int, IReadOnlyList<uint>> _listaDoDeck;
         readonly Func<int, int> _stCountOf;                 // zonas de magia/armadilha ocupadas
         readonly Func<int, int> _setStCountOf;              // dessas, quantas estão VIRADAS
         readonly Func<int, IReadOnlyList<uint>> _faceUpStOf; // magias/armadilhas ABERTAS
@@ -757,7 +771,8 @@ namespace DuelServer
                         Func<int, IReadOnlyList<(uint code, int pos, int seq)>> todoFieldPosOf = null,
                         Func<int, IReadOnlyList<uint>> setStOf = null,
                         Func<int, int, (int atk, int def)?> statsEmCampoOf = null,
-                        Func<int, int, bool> corpoCondenadoOf = null)
+                        Func<int, int, bool> corpoCondenadoOf = null,
+                        Func<int, IReadOnlyList<uint>> listaDoDeckOf = null)
         {
             _cards = cards;
             _corpoCondenado = corpoCondenadoOf ?? ((_, _) => false);
@@ -788,6 +803,10 @@ namespace DuelServer
             // É o comportamento de antes, e é o que os testes de decisão isolada
             // usam — eles montam campo com códigos, sem motor por trás.
             _statsEmCampo = statsEmCampoOf ?? ((_, _) => null);
+            // Sem quem informe, o NPC não conhece o próprio deck e a regra que
+            // ADIANTA o enterro simplesmente não dispara — é o comportamento
+            // anterior, e é o que os testes de decisão isolada montam.
+            _listaDoDeck = listaDoDeckOf ?? (_ => Array.Empty<uint>());
         }
 
         /// <summary>
@@ -1075,6 +1094,15 @@ namespace DuelServer
             // da mão (um custo de descarte, por exemplo) jogar fora justamente a
             // carta que ele ia invocar.
             _alvoDaInvocacaoDaMao = 0;
+
+            // Pelo mesmo motivo, e para o mesmo tipo de estrago: uma marca de
+            // enterro que sobrou (a ativação foi negada por uma corrente, ou o
+            // motor nunca chegou a perguntar) faria a PRÓXIMA seleção escolher
+            // pelo critério do enterro — "o maior que VOLTA do cemitério" — onde
+            // o que se pedia era um alvo ou um custo.
+            _proximoEnterroDoDeck = false;
+            _enterroPara = PrecisoDe.Corpo;
+            _remocaoDeCampo = false;
 
             // 0. BUSCA ESPECÍFICA antes da compra. Comprar primeiro pode trazer a
             //    carta que a busca traria — e aí a busca vira carta morta. Buscar
@@ -1557,7 +1585,18 @@ namespace DuelServer
             //       Vem DEPOIS das regras específicas de invocação (Toon, mariposa,
             //       Gate Guardian, Ancient Rules) de propósito: elas são escolhas de
             //       combo, esta é "põe o que der em campo".
-            var poeCorpo = AtivavelSe(q, c => Perfil(c).InvocaEspecial && !Perfil(c).Fusao && !COM_REGRA_PROPRIA.Contains(c));
+            //
+            //       **E o corpo tem de vir de ATIVAR.** O banco marca a Chaos
+            //       Scepter Blast como INVOCAÇÃO ESPECIAL (0x100000) por causa do
+            //       efeito de ela ser DESTRUÍDA na zona de magia — ativá-la não põe
+            //       corpo nenhum em campo: bane 1 carta, e com o campo dele vazio
+            //       essa carta é minha. É a MESMA armadilha do Templo do Mako (que
+            //       o banco marca igual, por causa do retorno na End Phase) e a
+            //       MESMA leitura que a exclui da regra do "corpo de graça", na
+            //       janela de corrente. Quem responde é o Lua da própria carta.
+            var poeCorpo = AtivavelSe(q, c => Perfil(c).InvocaEspecial && !Perfil(c).Fusao
+                                           && !COM_REGRA_PROPRIA.Contains(c)
+                                           && !_cards.SalvaSeDestruida(c));
             if (poeCorpo.code != 0)
             {
                 bool precisoDeCorpo = QtdMonstros(me) == 0 || (oponenteTemMonstro && meuMelhor < ameaca);
@@ -1649,6 +1688,35 @@ namespace DuelServer
                 }
                 _log($"guarda {remST.code} — {alvoSt.porque}");
             }
+
+            // 5.505 BANIR UMA CARTA DO CAMPO (Chaos Scepter Blast).
+            //
+            // Ela nao entrava em regra nenhuma: `DestroiMonstro`/`DestroiSt`
+            // exigem `Duel.Destroy` no script e ela usa `Duel.Remove`. O unico
+            // caminho que chegava a ativa-la era a regra GENERICA da janela de
+            // corrente — "ativa em resposta" —, que nao tem criterio nem de hora
+            // nem de alvo. Com o campo dele vazio, a unica coisa que ela alcanca
+            // sou eu: foi assim que o NPC baniu o proprio monstro de 2900 (o
+            // maior da mesa, que ele acabara de reanimar do cemiterio do jogador).
+            //
+            // A trava e' a mesma da remocao acima — so' sai se ha' o que tirar do
+            // campo DELE —, e a marca leva ao `DecideSelect` a informacao que ele
+            // nao teria: que esta pergunta e' uma REMOCAO, e nao um custo nem um
+            // alvo meu.
+            var baneCampo = AtivavelSe(q, c => _cards.BaneDoCampo(c)
+                                            && !COM_REGRA_PROPRIA.Contains(c)
+                                            && !Perfil(c).DestroiMonstro && !Perfil(c).DestroiSt);
+            if (baneCampo.code != 0)
+            {
+                if (ValeBanirDoCampoDele(foe))
+                {
+                    _remocaoDeCampo = true;
+                    return new Play("activate", baneCampo.index,
+                        $"bane 1 carta do campo dele ({baneCampo.code}) — banida nao volta nem se identifica");
+                }
+                _log($"guarda {baneCampo.code}: nao ha' no campo dele nada que valha a remocao " +
+                     "(so' o que fica: monstro, virada, ou magia continua) — guardo para a ameaca");
+            }
             // 5.55 TRAVA — a magia que prende o campo DELE (as Espadas).
             //
             // Faltava inteira: as duas Espadas nao entravam em regra nenhuma e
@@ -1701,12 +1769,37 @@ namespace DuelServer
                         : "o campo dele esta vazio — nao ha' o que travar"));
             }
 
-            // 5.56 ENTERRAR PARA REANIMAR (Foolish Burial e afins).
+            // 5.56 ENTERRAR PARA USAR DEPOIS (Foolish Burial e afins).
             //
             // Sozinha e' perda de carta: tira um monstro do deck e nao poe nada em
             // campo. O valor esta' no PAR — enterrar o corpo grande e trazer de
-            // volta —, entao a condicao e' ter a reanimacao na MAO. Sem ela, o
-            // NPC estaria pagando uma carta para encher o proprio cemiterio.
+            // volta.
+            //
+            // A primeira versao exigia a reanimacao na MAO, e com isso a carta
+            // quase nunca saia: num deck de 40 com tres Monster Reborn, ter as
+            // duas metades juntas e' sorte, nao plano — na pratica ela ficava na
+            // mao a partida inteira. O pedido veio do deck **Yugi Chaos**, que
+            // leva TRES Foolish Burial de proposito: eles existem para ADIANTAR o
+            // Dark Magician of Chaos ao cemiterio e alcanca-lo depois, e nao para
+            // acompanhar um Reborn que ja' esteja na mao.
+            //
+            // Sao dois motivos, nesta ordem:
+            //   (a) a reanimacao esta' na MAO — o combo fecha AGORA, e e' o melhor
+            //       caso;
+            //   (b) ela esta' no DECK — enterrar e' ADIANTAR: o corpo espera no
+            //       cemiterio a carta que vem, que e' o que faz um Foolish Burial
+            //       valer a pena numa mao de abertura.
+            //
+            // O (b) NAO e' "ativar sempre". Um deck sem reanimacao nenhuma
+            // continua guardando a carta, porque ali enterrar e' mesmo pagar uma
+            // carta para encher o proprio cemiterio — e e' esse o par CONTROLE da
+            // regra: sem ele, "ativou" nao provaria criterio nenhum.
+            //
+            // LIMITE CONHECIDO: `_listaDoDeck` e' a DECKLIST, e nao o que sobrou
+            // dentro do deck — seguir cada carta que deixa `LOCATION_DECK` seria
+            // encanamento novo para uma diferenca que sempre cai para o lado
+            // barato: uma reanimacao ja' comprada esta' na MAO, e ai quem responde
+            // e' o (a); uma ja' gasta superestima o deck em uma carta.
             //
             // Vem depois da regra que POE CORPO (o Premature Burial ja' rodou
             // acima): com alvo bom no cemiterio o motor ja' oferece a reanimacao,
@@ -1715,11 +1808,39 @@ namespace DuelServer
             var enterrar = AtivavelSe(q, c => Perfil(c).EnterraDoDeck && !COM_REGRA_PROPRIA.Contains(c));
             if (enterrar.code != 0)
             {
-                var reanimacao = _handOf(me).FirstOrDefault(c => Perfil(c).ReanimaDoCemiterio);
-                if (reanimacao != 0)
+                var reanimacoes = MinhasReanimacoes(me);
+                var deck = _listaDoDeck(me);
+                // Os corpos do MEU deck que alguma reanimacao minha alcanca — e' a
+                // pergunta "tem alvo valido?" feita antes de gastar a carta.
+                var alvos = deck.Distinct()
+                    .Where(c => reanimacoes.Any(r => _cards.ReanimacaoAlcanca(r, c)))
+                    .ToList();
+
+                uint naMao = _handOf(me).FirstOrDefault(c => Perfil(c).ReanimaDoCemiterio);
+
+                // Sem decklist informada nada mudou: quem responde e' a MAO, como
+                // sempre respondeu. E' o que mantem de pe' todo teste de decisao
+                // isolada deste projeto, que monta mao e campo e nunca deck.
+                if (naMao != 0 && (deck.Count == 0 || alvos.Count > 0))
+                {
+                    MarcarEnterro(me, ameacaReal);
                     return new Play("activate", enterrar.index,
-                        $"enterra do deck ({enterrar.code}) para reanimar depois — tenho {reanimacao} na mao");
-                _log($"guarda {enterrar.code}: sem reanimacao na mao, enterrar e' so' perder carta");
+                        $"enterra do deck ({enterrar.code}) para reanimar depois — tenho {naMao} na mao");
+                }
+                if (alvos.Count > 0)
+                {
+                    MarcarEnterro(me, ameacaReal);
+                    return new Play("activate", enterrar.index,
+                        $"enterra do deck ({enterrar.code}) ADIANTADO — o corpo espera no cemiterio " +
+                        $"pela(s) {reanimacoes.Count} reanimacao(oes) do meu deck, que alcanca(m) " +
+                        $"{alvos.Count} corpo(s) dele");
+                }
+                _log($"guarda {enterrar.code}: " +
+                     (reanimacoes.Count == 0
+                        ? "nao tenho reanimacao nenhuma que eu saiba usar"
+                        : $"as {reanimacoes.Count} reanimacao(oes) que eu tenho nao alcancam corpo " +
+                          "nenhum do meu deck") +
+                     " — enterrar seria so' perder carta");
             }
 
             // 5.57 REFORCO PERMANENTE do meu campo (Yellow Luster Shield, Banner
@@ -2259,6 +2380,142 @@ namespace DuelServer
                      "leva o de maior bonus mesmo assim");
             }
 
+            // **O ALVO DE UMA REMOCAO DE CAMPO** (Chaos Scepter Blast), avisado
+            // pela regra 5.505 ou pela janela de corrente.
+            //
+            // A lista dela mistura MONSTRO e MAGIA/ARMADILHA dos DOIS lados, e
+            // nenhum ramo daqui a reconhecia: o "alvo em campo" la' embaixo so'
+            // olha `MZONE` e so' dispara quando o oponente tem MONSTRO. Sem
+            // monstro dele na lista, tudo caia no criterio generico — maior ATK,
+            // sem perguntar de quem e' — e a carta banía o meu melhor corpo.
+            //
+            // A ordem e' a mesma de toda remocao: monstro dele primeiro, pela
+            // ameaca que ele representa AGORA; so' magia/armadilha dele, a mais
+            // pesada.
+            //
+            // O ultimo degrau nao devia acontecer (as duas portas que ativam a
+            // carta ja' exigem campo dele com carta), e existe porque o motor JA'
+            // pediu a resposta: nao responder trava o duelo em silencio. Aí' se
+            // paga com a MINHA carta mais barata — nunca com a melhor, que era o
+            // que o criterio generico fazia.
+            if (escolhaUnica && _remocaoDeCampo)
+            {
+                _remocaoDeCampo = false;
+                var dele = q.choices.Where(c => c.controller != me).ToList();
+                if (dele.Count > 0)
+                {
+                    var monstrosDele = dele.Where(c => c.location == MZONE).ToList();
+                    var alvo = monstrosDele.Count > 0
+                        ? monstrosDele.OrderByDescending(AmeacaDoAlvo).First()
+                        : dele.OrderByDescending(ValorDeBanirSt).First();
+                    _log($"remocao de campo: bane {alvo.code} do lado DELE " +
+                         (monstrosDele.Count > 0
+                            ? $"(a maior ameaca entre os {monstrosDele.Count} monstros dele)"
+                            : $"(a magia/armadilha que mais vale — {ValorDeBanirSt(alvo)}; " +
+                              "a aberta de uso unico esta' resolvendo e nao conta)"));
+                    return new List<int> { alvo.index };
+                }
+
+                var meuSt = q.choices.Where(c => c.location != MZONE).ToList();
+                var pago = meuSt.Count > 0
+                    ? meuSt.OrderBy(c => Peso(c.code)).First()
+                    : q.choices.OrderBy(c => ValorDoMeuCorpo(me, c.code, c.sequence)).First();
+                _log($"remocao de campo: ele nao tem NADA na lista — o motor exige uma resposta, " +
+                     $"entao vai a minha carta mais barata ({pago.code})");
+                return new List<int> { pago.index };
+            }
+
+            // **O CORPO QUE VAI PARA O CEMITERIO** (Foolish Burial), avisado pela
+            // regra 5.56.
+            //
+            // O criterio generico la' embaixo e' "maior ATK impresso", e para esta
+            // pergunta ele e' uma armadilha: no deck do Yugi Chaos o maior ATK do
+            // deck e' o **Black Luster Soldier** (3000), um monstro de RITUAL.
+            // Ritual, fusao, sincro, xyz e os "nomi" so' saem do cemiterio se
+            // tiverem sido corretamente invocados ANTES — e quem foi do deck
+            // direto para la' nunca foi (ver `DatabaseManager.VoltaDoCemiterio`).
+            //
+            // O erro e' CALADO: a carta e' enterrada, o motor esta' certo, e o
+            // Monster Reborn seguinte simplesmente nao a oferece. Nada acusa — so'
+            // o combo que nunca fecha. Enterrar o Dark Magician of Chaos (2800,
+            // que VOLTA) custa 200 de ATK e rende o deck inteiro.
+            //
+            // Nao vindo nenhum que volte, enterra o maior mesmo assim: o motor ja'
+            // pediu a resposta, e nao responder trava o duelo em silencio. Recusar
+            // aqui seria trocar uma jogada ruim por um jogo parado.
+            if (escolhaUnica && _proximoEnterroDoDeck)
+            {
+                _proximoEnterroDoDeck = false;
+                var preciso = _enterroPara;
+                _enterroPara = PrecisoDe.Corpo;
+
+                // PRIMEIRO a pergunta que manda: **eu consigo trazer este corpo de
+                // volta?** Nao "algum dia alguem conseguiria" — a reanimacao que
+                // EU tenho, com o filtro que ELA tem. Nao havendo alvo assim, a
+                // cascata desce: quem ao menos o motor deixa voltar, e por fim
+                // qualquer um — porque o motor JA' pediu a resposta e nao
+                // responder trava o duelo em silencio.
+                var reanimacoes = MinhasReanimacoes(me);
+                var legais = q.choices
+                    .Where(c => reanimacoes.Any(r => _cards.ReanimacaoAlcanca(r, c.code))).ToList();
+                string alcance = $"a(s) {reanimacoes.Count} reanimacao(oes) que eu tenho o alcanca(m)";
+                if (legais.Count == 0)
+                {
+                    legais = q.choices.Where(c => _cards.VoltaDoCemiterio(c.code)).ToList();
+                    alcance = "nenhuma reanimacao minha o alcanca; ao menos o motor o deixa voltar";
+                }
+                if (legais.Count == 0)
+                {
+                    legais = q.choices.ToList();
+                    alcance = "nenhum dos oferecidos volta do cemiterio; vai o maior mesmo assim";
+                }
+
+                // AS TRES RAZOES, cada uma so' na carencia dela (ver `PrecisoDe`).
+                // Fora da carencia, o criterio continua sendo o de sempre — o
+                // maior ATK. Sem isso a regra atropelaria: um corpo de 900 que
+                // poe uma carta na mao passaria na frente de um de 3000 numa mesa
+                // em que nada esta' apertando.
+                InteractiveDuel.Sel escolha;
+                string necessidade;
+                switch (preciso)
+                {
+                    case PrecisoDe.Campo:
+                        // Primeiro quem QUEBRA o campo dele (resolve de vez, como
+                        // a remocao vence a trava na regra 5.55); nao havendo,
+                        // quem mais SEGURA — e e' aqui que uma parede de 0/3000
+                        // ganha de um 2000 de ATK.
+                        escolha = legais
+                            .OrderByDescending(c => _cards.AoVoltarDoCemiterio(c.code).quebra ? 1 : 0)
+                            .ThenByDescending(c => ValorQueSegura(c.code))
+                            .ThenByDescending(c => _cards.Stats(c.code).Level).First();
+                        necessidade = _cards.AoVoltarDoCemiterio(escolha.code).quebra
+                            ? "estou sob ameaca e ele QUEBRA o campo dele ao voltar"
+                            : $"estou sob ameaca e ele e' quem mais SEGURA ({ValorQueSegura(escolha.code)})";
+                        break;
+
+                    case PrecisoDe.Carta:
+                        escolha = legais
+                            .OrderByDescending(c => _cards.AoVoltarDoCemiterio(c.code).recurso ? 1 : 0)
+                            .ThenByDescending(c => _cards.Stats(c.code).AtkValue)
+                            .ThenByDescending(c => _cards.Stats(c.code).Level).First();
+                        necessidade = _cards.AoVoltarDoCemiterio(escolha.code).recurso
+                            ? "a mao esta' curta e ele volta GERANDO CARTA"
+                            : "a mao esta' curta e nenhum gera carta — vai o de maior ATK";
+                        break;
+
+                    default:
+                        escolha = legais
+                            .OrderByDescending(c => _cards.Stats(c.code).AtkValue)
+                            .ThenByDescending(c => _cards.Stats(c.code).Level).First();
+                        necessidade = "nada apertando — vai o de maior ATK";
+                        break;
+                }
+
+                _log($"enterra {escolha.code} ({_cards.Stats(escolha.code).AtkValue}/" +
+                     $"{_cards.Stats(escolha.code).DefValue}): {alcance}; {necessidade}");
+                return new List<int> { escolha.index };
+            }
+
             // NORMAL Nv5+ (Summoner's Art buscando no deck, Ancient Rules
             // invocando da mão): entre os oferecidos, o de maior ATK.
             //
@@ -2551,6 +2808,79 @@ namespace DuelServer
             return picks;
         }
 
+        /// <summary>
+        /// **As reanimações que eu ainda posso usar** — na mão, em campo (aberta
+        /// ou virada) e as que o deck ainda tem —, e das quais eu SEI o que elas
+        /// aceitam trazer de volta.
+        ///
+        /// O `Legivel` não é detalhe: uma reanimação cujo filtro o leitor não
+        /// entende não pode entrar na conta, senão ela viraria uma promessa —
+        /// "pode enterrar, que eu trago de volta" — para um corpo que ela nunca
+        /// traria. Ver `DatabaseManager.ExigenciaDaReanimacao`.
+        /// </summary>
+        List<uint> MinhasReanimacoes(int me) =>
+            _handOf(me).Concat(_faceUpStOf(me)).Concat(_setStOf(me)).Concat(_listaDoDeck(me))
+                .Distinct()
+                .Where(c => Perfil(c).ReanimaDoCemiterio
+                         && _cards.ExigenciaDaReanimacao(c).Legivel)
+                .ToList();
+
+        /// <summary>
+        /// **Quanto este corpo SEGURA quando voltar ao campo** — o maior entre
+        /// ATK e DEF, que é o número que a `DecidePosicao` vai pôr para valer
+        /// (de pé quando o ATK é maior, deitado quando não é).
+        ///
+        /// É a terceira razão para preferir um alvo a outro, e a única que não se
+        /// lê no Lua: uma parede de 0/3000 é o melhor corpo para trazer de volta
+        /// contra um campo que eu não supero, e pelo ATK ela é a pior carta do
+        /// deck.
+        /// </summary>
+        int ValorQueSegura(uint code)
+        {
+            var st = _cards.Stats(code);
+            return Math.Max(st.AtkValue, st.DefValue);
+        }
+
+        /// <summary>
+        /// **De que eu estou precisando agora** — é isto que decide qual das três
+        /// razões pesa na escolha do corpo que vai para o cemitério.
+        ///
+        /// A ordem não é gosto: campo antes de carta. Um monstro que eu não supero
+        /// resolve o duelo contra mim já no turno que vem; uma mão curta só me
+        /// deixa mais lento.
+        /// </summary>
+        enum PrecisoDe
+        {
+            /// <summary>Sob ameaça: quero um corpo que QUEBRE o campo dele ou que SEGURE.</summary>
+            Campo,
+            /// <summary>Mão curta e mesa calma: quero um corpo que volte GERANDO CARTA.</summary>
+            Carta,
+            /// <summary>Nada apertando: quero o maior corpo, e ponto.</summary>
+            Corpo,
+        }
+
+        /// <summary>
+        /// Marca o enterro e a NECESSIDADE do momento para o `DecideSelect` que
+        /// vem em seguida — quem enxerga a mesa é a regra; a seleção só vê a lista
+        /// de cartas que o motor ofereceu.
+        ///
+        /// **A mão curta é `≤ 2` DEPOIS de gastar esta carta** (a própria carta de
+        /// enterro ainda está contada em `_handOf` quando a regra decide). Com
+        /// duas cartas ou menos, o que falta não é corpo, é jogada — e é aí que um
+        /// corpo que volta pondo carta na mão vale mais que um ATK maior. Acima
+        /// disso ele não vale: trocar 3000 de ATK por 900 e uma carta é um mau
+        /// negócio quando a mão ainda tem com que jogar.
+        /// </summary>
+        void MarcarEnterro(int me, bool sobAmeaca)
+        {
+            _proximoEnterroDoDeck = true;
+            _enterroPara = sobAmeaca ? PrecisoDe.Campo
+                         : _handOf(me).Count - 1 <= 2 ? PrecisoDe.Carta
+                         : PrecisoDe.Corpo;
+            _log($"enterro: preciso de {_enterroPara} " +
+                 $"(ameaca: {sobAmeaca}, mao depois desta carta: {Math.Max(0, _handOf(me).Count - 1)})");
+        }
+
         /// <summary>Monstros meus com a face para cima — os únicos que o Lua do
         /// Armory Call aceita como alvo (`eqfilter` exige `IsFaceup()`).</summary>
         List<uint> MonstrosFaceUp(int me) =>
@@ -2738,6 +3068,55 @@ namespace DuelServer
         /// dela por falta de opção — desmontando justamente o que o deck passou
         /// o duelo inteiro montando.
         /// </summary>
+        /// <summary>
+        /// **O campo dele tem alguma carta que VALHA uma remoção?**
+        ///
+        /// A primeira versão perguntava só "ele tem alguma carta?" (`QtdMonstros`
+        /// ou zona de magia ocupada), e isso deixou passar o caso que veio a
+        /// seguir no relato: o jogador ativou a **Summoner's Art**, o motor abriu
+        /// a janela de corrente, e o NPC baniu a busca **no meio da própria
+        /// resolução**. Banir ali não impede o efeito — o motor já a ativou — e a
+        /// carta ia para o cemitério sozinha; o NPC pagou a própria remoção para
+        /// não conseguir nada, e ficou sem ela para a ameaça de verdade.
+        ///
+        /// Três coisas valem, e a diferença entre elas é PERMANÊNCIA:
+        ///
+        ///   • um MONSTRO dele com a face para cima;
+        ///   • uma magia/armadilha dele **que fica** (contínua, equipamento, de
+        ///     campo) — ver `DatabaseManager.FicaEmCampo`;
+        ///   • uma magia/armadilha **virada** dele: é incógnita, mas ela FICA, e
+        ///     tirá-la antes de atacar é jogada clássica.
+        ///
+        /// O que NÃO vale é a Normal com a face para cima: ela só está ali porque
+        /// está resolvendo neste instante.
+        ///
+        /// LIMITE CONHECIDO: o monstro SETADO do jogador não é contado — a visão
+        /// honesta do NPC iniciante o descarta inteiro, presença e tudo
+        /// (`MonstrosHonestos`). O erro cai para o lado barato (guardar a carta),
+        /// e é o mesmo ponto cego que a regra 5.5 já tem com o `QtdMonstros`.
+        /// </summary>
+        bool ValeBanirDoCampoDele(int foe) =>
+            QtdMonstros(foe) > 0
+            || _setStCountOf(foe) > 0
+            || _faceUpStOf(foe).Any(_cards.FicaEmCampo);
+
+        /// <summary>
+        /// **Quanto vale banir esta magia/armadilha dele.** Negativo = não vale.
+        ///
+        /// É a mesma pergunta do <see cref="ValeBanirDoCampoDele"/>, agora sobre a
+        /// lista que o motor ofereceu — e ela erra calada nos dois lugares: a
+        /// ordenação por `Peso` empata tudo que não está na tabela de ameaça
+        /// (inclusive a magia que está resolvendo) e leva a primeira da lista.
+        /// </summary>
+        int ValorDeBanirSt(InteractiveDuel.Sel c)
+        {
+            // Virada: não sei o que é, mas sei que ela FICA — e é justamente a
+            // carta que se tira do caminho antes de atacar.
+            if (c.hidden || c.code == 0) return 1;
+            if (!_cards.FicaEmCampo(c.code)) return -1;   // aberta e de uso único
+            return 2 + Peso(c.code);
+        }
+
         bool TemCorpoDispensavel(int me) =>
             _fieldOf(me).Any(c => _cards.Stats(c).IsMonster && !PECAS_GATE_GUARDIAN.Contains(c));
 
@@ -3435,6 +3814,37 @@ namespace DuelServer
         bool _proximoEquipDoDeck;
 
         /// <summary>
+        /// A próxima seleção é o corpo que o Foolish Burial vai ENTERRAR — posta
+        /// pela regra 5.56 e consumida pelo `DecideSelect`. Mesmo padrão do
+        /// `_proximoEquipDoDeck`.
+        ///
+        /// Sem ela a escolha cai no critério genérico (maior ATK impresso), que
+        /// no deck do Yugi Chaos enterra o Black Luster Soldier — um Ritual, que
+        /// nunca mais sai do cemitério. O combo vai junto, calado.
+        /// </summary>
+        bool _proximoEnterroDoDeck;
+
+        /// <summary>
+        /// A próxima seleção é o alvo de uma REMOÇÃO DE CAMPO (a Chaos Scepter
+        /// Blast e a classe dela) — posta pela regra 5.505 ou pela janela de
+        /// corrente, consumida pelo `DecideSelect`.
+        ///
+        /// Sem ela a lista — monstro e magia/armadilha dos DOIS lados — não casa
+        /// com ramo nenhum e cai no critério genérico, que ordena por maior ATK
+        /// **sem perguntar de quem é a carta**. Foi assim que o NPC baniu o
+        /// próprio monstro de 2900.
+        /// </summary>
+        bool _remocaoDeCampo;
+
+        /// <summary>
+        /// De que eu precisava quando decidi enterrar — ver <see cref="PrecisoDe"/>.
+        /// É o que separa as três razões para preferir um corpo a outro, e por
+        /// isso mora aqui e não no `DecideSelect`: quem enxerga a mesa é a regra;
+        /// a seleção só vê a lista de cartas que o motor ofereceu.
+        /// </summary>
+        PrecisoDe _enterroPara = PrecisoDe.Corpo;
+
+        /// <summary>
         /// A magia/armadilha do oponente que a próxima remoção deve mirar —
         /// decidida por `AlvoDaRemocaoSt` e consumida pelo `DecideSelect`. Mesmo
         /// padrão do `_proximoAlvoEquipFraco`: a regra sabe o alvo certo, mas quem
@@ -3737,9 +4147,22 @@ namespace DuelServer
             // causa do retorno na End Phase, e sem esta trava ele caía aqui como
             // "põe corpo em campo" — quando ativar TIRA um corpo do campo. Era o
             // que fazia o Mako banir o próprio monstro em toda janela de corrente.
+            //
+            // **A MESMA ARMADILHA, uma segunda vez, e agora lida da carta.** A
+            // Chaos Scepter Blast também vem marcada como INVOCAÇÃO ESPECIAL — e
+            // o corpo dela não vem de ATIVAR: vem de ela ser DESTRUÍDA pelo
+            // oponente na zona de magia (`SalvaSeDestruida`, o mesmo leitor que a
+            // regra 2.5 usa para decidir baixá-la). Ativar não põe corpo nenhum
+            // em campo: bane 1 carta, e com o campo dele vazio essa carta é
+            // minha. Foi o relato — *"usou o Chaos Scepter Blast no próprio
+            // monstro, e era o de ATK maior no campo (2900)"*.
+            //
+            // Por ID seria a terceira lista a manter; pelo Lua vale para a
+            // próxima carta que tiver essa forma, sem uma linha nova aqui.
             var corpoDeGraca = q.choices.FirstOrDefault(
                 c => !CONTRA.ContainsKey(c.code) && !COM_REGRA_PROPRIA.Contains(c.code)
-                     && Perfil(c.code).InvocaEspecial);
+                     && Perfil(c.code).InvocaEspecial
+                     && !_cards.SalvaSeDestruida(c.code));
             if (corpoDeGraca.code != 0 && QtdMonstros(me) <= QtdMonstros(foe))
             {
                 _jaEncadeou = true;
@@ -3784,8 +4207,34 @@ namespace DuelServer
                     continue;
                 }
 
+                // E MESMO ARGUMENTO, quarta vez, para quem ALCANCA O CAMPO DOS
+                // DOIS LADOS. A regra logo abaixo e' a mais crua do arquivo —
+                // "ativa em resposta", sem criterio nenhum — e ela parte de que o
+                // motor so' abre a janela no momento certo. Para um efeito
+                // `EVENT_FREE_CHAIN` isso e' falso: a janela abre sempre.
+                //
+                // Com o campo dele VAZIO, uma carta que tira do campo so' alcanca
+                // as MINHAS — e o `DecideSelect` generico, que ordena por maior
+                // ATK sem perguntar de quem e', escolhe o meu melhor monstro. Foi
+                // exatamente o relato, e o log do duelo o mostra inteiro: Monster
+                // Reborn traz um 2900, ele ataca, e na janela seguinte a Chaos
+                // Scepter Blast bane esse mesmo 2900.
+                //
+                // O Main Phase ja' faz esta conta (a regra 5.5 exige campo dele
+                // com carta); a janela de corrente nao fazia nenhuma.
+                if (_cards.TiraDoCampoDosDoisLados(c.code) && !ValeBanirDoCampoDele(foe))
+                {
+                    _log($"chain: guarda {c.code} — no campo dele nao ha' nada que valha a " +
+                         "remocao (a magia que ele acabou de ativar vai para o cemiterio " +
+                         "sozinha); a unica coisa que ela alcancaria sou eu");
+                    continue;
+                }
+
                 if (!REMOCAO_ST.Contains(c.code))
                 {
+                    // A marca so' vale para quem TIRA do campo: e' ela que diz ao
+                    // `DecideSelect` que a pergunta seguinte e' uma remocao.
+                    _remocaoDeCampo = _cards.TiraDoCampoDosDoisLados(c.code);
                     _jaEncadeou = true;
                     PorqueDaCadeia = $"ativa {c.code} em resposta";
                     return c.index;

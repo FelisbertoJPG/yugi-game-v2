@@ -13,6 +13,8 @@ const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..') + '/';
 const html = readFileSync(RAIZ + 'web/duel.html', 'utf8');
 const seta = readFileSync(RAIZ + 'web/js/setaataque.js', 'utf8')
   .replace(/^export /gm, '');   // sem módulos: file:// não carrega import
+const batalha = readFileSync(RAIZ + 'web/js/batalha.js', 'utf8')
+  .replace(/^export /gm, '');
 
 /** Fatia um bloco do arquivo entre dois marcadores, incluindo os dois. */
 function fatia(de, ate, nome) {
@@ -37,12 +39,18 @@ const cssSeta = bloco('seta');
 const cssNum = bloco('lp');
 const cssFx = bloco('fx');
 const cssFlash = bloco('brilho');
+const cssBatalha = bloco('batalha');
 
 const jsSeta = fatia('function limparSeta() {', '  }\n}\n', 'desenharSeta');
 const jsPontos = fatia('function pontosDoAtaque(a) {', '\n}\n', 'pontosDoAtaque');
 const jsNum = fatia('async function voarNumeroLp(player, delta) {', '\n  el.remove();\n}', 'voarNumeroLp');
 const jsFlash = fatia('function flashZone(anchor', '\n}', 'flashZone');
 const jsBrilho = fatia('function brilhoDaEntrada(ev, viradaAntes) {', '  return null;\n}', 'brilhoDaEntrada');
+// A faixa da batalha e o nome da carta na zona. Ela e' o item mais visual desta
+// tela — tres passos, uma frase e dois numeros —, e nenhum teste de logica diz
+// se ela cabe na largura nem se o passo aceso da' para ler.
+const jsNomeZona = fatia('function nomeNaZona(ctrl, seq) {', '\n}', 'nomeNaZona');
+const jsFaixa = fatia('function renderBatalha() {', '  faixa.hidden = false;\n}', 'renderBatalha');
 
 const CARD = 'width:62px;height:90px';
 const zonas = (ctrl, top) => [0,1,2,3,4].map((i) =>
@@ -65,6 +73,7 @@ ${cssFx}
 ${cssFlash}
 ${cssSeta}
 ${cssNum}
+${cssBatalha}
   #atk-seta { position: fixed; }
 </style>
 <div class="hud"><div class="hud-side you" id="hud-p0">8000</div><div class="hud-side opp" id="hud-p1">8000</div></div>
@@ -74,10 +83,17 @@ ${zonas(0, 330)}
 ${[0,1,2,3,4].map((i) => `<div class="zona" data-anchor="0:8:${i}" style="left:${190+i*74}px;top:430px;${CARD}"></div>`).join('')}
 <div id="fx"></div>
 <svg id="atk-seta" hidden aria-hidden="true"></svg>
+<div id="bat-faixa" hidden></div>
 <div class="barra">
   <button onclick="cena({atkCtrl:1,atkSeq:1,defCtrl:0,defSeq:2,direct:false})">NPC ataca voce</button>
   <button onclick="cena({atkCtrl:0,atkSeq:0,defCtrl:1,defSeq:4,direct:false})">voce ataca NPC</button>
   <button onclick="cena({atkCtrl:1,atkSeq:0,defCtrl:0,defSeq:0,direct:true})">ataque direto</button>
+  <button onclick="momento('declaracao')">1. declaracao</button>
+  <button onclick="momento('dano')">2. etapa de dano</button>
+  <button onclick="momento('calculo', {posDoAlvo:0x4})">3. calculo (alvo DEITADO)</button>
+  <button onclick="momento('calculo', {posDoAlvo:0x1})">3. calculo (alvo de pe)</button>
+  <button onclick="momento('anulado')">ataque anulado</button>
+  <button onclick="momento(null)">acabou</button>
   <button onclick="voarNumeroLp(0,-1800)">dano 1800</button>
   <button onclick="voarNumeroLp(1,+300)">cura 300</button>
   <button onclick="entrada({type:'move',loc:4,seq:2,controller:0,code:1,pos:1})">monstro entra (ATAQUE)</button>
@@ -88,6 +104,7 @@ ${[0,1,2,3,4].map((i) => `<div class="zona" data-anchor="0:8:${i}" style="left:$
 </div>
 <script>
 ${seta}
+${batalha}
 const $ = (id) => document.getElementById(id);
 const prefersReduced = false;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -96,13 +113,23 @@ const elDaAncora = (a) => a ? document.querySelector('[data-anchor="' + a + '"]'
 function anchorRect(a) { const el = elDaAncora(a); if (!el) return null; const r = el.getBoundingClientRect(); return r.width && r.height ? r : null; }
 function containerRect(id) { const el = document.getElementById(id); const r = el && el.getBoundingClientRect(); return r && r.width ? r : null; }
 let ataquePendente = null;
-const field = { 0: { m: [] }, 1: { m: [] } };
+// Duas cartas de mentira nas zonas que os botoes usam, para a faixa ter nome
+// que mostrar (a de baixo e' a atacada no ataque "NPC ataca voce").
+const field = {
+  0: { m: [null, null, { code: 5053103, pos: 0x1 }, null, null] },
+  1: { m: [null, { code: 91152256, pos: 0x4 }, null, null, null] },
+};
+const NOMES = { 5053103: 'Battle Ox', 91152256: 'Celtic Guardian' };
+const nameOf = (id) => NOMES[id] || String(id);
+let etapaDaBatalha = null, ataqueAtual = null, calculoNaTela = null;
 
 ${jsPontos}
 ${jsSeta}
 ${jsNum}
 ${jsFlash}
 ${jsBrilho}
+${jsNomeZona}
+${jsFaixa}
 
 // As DUAS linhas do laco de eventos do apply(), na ordem em que ele as roda.
 // Assim o botao prova a DECISAO (quem acende e quem nao acende), e nao so' o
@@ -114,8 +141,26 @@ async function entrada(ev, viradaAntes = false) {
 }
 window.entrada = entrada;
 
-function cena(a) { ataquePendente = a; desenharSeta(); }
-window.cena = cena; window.voarNumeroLp = voarNumeroLp; window.flashZone = flashZone;
+function cena(a) {
+  ataquePendente = a; ataqueAtual = a;
+  desenharSeta();
+  if (!etapaDaBatalha) etapaDaBatalha = 'declaracao';
+  renderBatalha();
+}
+
+// O MSG_BATTLE de mentira e a mesma conta do jogo (calculoDaBatalha): o botao
+// do alvo DEITADO existe porque e' ali que a leitura errada aparece — o motor
+// manda ATK e DEF dos dois lados sempre, e quem escolhe qual vale e' a posicao.
+const COLISAO = { atkAtk: 1700, atkDef: 1000, defAtk: 1400, defDef: 1200, defDestroyed: true };
+function momento(m, { posDoAlvo = 0x1 } = {}) {
+  etapaDaBatalha = m;
+  calculoNaTela = m === 'calculo'
+    ? calculoDaBatalha(COLISAO, { posDoAlvo, direto: !!(ataqueAtual && ataqueAtual.direct) })
+    : null;
+  renderBatalha();
+}
+window.cena = cena; window.momento = momento;
+window.voarNumeroLp = voarNumeroLp; window.flashZone = flashZone;
 </script>
 `);
 console.log('bancada.html gerado');

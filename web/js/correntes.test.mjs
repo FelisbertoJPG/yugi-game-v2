@@ -75,7 +75,22 @@ t('AUTO pergunta quando ha INVOCACAO em andamento', () => {
   assert.equal(d.perguntar, true, 'e a janela do Horn of Heaven / Trap Hole');
 });
 
-t('AUTO pergunta quando um ATAQUE foi declarado', () => {
+t('AUTO pergunta quando um ATAQUE foi declarado (pelo gatilho do motor)', () => {
+  // O motor nomeia a declaracao como qualquer outro gatilho (`MarcaGatilhoDoAtaque`,
+  // provado por `--test-etapa-dano`). Antes disto ela era o unico momento sem
+  // nome, e a janela da Mirror Force chegava rotulada como mudanca de fase.
+  const d = decidirCorrente({
+    modo: 'auto',
+    pergunta: janela({ chainTriggerKind: 'attack', chainTriggerCode: 5053103, chainTriggerPlayer: 1 }),
+    turno: 1, fase: FASE_BATTLE,
+  });
+  assert.equal(d.perguntar, true, 'e a janela da Mirror Force');
+});
+
+t('AUTO ainda pergunta pela reserva, com o motor que nao manda o gatilho', () => {
+  // Cliente com o `engine` atrasado: o gatilho vem vazio e quem sabe do ataque
+  // e' a tela. Sem esta reserva, atualizar o front antes do motor tiraria do
+  // jogador justamente a janela que decide o duelo.
   const d = decidirCorrente({
     modo: 'auto', pergunta: janela(), turno: 1, fase: FASE_BATTLE, ataqueDeclarado: true,
   });

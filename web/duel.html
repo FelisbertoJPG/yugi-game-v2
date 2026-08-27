@@ -337,6 +337,60 @@
     100% { opacity: 0; transform: translateX(70px); }
   }
 
+  /* ---------- a faixa da batalha (os momentos do ataque) ---------- */
+  /* [bancada:batalha] --- inicio --- */
+  /* Fica no ALTO e não no meio: durante a janela de resposta o quadro das
+     cartas encosta embaixo (`#chain-overlay.com-seta`) e a seta cruza o meio da
+     mesa — os dois lugares onde o olho já está. E acima do véu da corrente
+     (z-index 80), senão o passo em que se está desaparece justamente quando ele
+     mais importa: na hora de decidir se responde. */
+  #bat-faixa {
+    position: fixed; top: 9%; left: 0; right: 0; z-index: 82;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    pointer-events: none;
+  }
+  #bat-faixa[hidden] { display: none; }
+  .bat-passos {
+    display: flex; align-items: center; gap: 0;
+    background: #0c1118e8; border: 1px solid var(--line);
+    padding: 4px 6px; border-radius: 3px;
+  }
+  .bat-passo {
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    color: #55503f; padding: 3px 10px; white-space: nowrap;
+  }
+  .bat-passo.feito { color: var(--dim); }
+  .bat-passo.agora {
+    color: #1a1408; background: var(--gold); border-radius: 2px;
+    box-shadow: 0 0 14px #f1c40f55;
+  }
+  .bat-passo + .bat-passo::before {
+    content: "›"; color: #3a3527; margin-right: 10px; margin-left: -4px;
+  }
+  /* Anulado é um fim, não um passo: plaqueta própria, para ninguém procurar o
+     próximo passo de uma trilha que parou. */
+  .bat-anulado {
+    font-size: 12px; letter-spacing: 3px; text-transform: uppercase;
+    color: #e05c4a; border: 1px solid #e05c4a; background: #0c1118e8;
+    padding: 5px 16px; border-radius: 3px;
+  }
+  .bat-quem {
+    font-size: 11.5px; color: var(--ink); background: #0c1118cc;
+    border: 1px solid var(--line); padding: 3px 12px; border-radius: 3px;
+  }
+  /* Os dois números que colidiram. É o "cálculo de dano" escrito: sem ele o
+     jogador vê um monstro sumir e tem de deduzir a conta de cabeça. */
+  .bat-calculo {
+    display: flex; align-items: center; gap: 10px;
+    background: #0c1118e8; border: 1px solid var(--gold); border-radius: 3px;
+    padding: 4px 14px; font-size: 16px; color: var(--gold);
+  }
+  .bat-calculo .lado { display: flex; align-items: baseline; gap: 4px; }
+  .bat-calculo .lado small { font-size: 9px; letter-spacing: 1px; color: var(--dim); }
+  .bat-calculo .morreu { text-decoration: line-through; color: #e05c4a; }
+  .bat-calculo .x { font-size: 12px; color: var(--dim); }
+  /* [bancada:batalha] --- fim --- */
+
   /* ---------- inspetor: a carta sob o mouse ---------- */
   /* O painel do Tag Force / YGOPro: passou o mouse, leu a carta. Fica FORA da
      `.arena` de propósito — ela tem `zoom: 1.25` e um layout de tabuleiro que
@@ -871,6 +925,7 @@
 </div>
 
 <div id="phase-toast"></div>
+<div id="bat-faixa" hidden></div>
 <div id="reveal" hidden></div>
 <div id="inspetor"></div>
 
@@ -915,6 +970,9 @@ import { YgoDB } from '/ygo-data/src/ygodb.js';
 import { getActiveDeck, hydrateDecks } from '/web/js/storage.js';
 import { getNpc, loadNpcDecks, getNpcActiveDeck, getNpcDecks, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
 import { encerrarDuelo, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
+// A BANLIST vale na PORTA do duelo, e nao so' na hora de salvar. Ver
+// `podeDuelar` mais abaixo — e a migration 0047, que e' quem tranca de verdade.
+import { hydrateBanlist, getBanlist, validateBanlist, textoDoProblema } from '/web/js/banlist.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 // A revelação carta a carta — a mesma que a Loja usa na abertura de pacote.
 import { montarRevelacao } from '/web/js/revelacao.js';
@@ -942,6 +1000,11 @@ import { rotuloReposicao, estaVirada } from '/web/js/posicao.js';
 import { banir, desbanir, topoBanido, contarAbertas, LOCATION_BANIDO } from '/web/js/banimento.js';
 import { ofertasPorMao, linhasDeAtivacao, textoDoEfeito } from '/web/js/ofertas.js';
 import { geometriaDaSeta, centroDe, haloDoAlvo, mostrarCamada, esconderCamada } from '/web/js/setaataque.js';
+// Os CINCO momentos do ataque (declaracao, a virada do alvo, a janela de
+// resposta, a colisao e o calculo). A regra mora fora da tela porque erra
+// calada: momento velho promete "responda ao ataque" quando nao ha ataque
+// nenhum, e momento que morre cedo apaga a seta no meio da etapa de dano.
+import { ETAPAS, proximaEtapa, emBatalha, textoDoAtaque, calculoDaBatalha } from '/web/js/batalha.js';
 // Duelar conta como estar jogando: sem o batimento aqui, quem esta no meio de
 // um duelo aparece OFFLINE na lista de amigos dos outros e some do contador.
 import { baterPonto } from '/web/js/presenca.js';
@@ -1483,6 +1546,36 @@ async function rpc(path, body) {
   return r.json();
 }
 
+/**
+ * **Este deck pode duelar?** Devolve o motivo, ou vazio quando está em regra.
+ *
+ * O relato foi *"o player está conseguindo duelar com um deck que possui mais
+ * de uma cópia de cards limitados"*, e o caminho é curto: `salvar_deck` sempre
+ * cobrou a banlist, mas **o duelo não passa por ele**. O `chosenDeck()` lê o
+ * deck do `localStorage` e manda as cartas direto para o motor local; o único
+ * servidor no caminho recebia apenas o NOME do deck. O builder recusava salvar,
+ * o banco recusava gravar — e o deck ficava só naquele navegador, de onde o
+ * duelo o carregava normalmente.
+ *
+ * Isto aqui é a **PORTA**, não a fechadura: quem tranca é `iniciar_duelo`
+ * (migration 0047), e é por isso que a checagem local pode ser feita com a
+ * cópia do `localStorage` sem risco. Ela só sabe **acrescentar** um motivo, e
+ * nunca dar permissão — banlist local desatualizada deixa passar, e aí o
+ * servidor recusa com a mensagem dele. É a mesma regra do resto do projeto:
+ * cópia local nunca vence a nuvem.
+ *
+ * A frase sai de `textoDoProblema`, a MESMA que o Deck Builder usa ao bloquear
+ * o salvar: duas frases escritas em lugares diferentes recusariam a mesma carta
+ * com dois motivos, conforme onde o jogador esbarrasse nela.
+ */
+function podeDuelar(deck) {
+  const bl = validateBanlist(deck, getBanlist());
+  if (bl.ok) return '';
+  return 'Este deck não pode duelar — banlist: '
+       + textoDoProblema(bl.problems[0], (id) => nameOf(id))
+       + '. Ajuste-o no Deck Builder.';
+}
+
 function chosenDeck() {
   // O deck do duelo e' o ATIVO, escolhido no Deck Builder. Havia um <select> na
   // barra do topo que trocava o deck e recomecava o duelo; ele saiu junto com o
@@ -1500,6 +1593,33 @@ async function start() {
   const ids = deck ? deck.main : [];
   const extraIds = deck?.extra ?? [];
   if (!ids.length) { warn('Nenhum deck com cartas. Monte/selecione um deck no Deck Builder.'); return; }
+  // A PORTA. Antes de acender o motor: um duelo que começa e só é recusado no
+  // fim (na hora do prêmio) é pior que um que não começa.
+  const barrado = podeDuelar(deck);
+  if (barrado) { warn(barrado); return; }
+
+  // A FECHADURA. `iniciar_duelo` (migration 0047) recebe as CARTAS e recusa o
+  // deck fora da banlist — é ele, e não a tela, que barra de verdade: a
+  // conferência de cima lê a cópia local, que qualquer um edita.
+  //
+  // Registrar antes de `/start` conserta de quebra um silêncio antigo: a parede
+  // de versão (0041) e o teto de duelos por hora eram descobertos DEPOIS de o
+  // duelo já estar rolando, e o recado do admin ("peça o instalador novo") ia
+  // para o lixo junto do erro — a partida corria inteira e o prêmio era negado
+  // no fim, sem ninguém saber por quê.
+  //
+  // As duas recusas ficam aqui em cima, ANTES de qualquer estado ser zerado: um
+  // duelo que não começou não pode limpar a mesa do que estava na tela.
+  //
+  // Só no modo Adversário: o Treino (`duel.html` sem `?npc=`) não registra nada
+  // e não paga nada, então ali quem responde é só a porta.
+  let registro = null;
+  if (advNpc) {
+    registro = await iniciarDuelo(advNpc.id, advDeckNome, [...ids, ...extraIds]);
+    if (!registro.id) { warn(registro.erro); return; }
+  }
+  dueloId = registro?.id ?? null;
+
   deckName = deck.name;
   hand = { 0: [], 1: 0 }; field = { 0: fresh(), 1: fresh() };
   lp = { 0: 8000, 1: 8000 };
@@ -1545,11 +1665,6 @@ async function start() {
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
 
-    // Registra o duelo no servidor. E' este id que destrava o premio depois —
-    // sem ele, `premiar_vitoria` recusa. Só vale contra adversário: o Treino
-    // (duel.html sem ?npc=) nao paga nada.
-    dueloId = advNpc ? await iniciarDuelo(advNpc.id, advDeckNome) : null;
-    rewardGiven = false;
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
     log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)${vs}`, true);
     aplicarEmOrdem(j);
@@ -1796,13 +1911,22 @@ try { chainMode = normalizarModo(localStorage.getItem('ygo:chainMode')); }
 catch { /* sem localStorage: fica no padrão */ }
 
 /**
- * Um ataque acabou de ser declarado?
+ * Um ataque acabou de ser declarado? — **a reserva** do modo `auto`.
  *
- * É o único dos quatro momentos do modo `auto` que o motor não entrega junto da
- * pergunta: `chainTrigger*` cobre invocação e ativação, a End Phase sai da fase
- * atual, e o ataque só existe no evento `attack`, que chega logo antes da
- * janela. Zera quando a janela é respondida e a cada turno novo — bandeira
- * velha faria o NPC parecer estar atacando o tempo todo.
+ * Hoje o motor entrega isto junto da pergunta, como já entregava a invocação e
+ * a ativação: a declaração virou um gatilho (`chainTriggerKind === 'attack'`,
+ * ver `InteractiveDuel.MarcaGatilhoDoAtaque`), e é ele que
+ * `momentoDaJanela` consulta primeiro. Esta bandeira ficou para o cliente cujo
+ * pacote `engine` está atrasado em relação ao front — sem ela, atualizar o
+ * front antes do motor tiraria do jogador justamente a janela que decide o
+ * duelo.
+ *
+ * Zera quando a janela é respondida, quando a etapa de dano fecha, quando o
+ * ataque é anulado e a cada turno novo. As duas do meio são novas e consertam
+ * um defeito de verdade: antes ela só caía na virada do TURNO, então bastava
+ * UM ataque para toda janela seguinte daquele turno — inclusive as da Main
+ * Phase 2, muito depois de a batalha ter acabado — se anunciar como resposta a
+ * um ataque.
  */
 let ataqueDeclarado = false;
 
@@ -1842,6 +1966,26 @@ function motivoDaCorrente(q) {
     return `${quem} ativou ${nameOf(q.chainTriggerCode)}`;
   if (q.chainTriggerKind === 'summon' && q.chainTriggerCode)
     return `${quem} invocou ${nameOf(q.chainTriggerCode)}`;
+  // A DECLARAÇÃO DE ATAQUE — a janela mais importante do duelo (Mirror Force,
+  // Waboku, Negate Attack, Sakuretsu) e a última a ganhar nome. Sem o gatilho
+  // ela caía na frase da fase abaixo: "Seu oponente está indo para a Battle
+  // Step", no exato instante em que um monstro dele vinha para cima do seu.
+  //
+  // A frase sai do ataque QUE ESTÁ NA MESA, e não só do código do gatilho: o
+  // motor nomeia o atacante, mas quem apanha também importa — e no meio da
+  // etapa de dano a pergunta deixa de ser "impedir o golpe" para ser
+  // "responder ao que ele já causou".
+  if (q.chainTriggerKind === 'attack' || (ataqueAtual && emBatalha(etapaDaBatalha))) {
+    const frase = ataqueAtual
+      ? textoDoAtaque({
+          atacante: nomeNaZona(ataqueAtual.atkCtrl, ataqueAtual.atkSeq)
+                    || (q.chainTriggerCode ? nameOf(q.chainTriggerCode) : ''),
+          alvo: nomeNaZona(ataqueAtual.defCtrl, ataqueAtual.defSeq),
+          direto: ataqueAtual.direct,
+        })
+      : `${quem} declarou um ataque com ${nameOf(q.chainTriggerCode)}`;
+    return etapaDaBatalha === 'declaracao' ? frase : `${frase} — ${ETAPAS.dano}`;
+  }
   const fase = PHASE_NOME[phase] ?? `Fase ${phase}`;
   return turn === 0 ? `Você está indo para a ${fase}` : `Seu oponente está indo para a ${fase}`;
 }
@@ -2071,6 +2215,100 @@ async function flyGhost(from, to, code, face, dur = 280, endScale = 1) {
 // resolução: sai quando o motor manda a batalha (ou o dano, no ataque direto).
 let ataquePendente = null;   // { atkCtrl, atkSeq, defCtrl, defSeq, direct }
 
+// ---------------- os momentos do ataque ----------------
+// A seta acima resolve UM dos cinco momentos (a declaração). Os outros quatro —
+// a virada do alvo, a janela de resposta, a colisão e o cálculo — aconteciam
+// todos dentro do mesmo piscar: o motor manda a etapa de dano inteira num lote
+// só de eventos, e a tela desenhava o resultado.
+//
+// `etapaDaBatalha` é o momento de AGORA (a regra está em `batalha.js`, com
+// teste em Node); `ataqueAtual` é quem ataca quem, e vive mais que
+// `ataquePendente` de propósito: este último morre na investida (é o que impede
+// o golpe de sair duas vezes num ataque direto, onde vêm `battle` E `lp`),
+// enquanto a faixa ainda precisa dizer o nome dos dois até o fim da etapa.
+let etapaDaBatalha = null;
+let ataqueAtual = null;
+let calculoNaTela = null;   // o par de números do MSG_BATTLE, enquanto está à vista
+
+/** O ataque acabou (resolveu, foi anulado, ou o turno virou): limpa a mesa. */
+function encerrarAtaque() {
+  etapaDaBatalha = null;
+  ataqueAtual = null;
+  ataquePendente = null;
+  calculoNaTela = null;
+  limparSeta();
+  renderBatalha();
+}
+
+/** O nome da carta numa zona de monstro — vazio quando ela ainda está virada. */
+function nomeNaZona(ctrl, seq) {
+  const c = field[ctrl]?.m?.[seq];
+  return c && c.code ? nameOf(c.code) : '';
+}
+
+/**
+ * **A faixa da batalha**: em que momento do ataque o duelo está, quem ataca
+ * quem, e — no cálculo — os dois números que colidiram.
+ *
+ * Fica no alto porque os dois lugares que já disputam o olho durante um ataque
+ * são o meio da mesa (a seta) e o rodapé (a janela de resposta encostada).
+ */
+function renderBatalha() {
+  const faixa = $('bat-faixa');
+  if (!etapaDaBatalha) { faixa.hidden = true; faixa.replaceChildren(); return; }
+
+  const frag = document.createDocumentFragment();
+  const div = (cls, txt) => {
+    const el = document.createElement('div');
+    el.className = cls;
+    if (txt != null) el.textContent = txt;
+    return el;
+  };
+
+  if (etapaDaBatalha === 'anulado') {
+    frag.append(div('bat-anulado', ETAPAS.anulado));
+  } else {
+    const trilha = ['declaracao', 'dano', 'calculo'];
+    const passos = div('bat-passos');
+    const onde = trilha.indexOf(etapaDaBatalha);
+    trilha.forEach((m, i) => passos.append(
+      div('bat-passo' + (i === onde ? ' agora' : i < onde ? ' feito' : ''), ETAPAS[m])));
+    frag.append(passos);
+  }
+
+  if (ataqueAtual) {
+    frag.append(div('bat-quem', textoDoAtaque({
+      atacante: nomeNaZona(ataqueAtual.atkCtrl, ataqueAtual.atkSeq),
+      alvo: nomeNaZona(ataqueAtual.defCtrl, ataqueAtual.defSeq),
+      direto: ataqueAtual.direct,
+    })));
+  }
+
+  if (calculoNaTela) {
+    const box = div('bat-calculo');
+    const lado = (v, morreu, rotulo) => {
+      const el = div('lado' + (morreu ? ' morreu' : ''));
+      el.append(document.createTextNode(String(v)));
+      if (rotulo) { const s = document.createElement('small'); s.textContent = rotulo; el.append(s); }
+      return el;
+    };
+    box.append(lado(calculoNaTela.atacante.valor, calculoNaTela.atacante.destruido, 'ATK'));
+    box.append(div('x', '⚔'));
+    // Sem defensor o ataque é DIRETO: o segundo quadro não existe. O evento
+    // `battle` chega mesmo assim, com o lado dele zerado — desenhá-lo poria na
+    // tela um adversário de 0 de ATK apanhando. Ver `calculoDaBatalha`.
+    if (calculoNaTela.defensor)
+      box.append(lado(calculoNaTela.defensor.valor, calculoNaTela.defensor.destruido,
+                      calculoNaTela.defensor.emDefesa ? 'DEF' : 'ATK'));
+    else
+      box.append(div('x', 'sem defensor — o dano vai direto'));
+    frag.append(box);
+  }
+
+  faixa.replaceChildren(frag);
+  faixa.hidden = false;
+}
+
 /** Onde o ataque começa e onde termina, em pixels de tela. */
 function pontosDoAtaque(a) {
   const from = centroDe(anchorRect(`${a.atkCtrl}:4:${a.atkSeq}`));
@@ -2297,6 +2535,8 @@ async function animateEvent(ev) {
         atkCtrl: ev.atkCtrl, atkSeq: ev.atkSeq,
         defCtrl: ev.defCtrl, defSeq: ev.defSeq, direct: !!ev.direct,
       };
+      ataqueAtual = ataquePendente;
+      renderBatalha();
       desenharSeta();
       // O tempo de LER a seta antes de a janela de resposta cobrir a mesa. Sem
       // esta pausa a seta e o quadro chegam no mesmo quadro de vídeo, que é o
@@ -2304,11 +2544,40 @@ async function animateEvent(ev) {
       await sleep(prefersReduced ? 0 : 620);
       return;
     }
-    // RESOLUÇÃO: a batalha (com alvo) e o dano (ataque direto) são os dois
-    // jeitos de o motor dizer que o ataque passou.
-    if (ev.type === 'battle') { await resolverInvestida(); return; }
+    // A ETAPA DE DANO abriu. É aqui que o alvo virado vai abrir (o `pos` logo
+    // abaixo, medido em `--test-etapa-dano`), então a pausa serve para separar
+    // "vou bater nesta zona" de "é ESTA carta que está nela" — sem ela as duas
+    // notícias chegam no mesmo quadro de vídeo.
+    if (ev.type === 'damagestep' && ev.etapa === 'inicio') {
+      await sleep(prefersReduced ? 0 : 260);
+      return;
+    }
+    // ATAQUE ANULADO: a seta sai, mas com um motivo na tela. Sem isto o golpe
+    // simplesmente não vinha — indistinguível de um ataque que ninguém declarou.
+    if (ev.type === 'attackcancel') {
+      limparSeta();
+      ataquePendente = null;
+      await sleep(prefersReduced ? 0 : 900);
+      return;
+    }
+    // CÁLCULO DE DANO: os dois números aparecem, e SÓ ENTÃO os corpos colidem.
+    // A ordem é o ponto — ver o número depois do golpe é ler a conta de uma
+    // batalha que já acabou.
+    if (ev.type === 'battle') {
+      const a = ataquePendente || ataqueAtual;
+      // A posição do alvo é a de AGORA: quem estava virado já foi aberto pelo
+      // `pos` da etapa de dano, e é a posição aberta que decide se ele luta
+      // pelo ATK ou pela DEF.
+      const alvo = a && !a.direct ? field[a.defCtrl]?.m?.[a.defSeq] : null;
+      calculoNaTela = calculoDaBatalha(ev, { posDoAlvo: alvo?.pos ?? 0, direto: !!a?.direct });
+      renderBatalha();
+      await sleep(prefersReduced ? 0 : 720);
+      await resolverInvestida();
+      return;
+    }
     if (ev.type === 'lp') {
-      // Ataque direto: o golpe vem antes do número — é ele que causa o dano.
+      // Ataque direto sem cálculo na tela (motor antigo, sem os eventos da
+      // etapa de dano): o golpe vem antes do número — é ele que causa o dano.
       if (ataquePendente?.direct && ev.delta < 0) await resolverInvestida();
       await voarNumeroLp(ev.player, ev.delta);
       return;
@@ -2326,22 +2595,34 @@ async function apply(j) {
       // troca de ataque para defesa, que não devia acender nada.
       const viradaAntes = ev.type === 'pos' && ev.loc === 4
         && estaVirada(field[ev.controller]?.m?.[ev.seq]?.pos ?? 0);
+      // O momento do ataque anda ANTES da animação: é ele que a faixa desenha,
+      // e a animação de cada evento já conta com o passo em que está.
+      etapaDaBatalha = proximaEtapa(etapaDaBatalha, ev);
+      renderBatalha();
       await animateEvent(ev);   // move o fantasma (origem ainda visível)
       await handle(ev);         // muta o estado (o premio de vitoria vai ao servidor)
       render();                 // a carta "assenta" no lugar
+      renderBatalha();          // a faixa nomeia as cartas, e o `pos` acabou de abrir uma
       const brilho = brilhoDaEntrada(ev, viradaAntes);
-      if (brilho) { flashZone(brilho.anchor); await sleep(brilho.ms); }
+      // O alvo abrindo DENTRO da etapa de dano é o momento em que se descobre
+      // contra o que se está batendo — ele merece mais que o brilho de uma
+      // entrada qualquer em campo.
+      const ms = brilho && etapaDaBatalha === 'dano' ? Math.max(brilho.ms, 620) : brilho?.ms;
+      if (brilho) { flashZone(brilho.anchor); await sleep(ms); }
     }
     question = j.question || null;
     ended = !!j.ended;
-    // A seta só existe enquanto a pergunta for "responder a este ataque". O
-    // ataque negado no meio da corrente nunca chega a `battle`, e sem esta
-    // linha a seta ficaria pendurada na tela apontando para uma carta que já
-    // foi para o cemitério.
-    if (ataquePendente && !(question && question.kind === 'chain' && question.player === 0)) {
-      ataquePendente = null;
-      limparSeta();
-    }
+    // O ataque só atravessa uma resposta quando a pergunta pendente É a janela
+    // dele. Fora disso ele acabou — e a seta ficaria pendurada apontando para
+    // uma carta que já foi para o cemitério.
+    //
+    // A condição vale para os DOIS estados de propósito: o `etapaDaBatalha`
+    // fecha sozinho no `damagestep:fim`, mas um cliente com o pacote `engine`
+    // atrasado não recebe esse evento — e ali um momento que nunca morre
+    // deixaria a faixa e a seta na tela pelo resto do duelo.
+    if ((ataquePendente || etapaDaBatalha)
+        && !(question && question.kind === 'chain' && question.player === 0))
+      encerrarAtaque();
     // Raio-x ligado: relê a mão do NPC antes de redesenhar. Ele acabou de
     // jogar, comprar ou descartar — mostrar a mão de antes seria pior que não
     // mostrar nenhuma, porque parece atual.
@@ -2499,26 +2780,40 @@ async function handle(ev) {
       warn(`Ação "${ev.action}" não vale agora (o motor espera: ${ev.expected}).`);
       break;
     case 'attack':
-      // Marca o momento para o modo `auto` das correntes: a janela da Mirror
-      // Force abre logo depois desta mensagem, e é a única dos quatro momentos
-      // que não vem identificada na própria pergunta.
+      // A reserva do modo `auto`, para o motor que ainda não manda o gatilho de
+      // ataque na própria pergunta (ver `ataqueDeclarado`).
       ataqueDeclarado = true;
-      {
-        // Quem ataca quem, por extenso: o log é o que sobra depois que a seta
-        // some, e "ataque declarado" não diz qual monstro nem contra o quê.
-        const nomeEm = (ctrl, seq) => {
-          const c = field[ctrl]?.m?.[seq];
-          return c ? (c.code ? nameOf(c.code) : 'carta virada') : 'monstro';
-        };
-        const quem = nomeEm(ev.atkCtrl, ev.atkSeq);
-        log(ev.direct ? `⚔ ${quem} ataca diretamente!`
-                      : `⚔ ${quem} ataca ${nomeEm(ev.defCtrl, ev.defSeq)}`);
-      }
+      // Quem ataca quem, por extenso — e pela MESMA frase que a faixa da
+      // batalha mostra: o log é o que sobra depois que ela some, e duas frases
+      // escritas em lugares diferentes divergem no primeiro ajuste.
+      log('⚔ ' + textoDoAtaque({
+        atacante: nomeNaZona(ev.atkCtrl, ev.atkSeq),
+        alvo: nomeNaZona(ev.defCtrl, ev.defSeq),
+        direto: !!ev.direct,
+      }));
+      break;
+    // A ETAPA DE DANO, que o motor sempre delimitou e ninguém traduzia. No log
+    // ela é a única coisa que separa "o ataque foi declarado" de "o ataque
+    // aconteceu" depois que a faixa some da tela.
+    case 'damagestep':
+      if (ev.etapa === 'inicio') log('— etapa de dano —');
+      else ataqueDeclarado = false;   // acabou: a próxima janela não é deste ataque
+      break;
+    case 'attackcancel':
+      ataqueDeclarado = false;
+      log('🛡 o ataque foi ANULADO', true);
       break;
     case 'battle': {
-      // O motor já resolveu; aqui é só contar o que houve.
-      const quem = (a, d) => `${a}${d ? ' (destruído)' : ''}`;
-      log(`⚔ ${quem(ev.atkAtk, ev.atkDestroyed)} vs ${quem(ev.defAtk, ev.defDestroyed)}`, true);
+      // O motor já resolveu; aqui é só contar o que houve. O número do defensor
+      // é o que ele REALMENTE usou na batalha (DEF quando está deitado) — o
+      // mesmo que a faixa mostra, senão o log e a tela contam batalhas
+      // diferentes da mesma colisão.
+      const alvo = ataqueAtual && !ataqueAtual.direct
+        ? field[ataqueAtual.defCtrl]?.m?.[ataqueAtual.defSeq] : null;
+      const c = calculoDaBatalha(ev, { posDoAlvo: alvo?.pos ?? 0, direto: !!ataqueAtual?.direct });
+      const quem = (l) => `${l.valor}${l.emDefesa ? ' (DEF)' : ''}${l.destruido ? ' — destruído' : ''}`;
+      log(c.defensor ? `⚔ ${quem(c.atacante)} vs ${quem(c.defensor)}`
+                     : `⚔ ${quem(c.atacante)} passa direto`, true);
       break;
     }
     case 'pos': {
@@ -2534,6 +2829,13 @@ async function handle(ev) {
       // `flip` vem do MSG_FLIPSUMMONING: e' a Invocacao-Virar, nao uma troca de
       // posicao qualquer — e ela merece a linha em destaque, como as invocacoes.
       if (ev.flip) log(`🔄 Invocação-Virar: ${quemE} abre em ${nomes[ev.pos] ?? 'pos ' + ev.pos}`, true);
+      // A carta atacada abrindo NÃO é uma troca de posição qualquer: é o
+      // instante em que se descobre contra o que se está batendo, e antes
+      // disto ela era anunciada como um "→ defesa" perdido no meio do log.
+      else if (etapaDaBatalha === 'dano' && ev.loc === 4
+               && ataqueAtual && ev.controller === ataqueAtual.defCtrl
+               && ev.seq === ataqueAtual.defSeq)
+        log(`👁 o alvo virado abre: ${quemE} (${nomes[ev.pos] ?? 'pos ' + ev.pos})`, true);
       else log(`${quemE} → ${nomes[ev.pos] ?? 'pos ' + ev.pos}`);
       break;
     }
@@ -3880,7 +4182,16 @@ function renderDrops(drops) {
     raridade: d.raridade,
     nova: d.nova,
   })), {
-    nomeDe,
+    // `nomeDe: nameOf`, e nunca o atalho `nomeDe` — aqui a função se chama
+    // `nameOf`. Escrito solto, o atalho de propriedade referencia uma variável
+    // que não existe: sintaxe válida, ReferenceError só em execução, e só na
+    // vitória contra um adversário que TEM pool de drop (sem drop, `renderDrops`
+    // volta antes). Foi assim que vencer o Panik virou "ERRO na tela: nomeDe is
+    // not defined" com a tela de fim nunca aparecendo e os dois botões de saída
+    // já desligados — o jogador ganhava o prêmio no servidor e ficava sem saída.
+    // Segunda vez desta armadilha no projeto (a primeira foi `turno` em
+    // `correntes`); hoje `node web/js/atalhos.test.mjs` varre o front inteiro.
+    nomeDe: nameOf,
     arte: (id) => ART(id),
     // Um drop traz três ou quatro cartas; sete por linha é o teto, e a grade se
     // fecha no número que houver.
@@ -4038,6 +4349,11 @@ if (!partidaId) {
 await hydrateWallet();   // carteira do projeto antes de premiar vitórias
 await hydrateDecks();    // o deck com que você vai duelar vem de decks/player/
 await hydrateCustomNpcs();
+// A banlist publicada, para a porta do duelo (`podeDuelar`) conferir com a
+// lista de AGORA e não com a que este navegador viu por último. Sem rede ela
+// mantém a cópia local (`hydrateBanlist` só substitui quando alcança a fonte),
+// e uma cópia velha aqui não abre porta nenhuma: quem tranca é o servidor.
+await hydrateBanlist();
 // Um adversário criado noutra máquina só existe no disco: refaz a busca agora
 // que o hydrate sincronizou (a busca lá em cima rodou antes de qualquer await).
 if (advId && !advNpc) advNpc = getNpc(advId);

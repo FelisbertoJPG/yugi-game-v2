@@ -201,8 +201,14 @@ await t('toda página do jogo faz a checagem de versão', () => {
 
 await t('e o selo viaja na chamada de DUELAR, que é onde o banco confere', () => {
   const w = fs.readFileSync(path.join(WEB, 'js', 'wallet.js'), 'utf8');
-  const corpo = w.slice(w.indexOf('export async function iniciarDuelo'));
-  assert.match(corpo.slice(0, 600), /selo\(\)/,
+  // A FUNÇÃO inteira, e não os primeiros N caracteres dela: a janela fixa que
+  // isto tinha quebrou no dia em que um comentário entrou antes do `selo()` —
+  // o teste acusava "parou de mandar a versao" com a linha ainda lá.
+  const i = w.indexOf('export async function iniciarDuelo');
+  const j = w.indexOf('\nexport ', i + 1);
+  const corpo = w.slice(i, j < 0 ? undefined : j);
+  assert.ok(corpo.length > 0, 'nao achei a iniciarDuelo em wallet.js');
+  assert.match(corpo, /selo\(\)/,
     'iniciarDuelo parou de mandar a versao — o banco passa a ver todo mundo como cliente velho');
 });
 

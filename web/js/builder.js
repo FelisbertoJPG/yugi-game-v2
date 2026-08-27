@@ -26,7 +26,7 @@ import { hydrateCardLists, getCardList, foraDaLista } from '/web/js/cardlists.js
 import { listarEstruturaisEx } from '/web/js/estruturais.js';
 import { raridadesDosEstruturais } from '/web/js/ydk.js';
 import { montarAuto } from '/web/js/automontagem.js';
-import { hydrateBanlist, getBanlist, validateBanlist } from '/web/js/banlist.js';
+import { hydrateBanlist, getBanlist, validateBanlist, textoDoProblema } from '/web/js/banlist.js';
 import { selosDaBanlist, textoDaBanlist } from '/web/js/selobanlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ordenarPool } from '/web/js/poolordem.js';
@@ -244,12 +244,11 @@ function deckStatus({ ignoreBanlist = false } = {}) {
   }
 
   if (!bl.ok) {
-    const p = bl.problems[0];
-    const message = p.type === 'points'
-      ? `banlist: ${p.spent}/${p.budget} pontos — estourou o orçamento`
-      : p.type === 'limit'
-      ? `banlist: ${brief(p.card)?.name ?? p.card} tem ${p.count} cópias (máximo ${p.limit})`
-      : `banlist: grupo ${p.group} com ${p.count} cópias (máximo ${p.group})`;
+    // A frase mora em `banlist.js` (`textoDoProblema`): a porta do duelo faz a
+    // MESMA pergunta, e duas frases escritas em lugares diferentes recusariam a
+    // mesma carta com dois motivos, conforme onde o jogador esbarrasse nela.
+    const message = 'banlist: '
+      + textoDoProblema(bl.problems[0], (id) => brief(id)?.name ?? id);
     return { ok: false, message, color: 'var(--red)' };
   }
   return {

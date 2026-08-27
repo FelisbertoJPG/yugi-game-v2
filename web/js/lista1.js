@@ -380,14 +380,47 @@ export const LISTA1_TIPOS = ['Normal Monster', 'Fusion Monster'];
 let SET = new Set(LISTA1_SPELLTRAP);
 let TIPOS = new Set(LISTA1_TIPOS);
 
+/**
+ * **As cartas que o JOGO ENTREGA** — as que estão em algum booster, Deck
+ * Estrutural ou pool de drop de NPC. Elas entram na lista sem passar pelo
+ * editor: carta que o jogo entrega é carta que o jogo aceita, senão o jogador
+ * paga DP, abre a carta, e só descobre na hora de salvar o deck que ela não
+ * vale (foi o caso de 10 cartas, nove delas dos pacotes de NPC).
+ *
+ * Ficam num conjunto À PARTE, e isso é o ponto: `fonteDaLista1()` é o que o
+ * editor lê para salvar de volta, e misturá-las ali as carimbaria como escolha
+ * à mão — tirar a carta do booster deixaria de tirá-la da lista, e a fonte
+ * viraria um depósito que só cresce.
+ *
+ * Quem calcula é o SERVIDOR (`cartas_obteniveis()`, migration 0048), e
+ * `cardlists.js` traz a resposta pronta. Não se recalcula aqui: uma segunda
+ * conta divergiria em silêncio da que `salvar_deck` usa para recusar o deck, e
+ * as duas telas continuariam plausíveis.
+ */
+let OBTENIVEIS = new Set();
+
 /** A carta (entrada do índice) faz parte da Lista 1? */
 export function inLista1(card) {
-  if (SET.has(card.id)) return true;
+  if (SET.has(card.id) || OBTENIVEIS.has(card.id)) return true;
   if (card.t !== 'M') return false;
   return TIPOS.has(card.tl);
 }
 
-/** O conteúdo atual da Lista 1, no formato que o editor edita e publica. */
+/** Esta carta é entregue pelo jogo (booster / estrutural / drop)? */
+export function ehObtenivel(id) { return OBTENIVEIS.has(Number(id)); }
+
+/** Instala a resposta do servidor. Ver o comentário de `OBTENIVEIS`. */
+export function aplicarObteniveis(ids) {
+  if (!Array.isArray(ids)) return;
+  OBTENIVEIS = new Set(ids.map(Number).filter(Number.isFinite));
+}
+
+/**
+ * O conteúdo atual da Lista 1, no formato que o editor edita e publica.
+ *
+ * **Sem as obteníveis, de propósito** — elas não são escolha de ninguém, são
+ * consequência do que está à venda. Ver `OBTENIVEIS`.
+ */
 export function fonteDaLista1() {
   return { tipos: [...TIPOS], ids: [...SET] };
 }

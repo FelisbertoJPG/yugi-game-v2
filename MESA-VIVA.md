@@ -115,6 +115,56 @@ o admin a posiciona onde quiser.
 - A pilha do adversário fica igualmente visível: banimento é informação pública
   pelas regras, e o único segredo é o que o próprio dado já esconde.
 
+### 1.5 A faixa da batalha — os CINCO momentos do ataque *(só `duel.html`)*
+
+No Yu-Gi-Oh a batalha não é um instante: **declara-se** o ataque escolhendo quem
+ataca e em quem; um alvo com a face para baixo **abre**; uma **janela de
+resposta** permite impedir o golpe; os corpos **colidem**; e só então o **dano é
+calculado**. Cada fronteira dessas é a chance de alguém agir, e a tela mostrava
+tudo dentro do mesmo piscar — a seta aparecia e o resultado já estava na mesa.
+
+O motor sempre mandou as fronteiras. Faltava traduzi-las: `MSG_ATTACK_DISABLED
+(112)`, `MSG_DAMAGE_STEP_START (113)` e `MSG_DAMAGE_STEP_END (114)` não tinham
+`case` nenhum no `InteractiveDuel`, e o laço de mensagens anda pelo tamanho
+declarado de cada uma — então eram puladas **em silêncio**, sem erro e sem log.
+
+- Uma faixa no ALTO da tela mostra em que passo o ataque está —
+  `DECLARAÇÃO › ETAPA DE DANO › CÁLCULO DE DANO`, com o atual aceso —, quem ataca
+  quem por extenso, e, no cálculo, **os dois números que colidiram**. No alto, e
+  não no meio, porque durante um ataque os dois lugares que já disputam o olho
+  são o meio da mesa (a seta) e o rodapé (a janela de resposta encostada); e
+  acima do véu da corrente (z-index 80), senão o passo desaparece justamente na
+  hora de decidir se responde.
+- **O alvo virado abrindo ganhou beat próprio** (620 ms e linha destacada no
+  log): é o instante em que se descobre contra o que se está batendo, e antes
+  disto era anunciado como um "→ defesa" perdido no meio das outras linhas.
+- **Ataque anulado é uma plaqueta, não um passo**: a trilha para ali. Antes, uma
+  Negate Attack era indistinguível de um ataque que ninguém declarou — a seta
+  sumia, nenhum LP mudava, e quem gastou a carta não via nada acontecer.
+- A **janela de resposta** finalmente diz a que está respondendo: a declaração
+  virou gatilho no motor (`chainTriggerKind = "attack"`), então em vez de *"seu
+  oponente está indo para a Battle Step"* ela lê *"Battle Ox ataca Celtic
+  Guardian"* — e, dentro da etapa de dano, `"… — Etapa de Dano"`.
+
+> **Os dois números do cálculo erram calado, e cada um mostra um valor
+> plausível.** O ataque **direto** também manda `MSG_BATTLE` (medido), com o lado
+> do defensor zerado: desenhá-lo poria na tela um adversário de 0 de ATK
+> apanhando. E um monstro **deitado luta pela DEF** — o evento traz ATK e DEF dos
+> dois lados sempre, e quem escolhe é a posição do defensor naquele instante;
+> mostrar o ATK dele anuncia "1700 × 1400" numa batalha que o motor resolveu como
+> 1700 × 1200, e aí o resultado (ninguém leva dano) deixa de fechar com os
+> números à vista.
+>
+> Por isso a regra mora fora da tela, em `web/js/batalha.js`, com
+> `node web/js/batalha.test.mjs` (16 asserções). As sequências de lá não são
+> inventadas: são as que `duel-server --test-etapa-dano` (21 asserções) mede no
+> motor de verdade, com o par controle do ataque direto e o duelo do ataque
+> anulado.
+>
+> O **visual** não se prova em nenhum dos dois: é `node tools/bancada-visual.mjs`
+> que põe a faixa na tela, com botões para cada passo — inclusive o cálculo com o
+> alvo DEITADO, que é onde a leitura errada aparece.
+
 ---
 
 ## Fase 2 — precisa do editor de campo (não feita)
@@ -165,6 +215,7 @@ tamanhos diferentes no editor.
 ## Fora das duas fases (nem `duel.html`, nem editor)
 
 - **Animação de ataque** (o corte, o recuo). Hoje há tremor no alvo
-  (`fx-shake`) e o fantasma que voa. O resto é `TAGFORCE-BATALHA.md`, que já
-  traz o timing exato lido do ISO.
+  (`fx-shake`), o fantasma que voa e a faixa com os passos (1.5). O que falta é
+  a coreografia do Tag Force — `TAGFORCE-BATALHA.md` já traz o timing exato lido
+  do ISO.
 - **Som.** Não existe nada no projeto.

@@ -251,3 +251,33 @@ export function validateBanlist(deck, banlist) {
 
   return { ok: problems.length === 0, problems, spent: gasto };
 }
+
+/**
+ * **Um problema da banlist, escrito para quem joga.**
+ *
+ * Mora aqui, e não em quem desenha, porque agora são DOIS os que perguntam: o
+ * Deck Builder (que bloqueia o salvar) e a porta do duelo (que bloqueia a
+ * partida). Duas frases escritas em lugares diferentes divergem no primeiro
+ * ajuste, e aí a mesma carta é recusada com dois motivos diferentes dependendo
+ * de onde o jogador esbarrou nela.
+ *
+ * `nomeDe` resolve o id porque este módulo não conhece o banco de cartas — sem
+ * ele a frase sai com o código, que é a resposta honesta e não um nome
+ * inventado.
+ */
+export function textoDoProblema(p, nomeDe = (id) => String(id)) {
+  if (!p) return '';
+  if (p.type === 'points') return `${p.spent}/${p.budget} pontos — estourou o orçamento`;
+  if (p.type === 'limit') {
+    // Teto ZERO é a carta BANIDA, e não "o degrau abaixo de Limitada": dizer
+    // "máximo 0 cópias" faria o jogador procurar a versão permitida dela.
+    return p.limit === 0
+      ? `${nomeDe(p.card)} está BANIDA`
+      : `${nomeDe(p.card)} tem ${p.count} cópias (máximo ${p.limit})`;
+  }
+  if (p.type === 'group') {
+    const nomes = (p.cards ?? []).map(nomeDe).join(' e ');
+    return `${nomes} dividem ${p.group} cópias, e o deck tem ${p.count}`;
+  }
+  return '';
+}

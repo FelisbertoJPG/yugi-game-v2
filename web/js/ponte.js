@@ -79,7 +79,13 @@ export const CAMPOS_DE_JOGADOR = ['player', 'controller', 'fromCtrl', 'ctrl', 'c
                                   // sempre mandou; o front só passou a usar quando a janela
                                   // ganhou o "seu oponente ativou X" — e sem espelhar, o
                                   // segundo jogador leria a frase com os lados trocados.
-                                  'chainTriggerPlayer'];
+                                  'chainTriggerPlayer',
+                                  // quem ataca e quem apanha (MSG_ATTACK). Sao os dois campos
+                                  // que a seta do ataque usa para achar as zonas, e a faixa da
+                                  // batalha para nomear as duas cartas: sem espelhar, o segundo
+                                  // jogador ve a seta sair da carta errada, e o ataque DIRETO
+                                  // dele aponta para a propria mao.
+                                  'atkCtrl', 'defCtrl'];
 
 const outroLado = (v) => (v === 0 ? 1 : v === 1 ? 0 : v);
 

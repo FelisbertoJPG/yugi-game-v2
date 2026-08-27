@@ -19,7 +19,9 @@ namespace DuelServer
     ///       `SetTargetRange(LOCATION_MZONE, 0)` — "todas as minhas, nenhuma das
     ///       dele" — e o tipo, que precisa FICAR em campo.
     ///   FOOLISH BURIAL — sozinha é perda de carta; o valor está no par com a
-    ///       reanimação. A condição é a mão, não o campo.
+    ///       reanimação. A condição é a mão, não o campo. (A segunda razão da
+    ///       regra — a reanimação que ainda está no DECK, que é o que faz a carta
+    ///       sair numa mão de abertura — mora em `--test-enterro`.)
     ///   SHIFTING SHADOWS — não muda um ponto de ATK: apaga o que o outro lado já
     ///       sabia sobre qual carta está em qual zona. Num deck de cartas setadas
     ///       é disso que o duelo vive.
@@ -164,9 +166,16 @@ namespace DuelServer
 
             // PAR CONTROLE: sem o par, enterrar e' pagar uma carta para encher o
             // proprio cemiterio.
+            //
+            // Este `brain` nao recebe `listaDoDeckOf`, entao a SEGUNDA razao da
+            // regra 5.56 — a reanimacao que ainda esta' no DECK — nao tem o que
+            // ler e nao dispara. Nao e' descuido: e' o que prova que decidir pelo
+            // deck e' opcional, e que nada mudou para quem nao o informa. A outra
+            // metade tem controle proprio em `--test-enterro`, com um deck de
+            // verdade e sem reanimacao nenhuma dentro dele.
             Zerar(); minhaMao.Add(FOOLISH); minhaMao.Add(POT);
             var p5 = brain.Decide(Idle(FOOLISH), 1);
-            Check("par CONTROLE: sem reanimacao na mao, GUARDA", !Ativou(p5, FOOLISH),
+            Check("par CONTROLE: sem reanimacao na mao (e sem decklist), GUARDA", !Ativou(p5, FOOLISH),
                   $"(veio {p5.Action} — {p5.Why})");
 
             // ---- embaralhar as viradas ----

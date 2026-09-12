@@ -1107,6 +1107,40 @@ public class DatabaseManager : IDisposable
         return texto;
     }
 
+    /// <summary>
+    /// Os ARQUÉTIPOS de cada carta, já em memória nativa, por código.
+    ///
+    /// Fica em cache pela vida do banco porque o `setcodes` do
+    /// <see cref="OCG_CardData"/> é um PONTEIRO: a DLL o guarda e o lê depois,
+    /// então uma alocação temporária viraria memória liberada sendo lida no meio
+    /// do duelo. Um bloco por carta, uns 10 bytes cada — o banco inteiro não
+    /// chega a 150 KB, e o `Dispose` devolve tudo.
+    /// </summary>
+    readonly Dictionary<uint, IntPtr> _setcodes = new();
+
+    /// <summary>
+    /// O `setcode` do cards.cdb é um inteiro de 64 bits com até QUATRO
+    /// arquétipos de 16 bits empilhados; a DLL espera um vetor de 16 bits
+    /// terminado em zero. Arquétipo 0 não existe — é o "sem arquétipo" —, então
+    /// ele para a leitura em vez de virar uma entrada.
+    /// </summary>
+    IntPtr SetcodesNativos(long setcode)
+    {
+        var lista = new List<ushort>();
+        for (int i = 0; i < 4; i++)
+        {
+            ushort s = (ushort)((setcode >> (i * 16)) & 0xffff);
+            if (s != 0) lista.Add(s);
+        }
+        if (lista.Count == 0) return IntPtr.Zero;
+
+        IntPtr bloco = Marshal.AllocHGlobal((lista.Count + 1) * sizeof(ushort));
+        for (int i = 0; i < lista.Count; i++)
+            Marshal.WriteInt16(bloco, i * sizeof(ushort), unchecked((short)lista[i]));
+        Marshal.WriteInt16(bloco, lista.Count * sizeof(ushort), 0);   // terminador
+        return bloco;
+    }
+
     public void CardReaderCallback(IntPtr payload, uint code, IntPtr dataPtr)
     {
         OCG_CardData cardData = new OCG_CardData();
@@ -1115,8 +1149,22 @@ public class DatabaseManager : IDisposable
 
         if (db != IntPtr.Zero)
         {
-            // A query pega os status basicos que o motor exige (ataque, defesa, nivel, atributo)
-            string query = $"SELECT alias, type, level, attribute, race, atk, def FROM datas WHERE id = {code}";
+            // **O `setcode` entrou na query em 30/08/2026, e a falta dele era um
+            // buraco de tamanho difícil de exagerar**: este campo ficava em
+            // `IntPtr.Zero`, e é dele que sai a resposta de `Card.IsSetCard`.
+            // Sem ele, TODA pergunta de arquétipo do jogo respondia `false` —
+            // silenciosamente, porque um vetor vazio é uma resposta legítima
+            // ("esta carta não pertence a arquétipo nenhum").
+            //
+            // Foi assim que duas cartas ficaram impossíveis de ativar, cada uma
+            // parecendo um defeito próprio: o **Gateway to Chaos**, cuja condição
+            // procura um Ritual do arquétipo "Black Luster Soldier" no deck, e a
+            // **Super Soldier Synthesis**, cujo ritual filtra o monstro pelo
+            // mesmo arquétipo. As duas nunca eram oferecidas, sem erro nenhum em
+            // lugar nenhum. A Black Luster Ritual clássica funcionava ao lado
+            // delas porque casa por CÓDIGO (`AddProcGreaterCode`), não por
+            // arquétipo — e essa diferença é que apontou para cá.
+            string query = $"SELECT alias, type, level, attribute, race, atk, def, setcode FROM datas WHERE id = {code}";
             IntPtr stmt;
 
             if (sqlite3_prepare_v2(db, query, -1, out stmt, IntPtr.Zero) == 0)
@@ -1130,6 +1178,13 @@ public class DatabaseManager : IDisposable
                     cardData.race = (ulong)sqlite3_column_int64(stmt, 4);
                     cardData.attack = sqlite3_column_int(stmt, 5);
                     cardData.defense = sqlite3_column_int(stmt, 6);
+
+                    if (!_setcodes.TryGetValue(code, out var bloco))
+                    {
+                        bloco = SetcodesNativos(sqlite3_column_int64(stmt, 7));
+                        _setcodes[code] = bloco;
+                    }
+                    cardData.setcodes = bloco;
                 }
                 else
                 {
@@ -1158,6 +1213,11 @@ public class DatabaseManager : IDisposable
             sqlite3_close(db);
             db = IntPtr.Zero;
         }
+        // Os arquétipos que foram para a memória nativa (ver `SetcodesNativos`).
+        // A DLL já não os lê depois que o duelo acabou.
+        foreach (var p in _setcodes.Values)
+            if (p != IntPtr.Zero) Marshal.FreeHGlobal(p);
+        _setcodes.Clear();
         GC.SuppressFinalize(this);
     }
 

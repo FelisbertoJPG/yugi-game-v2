@@ -48,9 +48,9 @@ const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => (
  *   • `colunas` — quantas cartas por linha, no máximo. O padrão são 7: com 50
  *     cartas de um [abrir 10] numa fileira que só quebra quando não cabe mais,
  *     elas encolhem até virar selo;
- *   • `aoAmpliar(id, i)` — o que fazer numa carta JÁ aberta (o duelo abre o
- *     detalhe da carta; a Loja não faz nada). Quando não vem, a carta aberta
- *     não responde mais a clique;
+ *   • `aoAmpliar(id, i)` — o que fazer numa carta JÁ aberta. As duas telas
+ *     abrem o detalhe da carta (`carddetail.js`). Quando não vem, a carta
+ *     aberta não responde mais a clique;
  *   • `aoTerminar()` — chamado quando a ÚLTIMA carta abre, e é o que religa os
  *     botões de saída de quem chamou;
  *   • `aoAbrir(i)` — cada abertura, para quem quiser som/log.

@@ -122,6 +122,35 @@ t('sem funcao de aplicar, recusa na hora de criar', () => {
   assert.throws(() => criarFilaDeVisoes(null), /funcao/);
 });
 
+t('drenar espera TUDO que ja entrou na fila', async () => {
+  // Quem precisa disso e' o fim da partida no multiplayer: o aviso de "acabou"
+  // chega logo atras da visao do golpe final, que ainda esta' sendo ANIMADA.
+  // Sem esperar, o quadro de vitoria entraria por cima do ultimo ataque — o
+  // perdedor leria "voce perdeu" sem ver por que.
+  const feitas = [];
+  const fila = criarFilaDeVisoes(async (v) => { await dorme(5); feitas.push(v.id); });
+  fila.enfileirar({ id: 'ataque' });
+  fila.enfileirar({ id: 'dano' });
+  await fila.drenar();
+  assert.deepEqual(feitas, ['ataque', 'dano'], 'drenar voltou antes de a fila assentar');
+  assert.equal(fila.pendentes, 0);
+});
+
+t('drenar numa fila vazia volta na hora', async () => {
+  const fila = criarFilaDeVisoes(async () => {});
+  await fila.drenar();   // se travasse aqui, o fim da partida nunca apareceria
+});
+
+t('uma aplicacao que FALHA nao prende o drenar', async () => {
+  // A corrente ja' engole a rejeicao (a visao seguinte tem de ser aplicada
+  // assim mesmo); o `drenar` anda em cima dela e herda isso — mas so' enquanto
+  // ele devolver a CORRENTE, e nao a promessa de uma aplicacao.
+  const fila = criarFilaDeVisoes(async (v) => { if (v.id === 'ruim') throw new Error('x'); });
+  fila.enfileirar({ id: 'ruim' }).catch(() => {});
+  await fila.drenar();
+  assert.equal(fila.pendentes, 0);
+});
+
 // ---------------------------------------------------------------------------
 
 for (const [nome, fn] of testes) {

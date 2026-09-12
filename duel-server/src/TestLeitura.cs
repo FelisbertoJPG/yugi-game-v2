@@ -506,9 +506,25 @@ namespace DuelServer
 
             var iniciante = ParedeSetada(sa, leitura: false);
             Check("o duelo (iniciante) nao travou em laco fechado", !iniciante.travou);
-            Check("NPC INICIANTE: nao le a carta virada — ataca a parede as cegas",
-                  iniciante.atacou && !iniciante.leuOSetado,
-                  $"(atacou={iniciante.atacou} leu={iniciante.leuOSetado})");
+            // **A afirmacao mudou em 30/08/2026, e a mudanca e' o conserto.**
+            //
+            // Antes daqui dizia "o iniciante ataca a parede AS CEGAS", e era
+            // verdade: para ele a carta virada simplesmente nao existia. O
+            // relato foi o avesso disso — *"ele esta' com medo de bater em
+            // qualquer card meu em defesa"* —, e as duas coisas sao o MESMO
+            // buraco: quem nao ve a carta ora se joga contra ela, ora nao
+            // ataca nunca.
+            //
+            // Hoje ele continua sem LER a carta (o `leuOSetado` segue falso, e
+            // e' isso que separa os dois niveis), mas faz a conta que qualquer
+            // um faz: a Mystical Elf foi SETADA sem tributo, entao e' nivel <= 4,
+            // entao tem no maximo 2400 de DEF — e o Battle Ox de 1700 nao passa.
+            // Recusar aqui e' a decisao CERTA, e ele chega nela sozinho.
+            Check("NPC INICIANTE: nao LE a carta virada (isso e' do avancado)",
+                  !iniciante.leuOSetado, "(leu a carta virada sem ter permissao)");
+            Check("NPC INICIANTE: mesmo assim recusa — 1700 nao passa da aposta de 2000",
+                  !iniciante.atacou,
+                  "(atacou as cegas: o teto por faixa de nivel nao chegou ao cerebro)");
         }
 
         static (bool leuOSetado, bool atacou, bool travou, string motivo) ParedeSetada(

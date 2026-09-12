@@ -105,7 +105,7 @@ function montarTela({ nameOf = (id) => `carta ${id}` } = {}) {
   const fonte = [
     fatia('function renderDrops(drops) {', '  pular.onclick = () => rev.revelarTudo();\n}', 'renderDrops'),
     fatia('function liberarSaidaDoFim(pode) {', "$('end-again').disabled = !pode;\n}", 'liberarSaidaDoFim'),
-    fatia('function mostrarFimDuelo(venci, empate, premio) {', "$('end-overlay').hidden = false;\n}", 'mostrarFimDuelo'),
+    fatia('function mostrarFimDuelo(venci, empate, premio, opcoes = {}) {', "$('end-overlay').hidden = false;\n}", 'mostrarFimDuelo'),
     fatia('function mostrarIconeGanho(icone) {', "caixa.querySelector('.nome').textContent = icone.nome;\n}", 'mostrarIconeGanho'),
   ].join('\n\n');
 
@@ -199,6 +199,44 @@ t('o icone ganho aparece; sem icone, a caixa some', () => {
   const sem = montarTela();
   sem.mostrarFimDuelo(true, false, { dp: 50, drops: [] });
   assert.equal(sem.$('end-icone').hidden, true, 'sem icone a caixa tem de sumir');
+});
+
+// ------------------------------------------------- o fim no MULTIPLAYER
+
+t('no multiplayer a saida e UMA: [novo duelo] some', () => {
+  // O relato: *"ambos devem ser redirecionados pra Home"*. A sala acabou para os
+  // dois, e "novo duelo" ali reabriria uma partida que nao existe mais — o
+  // `start()` tentaria carregar uma `partidas` encerrada e a tela ficaria muda.
+  const { mostrarFimDuelo, $ } = montarTela();
+  mostrarFimDuelo(true, false, null, { soHome: true });
+  assert.equal($('end-again').hidden, true, '[novo duelo] tinha de sumir no online');
+  assert.equal($('end-home').hidden, false, 'a saida para a home e a que fica');
+  assert.equal($('end-home').disabled, false, 'e ela precisa estar clicavel');
+});
+
+t('no treino os DOIS botoes continuam (soHome ausente)', () => {
+  // O par controle: um `hidden` que ficasse ligado tiraria o "novo duelo" do
+  // modo Adversario, que e' onde ele mais serve.
+  const { mostrarFimDuelo, $ } = montarTela();
+  mostrarFimDuelo(true, false, { dp: 100, drops: [] });
+  assert.equal($('end-again').hidden, false, 'no treino [novo duelo] fica');
+});
+
+t('o MOTIVO aparece quando o duelo nao acabou pelo tabuleiro', () => {
+  // Ganhar por desistencia sem uma palavra e' um trofeu que aparece do nada no
+  // meio do seu turno — o jogador nao tem como saber o que aconteceu.
+  const { mostrarFimDuelo, $ } = montarTela();
+  mostrarFimDuelo(true, false, null, { soHome: true, motivo: 'seu adversário desistiu' });
+  assert.match($('end-sub').innerHTML, /seu adversário desistiu/,
+    'a frase do motivo nao chegou ao subtitulo');
+  assert.match($('end-sub').innerHTML, /LP —/, 'e o placar de LP continua embaixo dela');
+});
+
+t('sem motivo, o subtitulo e so o placar (nao sobra <br> solto)', () => {
+  const { mostrarFimDuelo, $ } = montarTela();
+  mostrarFimDuelo(false, false, null);
+  assert.ok($('end-sub').innerHTML.startsWith('LP —'),
+    `o subtitulo comecou com lixo: ${$('end-sub').innerHTML}`);
 });
 
 console.log(`\n  ${pass} passaram, ${fail} falharam`);

@@ -23,6 +23,10 @@ namespace DuelServer
         // Delegates precisam de referência viva enquanto o nativo guarda o ponteiro.
         private readonly OCG_DataReader _cardReader;
         private readonly OCG_ScriptReader _scriptReader;
+        // Guardado em campo pelo mesmo motivo dos dois de cima: o delegate é
+        // passado à DLL como ponteiro, e sem uma referência viva aqui o GC o
+        // coleta no meio do duelo.
+        private readonly OCG_LogHandler _logHandler;
 
         public bool Alive => _duel != IntPtr.Zero;
 
@@ -40,6 +44,21 @@ namespace DuelServer
             _sm = new ScriptManager(streamingAssets);
             _cardReader = _db.CardReaderCallback;
             _scriptReader = _sm.ScriptReaderCallback;
+            // **A ÚNICA voz do motor sobre um efeito quebrado.** Ficava nula, e
+            // por isso um Lua que estoura na condição de ativação sumia sem
+            // deixar rastro: a carta não aparece como ativável e não há erro em
+            // lugar nenhum — nem no log, nem no console, nem na tela. Do lado
+            // de quem joga, "esta carta não funciona" e "esta carta ainda não
+            // pode ser usada" são a MESMA coisa, e não havia como separá-las.
+            //
+            // `Debug.Message` (type 2) é ruído dos próprios scripts e vai como
+            // informação; os outros dois são erro de verdade.
+            _logHandler = (_, texto, tipo) =>
+            {
+                if (string.IsNullOrWhiteSpace(texto)) return;
+                if (tipo == 2) Log.Info($"[lua] {texto}");
+                else Log.Err($"[lua] {texto}");
+            };
 
             // O RNG do edo9300 usa 4 seeds (seed0..3). Setar só a seed0 deixa o
             // embaralhamento quase fixo — derivamos as 4 com splitmix64.
@@ -64,7 +83,7 @@ namespace DuelServer
                 team2 = new OCG_Player { startingLP = 8000, startingDrawCount = 5, drawCountPerTurn = 1 },
                 cardReader = Marshal.GetFunctionPointerForDelegate(_cardReader),
                 scriptReader = Marshal.GetFunctionPointerForDelegate(_scriptReader),
-                logHandler = IntPtr.Zero,
+                logHandler = Marshal.GetFunctionPointerForDelegate(_logHandler),
                 cardReaderDone = IntPtr.Zero,
                 enableUnsafeLibraries = 0
             };

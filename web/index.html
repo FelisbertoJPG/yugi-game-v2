@@ -438,11 +438,15 @@
         <span>Trilha de Duelos</span>
         <span class="why">a campanha em trilha · cada vitória libera o próximo adversário</span>
       </button>
-      <button id="btn-mp">
-        <span class="k">5</span>
-        <span>Multiplayer</span>
-        <span class="why">duele com uma pessoa · amigos, convite e desafio de 1 clique</span>
-      </button>
+      <!-- O MUNDO SAIU DO MENU (08/09/2026). A tela (`mundo3d.html`) continua
+           inteira e continua alcançável pela Área de Teste — o que saiu foi a
+           porta do JOGADOR. O construtor de cenas que nasceu dela virou projeto
+           à parte (`three_js_scene_editor`), e um mundo sem interação nenhuma
+           não se sustenta como opção do menu enquanto isso amadurece.
+
+           O Multiplayer, que ele havia substituído aqui, continua onde estava:
+           quem desafia chega lá pelo cartão do amigo, na lateral, que é de onde
+           o convite parte de qualquer jeito. Ver `desafiar` mais abaixo. -->
     </div>
 
     <footer id="foot">carregando…</footer>
@@ -597,7 +601,6 @@ $('btn-shop').onclick = () => (location.href = '/web/loja.html');
 $('btn-deck').onclick = () => (location.href = '/web/deck.html?owned=1');
 $('btn-inv').onclick = () => (location.href = '/web/inventario.html');
 $('btn-adv').onclick = () => (location.href = '/web/trilha.html');
-$('btn-mp').onclick = () => (location.href = '/web/multiplayer.html');
 $('btn-test').onclick = () => (location.href = '/web/teste.html');
 
 document.addEventListener('keydown', (e) => {
@@ -611,7 +614,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '2') $('btn-deck').click();
   if (e.key === '3') $('btn-inv').click();
   if (e.key === '4') $('btn-adv').click();
-  if (e.key === '5') $('btn-mp').click();
 });
 
 // ------------------------------------------------------------- presença

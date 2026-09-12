@@ -62,6 +62,18 @@ namespace DuelServer
         // ocupadas — a IA usa para achar o Reborn na mão e não afogar as magias
         // com armadilhas setadas. Alimentados pelo MSG_DRAW e pelo MSG_MOVE.
         readonly List<uint>[] _hand = { new(), new() };
+        /// <summary>
+        /// **O que eu VI ir para a mão dele** — buscado do deck, recuperado do
+        /// cemitério ou resgatado das banidas. Pelas regras, uma carta adicionada
+        /// à mão por efeito é mostrada ao adversário, então isto é PÚBLICO: um
+        /// humano do outro lado da mesa lembraria da mesma coisa.
+        ///
+        /// Sai da lista quando a carta deixa a mão — a memória responde "o que
+        /// eu sei que está na mão dele AGORA", e não um histórico. Guardar o que
+        /// já foi jogado faria o NPC apostar num corpo que ele viu entrar em
+        /// campo.
+        /// </summary>
+        readonly List<uint>[] _vistosNaMao = { new(), new() };
         readonly int[] _st = { 0, 0 };
         // Modelo da zona de magia/armadilha, por (jogador, sequência), com a
         // POSIÇÃO. Serve para duas perguntas que o NPC precisa fazer: "o
@@ -74,6 +86,9 @@ namespace DuelServer
         const byte LOCATION_EXTRA = 0x40;
         const byte LOCATION_HAND = 0x2;
         const byte LOCATION_SZONE = 0x8;
+        const byte LOCATION_DECK = 0x1;
+        const byte LOCATION_GRAVE = 0x10;
+        const byte LOCATION_REMOVED = 0x20;
 
         /// <summary>
         /// A carta está OCULTA para <paramref name="espectador"/>? Virada
@@ -419,7 +434,14 @@ namespace DuelServer
                                 // A decklist do PRÓPRIO NPC. Também não depende
                                 // do `npcLeitura`: ninguém precisa de permissão
                                 // para saber o que pôs no próprio deck.
-                                ListaDoDeck);
+                                ListaDoDeck,
+                                // O que QUALQUER UM sabe sobre uma carta virada:
+                                // que ela está ali, e quantos tributos ela custou.
+                                // Ver `ViradosDele`.
+                                ViradosDele,
+                                // E o que ele viu ir para a mão dele — a memória
+                                // com que se aposta em qual carta foi setada.
+                                VistosNaMaoDele);
             Log.Info($"[npc] nivel: {(npcLeitura ? "AVANCADO (le a mao e as cartas baixadas)" : "iniciante (so' o que esta com a face para cima)")}");
             // `DuelSession` já colocou a carta no motor (antes de OCG_StartDuel),
             // mas isso não gera MSG_MOVE — o front só sabe de campo por evento.
@@ -454,6 +476,20 @@ namespace DuelServer
         public IReadOnlyList<uint> MaoDoNpc() =>
             _npcEnabled && !_doisHumanos ? _hand[1 - HUMAN] : null;
 
+        /// <summary>
+        /// A mão do JOGADOR — para as suítes, e só.
+        ///
+        /// Ela não vai para lugar nenhum pela rede (a do jogador já está na tela
+        /// dele; o que precisava de guarda é a do NPC, e essa é a `MaoDoNpc`).
+        /// Existe porque um teste que monta uma situação de mão precisa PROVAR
+        /// que a montou: sem isto, um embaralhamento que não deu a carta certa é
+        /// indistinguível de um motor que não oferece a jogada — e as duas
+        /// coisas se parecem exatamente com "a carta não funciona". Foi assim
+        /// que a primeira versão de `--test-synthesis` acusou um bug que era
+        /// dela mesma.
+        /// </summary>
+        internal IReadOnlyList<uint> MaoDoJogador() => _hand[HUMAN];
+
         // ---- visão HONESTA (NPC iniciante) ----
         //
         // O recorte é sempre o mesmo: do lado do JOGADOR, só o que ele mesmo
@@ -470,6 +506,43 @@ namespace DuelServer
             player != HUMAN
                 ? AllMonstersPos(player)
                 : AllMonstersPos(player).Where(m => (m.pos & POS_FACEUP) != 0).ToList();
+
+        /// <summary>
+        /// **Os monstros VIRADOS de um lado, e o que qualquer um sabe deles.**
+        ///
+        /// Uma carta com a face para baixo esconde QUAL carta ela é — não que
+        /// ela existe, e não o que ela custou para entrar. Quem está na mesa viu
+        /// o outro setar; viu se ele tributou, e quantos. E isso LIMITA o nível:
+        ///
+        ///   sem tributo   → nível ≤ 4
+        ///   1 tributo     → nível 5 ou 6
+        ///   2 tributos    → nível ≥ 7
+        ///
+        /// O nível vem do nível REAL da carta, e isso não é leitura escondida —
+        /// é o caminho curto para o mesmo fato: um monstro de nível 4 foi posto
+        /// sem tributo, necessariamente. O que sai daqui é só a FAIXA, nunca a
+        /// carta: `código` não viaja, e quem recebe não tem como voltar dela
+        /// para o monstro. Rastrear os tributos pelos eventos daria o mesmo
+        /// número por um caminho mais longo e com mais chance de errar.
+        ///
+        /// É por isso que vale para os DOIS níveis de NPC: o iniciante também
+        /// tem direito a esta conta, porque ela é pública.
+        /// </summary>
+        /// <summary>
+        /// As cartas que eu VI irem para a mão dele (`_vistosNaMao`), para o
+        /// cérebro apostar em qual foi setada. Público — ver o campo.
+        /// </summary>
+        IReadOnlyList<uint> VistosNaMaoDele(int player) =>
+            player >= 0 && player <= 1 ? _vistosNaMao[player] : (IReadOnlyList<uint>)Array.Empty<uint>();
+
+        IReadOnlyList<(int seq, int nivelMax)> ViradosDele(int player) =>
+            AllMonstersPos(player)
+                .Where(m => (m.pos & POS_FACEUP) == 0)
+                .Select(m => (m.seq, nivelMax: FaixaDeNivel(_s.Cards.Stats(m.code).Level)))
+                .ToList();
+
+        /// <summary>O teto de nível que os tributos pagos denunciam.</summary>
+        static int FaixaDeNivel(int nivel) => nivel <= 4 ? 4 : nivel <= 6 ? 6 : 12;
 
         /// <summary>Magias/armadilhas viradas: as do jogador somem (ele só sabe
         /// que existe alguma coisa ali, o que `SetStCountOf` já conta).</summary>
@@ -1238,6 +1311,25 @@ namespace DuelServer
                     // Mão e zonas de magia/armadilha do NPC (código real).
                     if (pl == LOCATION_HAND && pc <= 1) _hand[pc].Remove(code);
                     if (cl == LOCATION_HAND && cc <= 1) _hand[cc].Add(code);
+
+                    // **A MEMÓRIA DO QUE FOI MOSTRADO.** Carta que vai para a mão
+                    // vinda do DECK, do CEMITÉRIO ou das BANIDAS foi BUSCADA,
+                    // RECUPERADA ou RESGATADA — e pelas regras do jogo isso é
+                    // mostrado ao adversário. Comprar não conta (a compra é
+                    // secreta, e ela nem passa por aqui: é MSG_DRAW).
+                    //
+                    // Isto NÃO é leitura escondida, e é a diferença que importa:
+                    // um humano do outro lado da mesa também viu, e é com isso
+                    // que ele aposta em qual carta o outro acabou de setar.
+                    if (cl == LOCATION_HAND && cc <= 1
+                        && (pl == LOCATION_DECK || pl == LOCATION_GRAVE || pl == LOCATION_REMOVED))
+                    {
+                        _vistosNaMao[cc].Add(code);
+                    }
+                    // Saiu da mão: some da memória. Ela responde "o que eu SEI
+                    // que está na mão dele AGORA" — guardar o que já foi jogado
+                    // faria o NPC apostar num corpo que ele viu ir para o campo.
+                    if (pl == LOCATION_HAND && pc <= 1) _vistosNaMao[pc].Remove(code);
                     if (pl == LOCATION_SZONE && pc <= 1 && _st[pc] > 0) _st[pc]--;
                     if (cl == LOCATION_SZONE && cc <= 1) _st[cc]++;
                     if (pl == LOCATION_SZONE && pc <= 1) _stBoard.Remove((pc, ps));

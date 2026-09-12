@@ -289,6 +289,21 @@ New-Item -ItemType Directory -Path $saida -Force | Out-Null
 Passo 1 "montando o pacote 'game' (front + indices)"
 $g = Join-Path $stage 'game'
 Copiar (Join-Path $root 'web')          (Join-Path $g 'web')
+
+# Os .md de dentro de `web/` sao documentacao NOSSA - `web/CLAUDE.md` (146 KB),
+# `web/vendor/README.md`, `web/modelos/README.md`. Nenhum e' lido em tempo de
+# execucao (as mencoes em `web/js/*.js` sao comentario, nao `fetch`), entao no
+# jogo instalado eles sao ~55 KB comprimidos que todo mundo baixa a cada
+# atualizacao para nunca abrir. Sai daqui e nao da raiz do repositorio: e' no
+# ESTAGIO que se decide o que viaja, e o `web/CLAUDE.md` precisa continuar em
+# `web/` para o Claude Code carrega-lo sozinho ao mexer na pasta.
+$docsFora = @(Get-ChildItem (Join-Path $g 'web') -Recurse -Filter *.md -File)
+if ($docsFora) {
+  $kb = [math]::Round((($docsFora | Measure-Object Length -Sum).Sum / 1KB), 1)
+  $docsFora | Remove-Item -Force
+  Ok "$($docsFora.Count) .md fora do pacote 'game' ($kb KB crus)"
+}
+
 Copiar (Join-Path $root 'ygo-data\src') (Join-Path $g 'ygo-data\src')
 
 # `boards/*.json` NUNCA viajou - nem no Release nem na semente do pack - e por

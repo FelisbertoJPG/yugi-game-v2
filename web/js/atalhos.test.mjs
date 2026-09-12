@@ -101,12 +101,60 @@ function declaracoes(c) {
   for (const m of c.matchAll(/\bfor\s*(?:await\s*)?\(\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
   for (const m of c.matchAll(/(?:const|let|var)\s*{([^{}]*)}/g)) lista(m[1]);
   for (const m of c.matchAll(/(?:const|let|var)\s*\[([^[\]]*)\]/g)) lista(m[1]);
-  for (const m of c.matchAll(/\(([^()]*)\)\s*=>/g)) lista(m[1]);
-  for (const m of c.matchAll(/\bfunction\s*\*?\s*[A-Za-z_$][\w$]*\s*\(([^()]*)\)/g)) lista(m[1]);
-  for (const m of c.matchAll(/\b(?:async\s+)?function\s*\(([^()]*)\)/g)) lista(m[1]);
-  for (const m of c.matchAll(/[A-Za-z_$][\w$]*\s*\(([^()]*)\)\s*{/g)) lista(m[1]);
-  for (const m of c.matchAll(/\(\s*{([^{}]*)}\s*(?:=\s*{[^{}]*}\s*)?\)\s*(?:=>|{)/g)) lista(m[1]);
+
+  // **Toda lista de parâmetro, inclusive as que têm valor padrão aninhado.**
+  //
+  // Este era um FURO, e um furo grande: até 31/08/2026 as listas de parâmetro
+  // eram casadas com `[^()]*` e `[^{}]*`, isto é, "sem parêntese nem chave
+  // dentro". Só que um padrão de parâmetro quase sempre tem os dois —
+  // `function f(conf, aoEstado = () => {})` é a forma corrente neste projeto
+  // (está em `realtime.js`, `presenca.js`, `mundovivo.js`, `revelacao.js`) —,
+  // e para essas funções a varredura não enxergava parâmetro NENHUM. O
+  // resultado eram as duas caras do mesmo furo: um atalho legítimo dentro
+  // delas era acusado à toa (e varredura que grita à toa deixa de ser lida),
+  // e um atalho ÓRFÃO de verdade ali dentro passaria batido se o nome
+  // aparecesse por acaso noutro lugar do arquivo.
+  //
+  // Casar aninhamento com expressão regular não dá — por isso os grupos são
+  // varridos com uma PILHA, e a lista de parâmetro é o grupo `(…)` seguido de
+  // `=>` ou de `{`. Sobra-colher é o lado seguro: um `if (cond) {` entra e
+  // acrescenta `cond` ao conjunto, que é exatamente o que a varredura já
+  // fazia de propósito — ela é escopo-cega, e a pergunta é "este nome existe
+  // em algum lugar?".
+  for (const g of balanceados(c, 0x28, 0x29)) {
+    if (/^\s*(=>|{)/.test(c.slice(g.fim + 1, g.fim + 4))) lista(g.dentro);
+  }
+  // O mesmo para o destructuring com padrão aninhado:
+  // `const { a = () => {}, b } = ganchos`.
+  for (const g of balanceados(c, 0x7b, 0x7d)) {
+    if (/(?:const|let|var)\s*$/.test(c.slice(Math.max(0, g.ini - 12), g.ini))) lista(g.dentro);
+  }
   return d;
+}
+
+/**
+ * Todo par `(…)` ou `{…}` BALANCEADO do texto, numa passada só, com pilha.
+ *
+ * Devolve o conteúdo e as duas pontas, porque quem chama decide pelo que vem
+ * ANTES ou DEPOIS do grupo se aquilo é uma lista de parâmetro, um
+ * destructuring ou coisa nenhuma.
+ *
+ * Um parêntese solto dentro de uma expressão regular (`/\\(/`) desemparelha a
+ * pilha e produz grupo torto — `limpar()` tira comentário e string, não
+ * regex. Isso só faz COLHER nome a mais, nunca a menos, e nome a mais é a
+ * direção segura: a varredura fica um pouco mais surda, jamais mentirosa.
+ */
+function balanceados(c, abre, fecha) {
+  const saida = [], pilha = [];
+  for (let i = 0; i < c.length; i++) {
+    const ch = c.charCodeAt(i);
+    if (ch === abre) pilha.push(i);
+    else if (ch === fecha && pilha.length) {
+      const ini = pilha.pop();
+      saida.push({ ini, fim: i, dentro: c.slice(ini + 1, i) });
+    }
+  }
+  return saida;
 }
 
 /** Os atalhos de um trecho de código que não casam com declaração nenhuma. */
@@ -183,6 +231,45 @@ t('e NAO acusa o atalho legitimo (o nome existe no arquivo)', () => {
       colunas,
     };`;
   assert.deepEqual(atalhosOrfaos(bom), []);
+});
+
+/**
+ * O par CONTROLE do conserto acima. Sem ele, um `declaracoes` que colhesse
+ * TUDO passaria em todas as outras asserções e a varredura deixaria de
+ * acusar qualquer coisa — em silêncio, que é o defeito que ela existe para
+ * não ter.
+ */
+t('a varredura ENXERGA dentro de funcao com valor padrao aninhado', () => {
+  // A forma corrente do projeto: um parâmetro com arrow de valor padrão.
+  // Antes de 31/08/2026, nada aqui dentro era enxergado.
+  const bom = `
+    export function ouvir(conf, aoMudar, aoEstado = () => {}) {
+      return abrir(conf, {
+        aoMudar,
+        aoEstado,
+      });
+    }`;
+  assert.deepEqual(atalhosOrfaos(bom), [], 'acusou parametro legitimo a toa');
+
+  // E o CASO RUIM na mesma forma: `aoEstado` existe, `aoEstadoo` não.
+  const ruim = `
+    export function ouvir(conf, aoMudar, aoEstado = () => {}) {
+      return abrir(conf, {
+        aoEstadoo,
+      });
+    }`;
+  const achados = atalhosOrfaos(ruim);
+  assert.equal(achados.length, 1, 'deixou de acusar o orfao dentro dessas funcoes');
+  assert.equal(achados[0].nome, 'aoEstadoo');
+
+  // O mesmo para o destructuring com padrão aninhado.
+  const ganchos = `
+    const { aoEntrar = () => {}, aoSair = () => {} } = ganchos;
+    const g = {
+      aoEntrar,
+      aoSair,
+    };`;
+  assert.deepEqual(atalhosOrfaos(ganchos), []);
 });
 
 t('destructuring e parametro contam como declaracao', () => {

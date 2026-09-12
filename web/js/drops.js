@@ -69,6 +69,88 @@ export function chanceDoIcone(bruto) {
 export const poolVazio = () => ({ UR: [], SR: [], R: [], N: [] });
 
 /**
+ * **O BÔNUS DE PRIMEIRA VITÓRIA** — o prêmio que só sai uma vez.
+ *
+ * O pool de cima é a economia contínua: sorteio, repetição, e é ela que faz
+ * valer a pena duelar de novo. Este aqui é o contrário — é **fixo, garantido e
+ * uma vez só**, e existe para dar ao primeiro "eu venci este deck" um peso que
+ * um sorteio nunca vai ter.
+ *
+ *     bonus: {
+ *       cartas: [ { id: 25833572, qtd: 2 }, … ],
+ *       itens:  [ { tipo: 'icone', id: 'guardiao' },
+ *                 { tipo: 'estrutural', id: 'labirinto' } ]
+ *     }
+ *
+ * **`cartas` tem QUANTIDADE por carta, e não uma contagem de sorteios**: nada
+ * é sorteado aqui, então a lista já diz exatamente o que entra na Coleção. É a
+ * diferença que separa este quadro do pool das gavetas, e é por isso que ele
+ * não reaproveita a estrutura por raridade — raridade ali existe para pesar o
+ * sorteio, e sorteio não há.
+ *
+ * **`itens` é uma lista de PARES `{tipo, id}`, aberta de propósito.** Hoje o
+ * editor oferece dois tipos; o dia em que houver um terceiro (uma moldura, um
+ * título, um baú) é um `case` a mais no servidor e uma opção a mais no select,
+ * sem migration nenhuma — o formato já cabe. Um tipo que o servidor não conhece
+ * é IGNORADO em silêncio, e isso é de propósito: um cliente novo configurando
+ * um tipo que o banco antigo não entende não pode derrubar a premiação inteira.
+ */
+export const TIPOS_DE_ITEM = ['icone', 'estrutural'];
+
+/** Teto de cópias por carta do bônus — o mesmo 3 das regras de construção:
+ *  dar 4 cópias de algo que nenhum deck pode usar não é prêmio, é lixo. */
+export const MAX_COPIAS_BONUS = 3;
+
+/** Bônus vazio — a forma que o editor abre quando ninguém configurou nada. */
+export const bonusVazio = () => ({ cartas: [], itens: [] });
+
+/**
+ * Põe o bônus em forma. Mesma tolerância do resto deste arquivo: ele é editado
+ * por gente, e um id repetido ou um texto no lugar do número não pode derrubar
+ * a tela de recompensa de ninguém.
+ *
+ * Devolve `null` quando não sobrou nada — o mesmo que não ter bônus, e é o que
+ * mantém a chave fora do JSON publicado em vez de gravar um objeto vazio em
+ * cada deck do jogo.
+ */
+export function normalizarBonus(bruto) {
+  if (typeof bruto !== 'object' || bruto == null) return null;
+
+  const cartas = [];
+  const vistas = new Set();
+  for (const c of Array.isArray(bruto.cartas) ? bruto.cartas : []) {
+    // Aceita `{id, qtd}` e o id solto — este último é o que um editor mais
+    // antigo (ou uma mão) escreveria, e vale 1 cópia.
+    const id = Number(typeof c === 'object' && c != null ? c.id : c);
+    if (!Number.isInteger(id) || id <= 0 || vistas.has(id)) continue;
+    let qtd = Number(typeof c === 'object' && c != null ? c.qtd : 1);
+    if (!Number.isFinite(qtd)) qtd = 1;
+    qtd = Math.max(1, Math.min(MAX_COPIAS_BONUS, Math.trunc(qtd)));
+    vistas.add(id);
+    cartas.push({ id, qtd });
+  }
+
+  const itens = [];
+  const vistos = new Set();
+  for (const it of Array.isArray(bruto.itens) ? bruto.itens : []) {
+    if (typeof it !== 'object' || it == null) continue;
+    const tipo = String(it.tipo ?? '').trim();
+    if (!TIPOS_DE_ITEM.includes(tipo)) continue;
+    // O id de um ícone e o de um estrutural têm o MESMO formato de slug (é o
+    // `check` das duas colunas no banco), então uma regra só serve às duas.
+    if (typeof it.id !== 'string') continue;
+    const id = it.id.trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(id)) continue;
+    const chave = `${tipo}:${id}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    itens.push({ tipo, id });
+  }
+
+  return cartas.length || itens.length ? { cartas, itens } : null;
+}
+
+/**
  * Põe uma configuração em forma. Aceita lixo de propósito: este arquivo é
  * editado por gente, e um id repetido ou um texto no lugar do número não pode
  * derrubar a tela de recompensa de ninguém.
@@ -122,16 +204,21 @@ function normalizarUm(cfg) {
   }
   const chance = chanceDoIcone(cfg.chanceIcone);
 
-  // Sem carta E sem ícone não há prêmio nenhum: some da configuração, como já
-  // acontecia com o pool vazio.
+  const bonus = normalizarBonus(cfg.bonus);
+
+  // Sem carta, sem ícone E sem bônus não há prêmio nenhum: some da
+  // configuração, como já acontecia com o pool vazio. O bônus entra nesta conta
+  // porque um deck que SÓ dá bônus de primeira vitória é configuração legítima
+  // — sem isto ele seria descartado inteiro na gravação seguinte.
   const semCarta = !vistos.size || qtd <= 0;
   const semIcone = !icones.length || chance <= 0;
-  if (semCarta && semIcone) return null;
+  if (semCarta && semIcone && !bonus) return null;
 
   return {
     quantidade: semCarta ? 0 : qtd,
     pool,
     ...(semIcone ? {} : { icones, chanceIcone: chance }),
+    ...(bonus ? { bonus } : {}),
   };
 }
 

@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classic Duels — Criar item</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  .wrap { width: min(1000px, 94vw); margin: 0 auto; padding: 18px 0 60px; }
+
+  .topo { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+          border-bottom: 2px solid var(--line); padding-bottom: 14px; margin-bottom: 18px; }
+  .topo h1 { margin: 0; font-size: 22px; letter-spacing: 4px; color: var(--gold); }
+  .topo .sub { font-size: 10px; color: var(--dim); line-height: 1.6; flex: 1; min-width: 240px; }
+
+  .grade { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 820px) { .grade { grid-template-columns: 1fr; } }
+
+  .painel { background: var(--panel); border: 2px solid var(--line); padding: 16px; }
+  .painel h2 { margin: 0 0 4px; font-size: 12px; letter-spacing: 2px; color: var(--gold); }
+  .painel .ajuda { font-size: 10px; color: var(--dim); margin: 0 0 12px; line-height: 1.6; }
+
+  .campo { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+           font-size: 11px; color: var(--dim); }
+  .campo label { width: 74px; flex: none; }
+  .campo input, .campo select { flex: 1; min-width: 0; }
+  .campo.check { justify-content: flex-start; }
+  .campo.check input { flex: none; width: auto; }
+
+  /* A PRÉVIA não é redonda: sleeve, playmat e deckbox são imagens que se olham
+     inteiras. O quadro tem proporção livre e a imagem cabe DENTRO dele
+     (`contain`) — cortar por conta própria esconderia justamente o que o admin
+     está tentando ver. */
+  .previa {
+    display: flex; align-items: center; justify-content: center;
+    height: 190px; margin-bottom: 10px;
+    background: var(--panel2); border: 1px dashed var(--line);
+  }
+  .previa img { max-width: 100%; max-height: 100%; display: block; }
+  .previa .vazio { font-size: 10px; color: var(--dim); }
+
+  .acoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .aviso { font-size: 10px; color: var(--dim); margin-top: 10px; line-height: 1.6; }
+  .aviso b { color: var(--ink); }
+
+  /* O ramo do ÍCONE. Ele não tem formulário aqui: o editor de ícones já existe
+     e grava certo há tempo, então a tela DELEGA em vez de ter uma segunda
+     cópia — duas telas que gravam a mesma coisa divergem na primeira mudança.
+     `hidden` sozinho basta porque nada nesta folha dá `display` a estes ids;
+     ver `web/js/esconder.test.mjs`. */
+  #ramo-icone { text-align: center; padding: 20px 10px; }
+  #ramo-icone p { font-size: 11px; color: var(--dim); line-height: 1.7; margin: 0 0 14px; }
+
+  .lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .item {
+    background: var(--panel2); border: 1px solid var(--line); padding: 8px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .item .arte {
+    height: 92px; display: flex; align-items: center; justify-content: center;
+    background: var(--bg2); border: 1px solid var(--line);
+  }
+  .item .arte img { max-width: 100%; max-height: 100%; display: block; }
+  .item .arte .sem { font-size: 9px; color: var(--red); }
+  .item .nome { font-size: 11px; color: var(--ink); }
+  .item .meta { font-size: 9px; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+  .item .linha { display: flex; gap: 6px; }
+  .item button { font-size: 10px; padding: 2px 7px; }
+  .vazia { font-size: 11px; color: var(--dim); padding: 20px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topo">
+    <h1>CRIAR ITEM</h1>
+    <div class="sub">
+      Cosméticos do jogo. O <b>ícone de perfil</b> tem editor próprio (o recorte
+      é redondo e a posse é decidida no servidor) — escolher esse tipo leva
+      para lá. Os demais são cadastrados aqui e, por enquanto, servem para a
+      Loja e para o <b>bônus de primeira vitória</b> dos adversários.
+    </div>
+    <button id="btn-voltar">← Área de Teste</button>
+  </div>
+
+  <div class="grade">
+    <div class="painel">
+      <h2>NOVO ITEM</h2>
+      <p class="ajuda">O tipo é a primeira escolha: ele decide o resto da tela.</p>
+
+      <div class="campo">
+        <label for="tipo">tipo</label>
+        <select id="tipo"></select>
+      </div>
+
+      <!-- ÍCONE: delega. -->
+      <div id="ramo-icone" hidden>
+        <p>
+          O ícone de perfil é criado no editor dele, que já existe: lá o recorte
+          é circular e a gravação vai para o catálogo de ícones, que é de onde a
+          tela de perfil e o sorteio de prêmio leem.
+        </p>
+        <button id="btn-icones" class="btn-primary">abrir o editor de ícones</button>
+      </div>
+
+      <!-- OS DEMAIS -->
+      <div id="ramo-item">
+        <div class="previa" id="previa">
+          <span class="vazio">sem imagem</span>
+        </div>
+
+        <div class="campo">
+          <label for="arquivo">imagem</label>
+          <input type="file" id="arquivo" accept="image/*">
+        </div>
+        <div class="campo">
+          <label for="nome">nome</label>
+          <input type="text" id="nome" placeholder="Playmat do Labirinto" autocomplete="off">
+        </div>
+        <div class="campo">
+          <label for="id">id</label>
+          <input type="text" id="id" placeholder="(sai do nome)" autocomplete="off">
+        </div>
+        <div class="campo">
+          <label for="preco">valor</label>
+          <input type="number" id="preco" min="0" step="10" value="0"> <span>DP</span>
+        </div>
+        <div class="campo">
+          <label for="ordem">ordem</label>
+          <input type="number" id="ordem" step="1" value="0">
+        </div>
+        <div class="campo check">
+          <input type="checkbox" id="na_loja">
+          <label for="na_loja" style="width:auto">pôr na Loja</label>
+        </div>
+
+        <div class="acoes">
+          <button id="btn-salvar" class="btn-primary">salvar</button>
+          <button id="btn-limpar">limpar</button>
+        </div>
+
+        <p class="aviso" id="aviso">
+          A imagem é reduzida antes de subir e viaja <b>dentro do banco</b>, como
+          a do ícone: assim ela funciona no jogo empacotado sem publicar Release.
+          Teto de <b>512 KB</b>.
+        </p>
+      </div>
+    </div>
+
+    <div class="painel">
+      <h2>CADASTRADOS</h2>
+      <p class="ajuda">Clique em <b>editar</b> para carregar no formulário ao lado.</p>
+      <div id="lista" class="lista"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/web/js/bootguard.js"></script>
+<script type="module">
+import { requireAdmin } from '/web/js/auth.js';
+import { downscaleDataUrl } from '/web/js/customcards.js';
+import {
+  catalogo, salvarItem, apagarItem, slug,
+  OPCOES_DE_TIPO, ROTULO_DO_TIPO, ehIcone,
+} from '/web/js/itens.js';
+
+await requireAdmin();
+
+const $ = (id) => document.getElementById(id);
+let imagemNova = null;      // só existe quando o admin escolheu um arquivo agora
+let editando = null;        // id em edição, ou null
+
+/** O mesmo aviso da tela de ícones: uma linha de texto no painel, e não um
+ *  `alert` — quem cadastra em série não quer clicar em OK a cada salvamento. */
+const avisar = (t, classe = '') => {
+  $('aviso').className = `aviso ${classe}`;
+  $('aviso').textContent = t ?? '';
+};
+
+// ---------------------------------------------------------------- o tipo
+$('tipo').replaceChildren(...OPCOES_DE_TIPO.map((t) =>
+  Object.assign(document.createElement('option'), { value: t, textContent: ROTULO_DO_TIPO[t] })));
+
+function pintarTipo() {
+  const icone = ehIcone($('tipo').value);
+  $('ramo-icone').hidden = !icone;
+  $('ramo-item').hidden = icone;
+}
+$('tipo').onchange = pintarTipo;
+pintarTipo();
+
+$('btn-icones').onclick = () => (location.href = '/web/icones.html');
+$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+
+// -------------------------------------------------------------- a imagem
+$('arquivo').onchange = async () => {
+  const f = $('arquivo').files?.[0];
+  if (!f) return;
+  const lido = await new Promise((r) => {
+    const fr = new FileReader();
+    fr.onload = () => r(String(fr.result || ''));
+    fr.onerror = () => r('');
+    fr.readAsDataURL(f);
+  });
+  if (!lido.startsWith('data:image/')) return void avisar('isso não é uma imagem');
+  // Reduz mantendo a proporção: item não é círculo, e cortar por conta própria
+  // esconderia justamente o que o admin quer ver. 512px é o suficiente para
+  // uma sleeve/playmat na tela e cabe folgado no teto da coluna.
+  imagemNova = await downscaleDataUrl(lido, { maxW: 512 });
+  pintarPrevia(imagemNova);
+};
+
+function pintarPrevia(src) {
+  const box = $('previa');
+  if (!src) {
+    box.replaceChildren(Object.assign(document.createElement('span'),
+                                      { className: 'vazio', textContent: 'sem imagem' }));
+    return;
+  }
+  const img = document.createElement('img');
+  img.src = src; img.alt = '';
+  box.replaceChildren(img);
+}
+
+$('nome').oninput = () => {
+  if (!editando && !$('id').value.trim()) $('id').placeholder = slug($('nome').value) || '(sai do nome)';
+};
+
+// --------------------------------------------------------------- gravar
+$('btn-salvar').onclick = async () => {
+  const r = await salvarItem({
+    id: $('id').value.trim() || slug($('nome').value),
+    tipo: $('tipo').value,
+    nome: $('nome').value,
+    preco: $('preco').value,
+    ordem: $('ordem').value,
+    na_loja: $('na_loja').checked,
+    imagem: imagemNova,
+  });
+  if (!r.ok) return void avisar(r.erro);
+  avisar('item salvo');
+  imagemNova = null;          // a próxima gravação não reenvia a mesma arte
+  await pintarLista();
+};
+
+$('btn-limpar').onclick = () => {
+  editando = null; imagemNova = null;
+  for (const id of ['nome', 'id']) $(id).value = '';
+  $('preco').value = '0'; $('ordem').value = '0'; $('na_loja').checked = false;
+  $('arquivo').value = '';
+  pintarPrevia(null);
+};
+
+// --------------------------------------------------------------- a lista
+async function pintarLista() {
+  const itens = await catalogo();
+  const box = $('lista');
+  if (!itens.length) {
+    box.replaceChildren(Object.assign(document.createElement('div'),
+      { className: 'vazia', textContent: 'nenhum item cadastrado ainda.' }));
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const it of itens) {
+    const el = document.createElement('div');
+    el.className = 'item';
+
+    const arte = document.createElement('div');
+    arte.className = 'arte';
+    if (it.imagem) {
+      const img = document.createElement('img'); img.src = it.imagem; img.alt = '';
+      arte.append(img);
+    } else {
+      // Item sem arte é o mesmo estrago do ícone sem arte: a Loja desenha um
+      // buraco. Dizer isso aqui é mais barato que descobrir depois.
+      arte.append(Object.assign(document.createElement('span'),
+                                { className: 'sem', textContent: 'SEM IMAGEM' }));
+    }
+    el.append(arte);
+
+    el.append(Object.assign(document.createElement('div'),
+                            { className: 'nome', textContent: it.nome }));
+    el.append(Object.assign(document.createElement('div'), {
+      className: 'meta',
+      textContent: `${ROTULO_DO_TIPO[it.tipo] ?? it.tipo} · ${it.preco} DP`
+                 + (it.na_loja ? ' · na loja' : ''),
+    }));
+
+    const linha = document.createElement('div');
+    linha.className = 'linha';
+
+    const ed = document.createElement('button');
+    ed.textContent = 'editar';
+    ed.onclick = () => {
+      editando = it.id; imagemNova = null;
+      $('tipo').value = it.tipo; pintarTipo();
+      $('nome').value = it.nome; $('id').value = it.id;
+      $('preco').value = String(it.preco); $('ordem').value = String(it.ordem);
+      $('na_loja').checked = !!it.na_loja;
+      $('arquivo').value = '';
+      pintarPrevia(it.imagem || null);
+    };
+
+    const ap = document.createElement('button');
+    ap.className = 'btn-danger';
+    ap.textContent = 'apagar';
+    ap.onclick = async () => {
+      if (!confirm(`Apagar "${it.nome}"?`)) return;
+      const r = await apagarItem(it.id);
+      if (!r.ok) return void avisar(r.erro || 'não consegui apagar');
+      avisar('item apagado');
+      await pintarLista();
+    };
+
+    linha.append(ed, ap);
+    el.append(linha);
+    frag.append(el);
+  }
+  box.replaceChildren(frag);
+}
+
+await pintarLista();
+</script>
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
+</body>
+</html>

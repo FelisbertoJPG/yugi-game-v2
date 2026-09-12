@@ -49,5 +49,17 @@
 }
 .carta .nm { font-size: 9px; color: var(--dim); margin-top: 2px; line-height: 1.2; }
 
+/* Com o "segurar para ler" ligado (a Loja liga; a Trilha ainda não — ver
+   `gavetas.js`), a miniatura vira alvo de gesto, e o cursor é o único aviso
+   disso antes do jogador descobrir por acidente.
+
+   O anel de progresso do "segurar" é o `.holding` de `interact.js`, que se
+   injeta sozinho e desenha um `::after` com `inset: 0` — ele depende do
+   `position: relative` que a `.carta` já tem por causa do ✔ e do ×N. */
+.carta.lupa { cursor: zoom-in; }
+/* O anel envolve a célula inteira, nome incluído: é a célula que se segura, e
+   ela é o alvo do gesto. Só a arte exigiria um invólucro novo em volta da
+   `<img>` — um `::after` não desenha em elemento substituído. */
+
 /* Sem nenhuma carta: dizer isso é melhor que uma caixa vazia. */
 .gav-box .nada { font-size: 12px; color: var(--dim); font-style: italic; padding: 10px 0; }

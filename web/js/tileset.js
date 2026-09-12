@@ -47,7 +47,10 @@ function novoCanvas(w, h) {
 
 // ---------------------------------------------------------------- chão
 
-const CHAO = {
+// Exportado porque o mundo 3D (`floresta3d.js`) pinta com as MESMAS cores.
+// Duas paletas escritas em dois arquivos divergem na primeira mexida, e o
+// sintoma seria os dois mundos parecerem jogos diferentes.
+export const CHAO = {
   grama:  { base: '#33513a', alt: '#3b5f43', escuro: '#2a4430', detalhe: '#48734f' },
   terra:  { base: '#6b563e', alt: '#77634a', escuro: '#5a4632', detalhe: '#8a7458' },
   pedra:  { base: '#464e63', alt: '#515a72', escuro: '#394153', detalhe: '#5d6784' },

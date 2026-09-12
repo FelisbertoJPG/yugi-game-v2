@@ -34,11 +34,22 @@
   .sec-head .spacer { flex: 1; }
 
   .deck-scroll { flex: 1; overflow-y: auto; padding: 8px 12px 16px; }
+  /* A miniatura do DECK era 52px, e numa coluna larga isso dava catorze cartas
+     por linha — a arte ficava pequena demais para se reconhecer a carta sem ler
+     o nome. São 50% a mais (52 → 78), e o número não é redondo por acaso: ele
+     encosta nos 76px do `.pool-grid`, que é onde os selos (raridade, banlist,
+     ×N) foram desenhados e conferidos. Deck e pool passam a ter a MESMA escala,
+     que é o que faz a carta arrastada de um lado para o outro parecer a mesma
+     carta.
+
+     O preço, dito em voz alta: um deck de 40 ocupa mais altura e rola mais. Foi
+     a troca pedida — reconhecer a carta de relance vale mais que ver as 40 de
+     uma vez, ainda mais com o `[organizar deck]` pondo cada família junta. */
   .deck-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
     gap: 4px;
   }
-  .deck-grid.extra { grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); }
+  .deck-grid.extra { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
   .zone-empty {
     color: var(--dim); font-size: 11px; padding: 14px 4px; font-style: italic;
   }
@@ -156,6 +167,35 @@
   .icone-op { padding: 5px; background: var(--panel2); border: 1px solid var(--line);
               display: flex; flex-direction: column; align-items: center; gap: 3px; }
   .icone-op:hover { border-color: var(--gold); }
+
+  /* ---------- bônus de primeira vitória ----------
+     A carta daqui mostra a QUANTIDADE num controle, e não num contador: no
+     pool o `×N` diz quantas cópias existem, aqui ele é o que se está
+     escolhendo. Por isso é um `<input>` e não um `<span>`. */
+  .bonus-qtd {
+    position: absolute; bottom: 2px; right: 2px; z-index: 3;
+    width: 26px; padding: 0 2px; text-align: center;
+    font: 700 10px/1.5 ui-monospace, monospace;
+    background: #04121fe0; color: var(--gold); border: 1px solid var(--line);
+  }
+  .bonus-itens { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .bonus-itens-topo {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 11px; color: var(--dim); margin-bottom: 8px;
+  }
+  .bonus-itens-topo select { font-size: 11px; max-width: 190px; }
+  .bonus-itens-topo button { font-size: 11px; padding: 3px 9px; }
+  .bonus-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px; margin-bottom: 4px;
+    background: var(--panel2); border: 1px solid var(--line); font-size: 11px;
+  }
+  .bonus-item .tipo {
+    font-size: 9px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase;
+  }
+  .bonus-item img { width: 22px; height: 22px; border-radius: 50%; display: block; }
+  .bonus-item .spacer { flex: 1; }
+  .bonus-item button { font-size: 10px; padding: 2px 7px; }
   .icone-op img { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--line2); }
   .icone-op .rot { font-size: 8px; letter-spacing: 1px; color: var(--dim);
                    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -364,6 +404,8 @@
       <span class="n" id="main-count">0</span>
       <button id="btn-clear" class="btn-danger" style="font-size:10px; padding:2px 8px"
               title="remover todas as cartas deste deck">limpar deck</button>
+      <button id="btn-organizar" style="font-size:10px; padding:2px 8px"
+              title="pôr o deck em ordem: Ritual, Monstro de Efeito, Monstro Normal, Magia e Armadilha — e, dentro de cada um, as de 3 cópias primeiro (o Extra vai junto: Fusão, Sincro, Xyz, Link)">organizar deck</button>
       <span class="spacer"></span>
       <span id="main-rule">40–60</span>
     </div>
@@ -461,6 +503,52 @@
               tem todos não ganha nada, e a chance não se acumula.
             </p>
             <div id="icone-escolha"></div>
+          </div>
+        </section>
+
+        <!-- BÔNUS DE PRIMEIRA VITÓRIA — o prêmio que sai UMA vez.
+             As gavetas acima são a economia contínua (sorteio, repetição, e é
+             ela que faz querer duelar de novo). Este é o contrário: fixo,
+             garantido, e só na primeira vez que o jogador vencer ESTE deck.
+
+             `aberto` NÃO é decoração — é a mesma armadilha das gavetas: o CSS
+             tem `.quadro:not(.aberto) .quadro-corpo { display:none }`, e um
+             quadro escrito à mão não recebe a classe de ninguém. Sem ela o
+             corpo nasce invisível, `renderBonus()` roda certo, o DOM enche, e a
+             tela mostra só o cabeçalho — sem um erro no console. O cabeçalho
+             daqui ABRE e FECHA (é o pedido), então esta classe é o estado
+             INICIAL, não uma decisão permanente. `drops.test.mjs` cobra isso. -->
+        <section class="quadro aberto" id="quadro-bonus" style="margin-top:12px">
+          <button type="button" class="quadro-head" id="bonus-head">
+            <span class="seta">▾</span>
+            <b style="color:var(--green)">BÔNUS DE PRIMEIRA VITÓRIA</b>
+            <span class="qtd" id="bonus-conta">nada</span>
+          </button>
+          <div class="quadro-corpo">
+            <p class="drop-ajuda" style="margin:0 0 8px">
+              Entregue <b>uma única vez</b>, na primeira vitória contra este deck —
+              sem sorteio: sai exatamente o que estiver aqui. Arraste cartas do
+              pool (ou clique nelas) e use <b>×</b> para a quantidade.
+            </p>
+            <div class="dropzone" id="bonus-zona">
+              <div class="deck-grid" id="bonus-cartas"></div>
+              <div class="zone-empty" id="bonus-vazio">
+                Arraste cartas do pool da direita para cá.
+              </div>
+            </div>
+
+            <div class="bonus-itens">
+              <div class="bonus-itens-topo">
+                <b>ITENS</b>
+                <select id="bonus-item-tipo" title="que tipo de item entregar">
+                  <option value="icone">ícone</option>
+                  <option value="estrutural">deck estrutural</option>
+                </select>
+                <select id="bonus-item-id" title="qual"></select>
+                <button type="button" id="bonus-item-add">adicionar</button>
+              </div>
+              <div id="bonus-item-lista"></div>
+            </div>
           </div>
         </section>
       </div>

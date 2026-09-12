@@ -60,5 +60,18 @@ export function criarFilaDeVisoes(aplicar) {
     get pendentes() { return pendentes; },
     /** Há visão ESPERANDO além da que está sendo aplicada agora? */
     get esperando() { return pendentes > 1; },
+    /**
+     * **Espera assentar tudo que já entrou na fila.**
+     *
+     * Quem precisa disso é o FIM da partida no multiplayer: o aviso de "acabou"
+     * chega pelo mesmo canal das jogadas, logo atrás da visão do golpe final —
+     * e essa visão ainda está sendo ANIMADA quando o aviso é lido. Mostrar o
+     * quadro de vitória ali cortaria o último ataque pela metade, e o jogador
+     * veria "você perdeu" sem ver por quê.
+     *
+     * Devolve a cauda da corrente NO MOMENTO DA CHAMADA. Visão que entre depois
+     * não é esperada — e não deve ser: depois do fim não há mais duelo.
+     */
+    drenar: () => corrente,
   };
 }

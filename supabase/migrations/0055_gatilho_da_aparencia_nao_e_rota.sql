@@ -1,0 +1,31 @@
+-- ============================================================================
+-- O GATILHO da aparencia nao e' uma rota da API.
+--
+-- Achado pelo advisor de seguranca do Supabase logo depois de aplicar a 0054:
+--
+--   Function `public.perfis_valida_aparencia()` can be executed by the `anon`
+--   role as a `SECURITY DEFINER` function via `/rest/v1/rpc/...`
+--
+-- Toda funcao em `public` nasce com `execute` para `public`, e o PostgREST
+-- publica como rota TUDO o que o papel pode executar. Uma funcao de GATILHO
+-- nunca deveria estar ali: ela existe para o motor de triggers chamar, e nao
+-- para um cliente chamar por HTTP.
+--
+-- **Nao era exploravel**, e vale registrar por que: o Postgres recusa uma
+-- funcao `returns trigger` chamada fora de um trigger ("trigger functions can
+-- only be called as triggers"), e ela e' `security definer` sem parametro
+-- nenhum. O que se ganha aqui e' superficie a menos e um aviso a menos — o tipo
+-- de coisa que, deixada de lado, faz a lista de avisos parar de ser lida.
+--
+-- **REVOKE nao desliga o gatilho.** A permissao de executar a funcao e'
+-- conferida quando o TRIGGER e' criado, e nao a cada disparo. Isto foi provado
+-- antes de aplicar, num bloco desfeito: com a permissao revogada, o gatilho
+-- continuou recusando a peca sem posse e continuou aceitando a peca comprada.
+--
+-- LIMITE CONHECIDO, de proposito: `public.perfis_valida_icone()` (0036) tem
+-- exatamente o mesmo aviso e nao e' tocado aqui. Ele e' anterior a este
+-- trabalho, e mexer nele e' decisao de quem cuida daquela feature — nao um
+-- efeito colateral de uma migration sobre roupa.
+-- ============================================================================
+
+revoke all on function public.perfis_valida_aparencia() from public, anon, authenticated;

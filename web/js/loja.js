@@ -9,6 +9,8 @@ import {
   chancesDoPacote, DEFAULT_PRICE, PACK_SIZE, PITY_EVERY, UR_PITY_PACKS,
 } from '/web/js/boosters.js';
 import { renderGavetas, fraseDaColecao } from '/web/js/gavetas.js';
+import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
+import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
 import { hydrateBanlist, getBanlist } from '/web/js/banlist.js';
 import { selosDaBanlist, textoDaBanlist } from '/web/js/selobanlist.js';
 import { montarRevelacao } from '/web/js/revelacao.js';
@@ -38,6 +40,22 @@ function ART(id, small = false) {
 
 let db = null;
 const nameOf = (id) => db?.brief(id)?.name ?? String(id);
+
+/**
+ * **Segurar para ler a carta** — o mesmo gesto do Deck Builder, com o mesmo
+ * anel de progresso (`wireLongPress`) e a MESMA janela (`showCardDetail`).
+ *
+ * Vale nos DOIS lugares onde a Loja mostra carta: o "ver as cartas" de um
+ * conteúdo e o pacote recém-aberto. É onde a informação decide a compra e a
+ * miniatura não cabe: 68px de arte e o nome em 9px não dizem o que a carta
+ * FAZ, e quem não a reconhece pelo desenho estava comprando às cegas.
+ *
+ * As duas funções vão de fora para `gavetas.js` e `revelacao.js` porque os
+ * módulos são compartilhados com a Trilha e com o fim de duelo — quem carrega
+ * o banco de cartas é a tela, não eles.
+ */
+const ampliar = (id) => showCardDetail(id);
+const ligarGesto = (el, acao) => wireLongPress(el, HOLD_MS, acao);
 
 let toastTimer;
 function toast(msg) {
@@ -293,6 +311,11 @@ function abrirConteudo(titulo, sub, pool, { chances = null, copias = null } = {}
     // O canto direito da gaveta é do `×N` de cópias; o esquerdo, do ✔ de
     // "você tem". Os dois selos descem uma linha para não cair por cima.
     selos: (id) => selosDaBanlist(banlist, id, { hasTopLeft: true, hasTopRight: true }),
+    // Segurar (ou clicar) abre a carta inteira, com texto de efeito e tudo. É
+    // a resposta para *"o que é esta carta?"* no lugar exato onde a pergunta
+    // aparece: antes de gastar o DP.
+    aoAmpliar: ampliar,
+    ligarGesto,
   });
   $('conteudo-sub').innerHTML = `${sub} `
     + '<b style="color:var(--green,#3fd68a)">✔</b> = já está na sua Coleção — '
@@ -409,6 +432,11 @@ function showReveal(booster, pulls) {
     // quando não cabe mais, elas ficavam do tamanho de um selo.
     colunas: 7,
     selos,
+    // Segurar amplia — como no drop do fim de duelo. Só DEPOIS de revelada: na
+    // carta ainda virada o gesto REVELA (quem decide isso é `revelacao.js`),
+    // senão o detalhe entregaria a carta e mataria a virada.
+    aoAmpliar: ampliar,
+    ligarGesto,
     aoTerminar: liberar,
   });
 
@@ -503,7 +531,30 @@ try {
   db = await YgoDB.load('/ygo-data/data', { full: false });
 } catch { /* segue sem nomes; a arte ainda vem por id */ }
 
-for (const c of listCustom()) if (c.art) customArt.set(c.id, c.art);
+// As cartas customizadas não existem no `cards.json`: quem sabe delas é o
+// `localStorage` (`customcards.js`). A arte já vinha daqui; o NOME e o TEXTO
+// passaram a vir também, porque agora dá para abrir a carta na Loja — sem o
+// `addCustom` a miniatura seguia com o id cru no lugar do nome e o detalhe
+// abriria em "(carta não encontrada no banco)".
+const customDesc = new Map();
+for (const c of listCustom()) {
+  if (c.art) customArt.set(c.id, c.art);
+  customDesc.set(Number(c.id), c.desc || '');
+  db?.addCustom(c);
+}
+
+// A janela de detalhes e o anel do "segurar". `configureCardDetail` vem DEPOIS
+// do `YgoDB.load` de propósito: ela guarda o índice que a tela já carregou, e
+// entregar `null` aqui faria a janela abrir só com o id no lugar do nome.
+// O texto completo da carta (o `cards.json` de 14 MB) ela busca sozinha, na
+// primeira vez que alguém abrir um detalhe — o índice enxuto basta para o
+// resto da Loja.
+configureCardDetail({
+  db,
+  artOf: (id) => customArt.get(Number(id)) ?? null,
+  descOf: (id) => customDesc.get(Number(id)) ?? null,
+});
+injectHoldStyles(HOLD_MS);
 
 renderDP();
 renderShop();

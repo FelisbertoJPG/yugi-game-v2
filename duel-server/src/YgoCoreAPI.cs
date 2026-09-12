@@ -9,6 +9,21 @@ namespace YGO
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate int OCG_ScriptReader(IntPtr payload, IntPtr duel, [MarshalAs(UnmanagedType.LPStr)] string name);
 
+    /// <summary>
+    /// O que o motor tem a DIZER — erro de Lua, principalmente.
+    ///
+    /// `type`: 0 = erro do script (a mensagem traz arquivo e linha), 1 = erro
+    /// da própria VM, 2 = "for debug" (o `Debug.Message` dos scripts).
+    ///
+    /// Este ponteiro ficava NULO, e era o único canal por onde um efeito
+    /// quebrado poderia se anunciar: sem ele, uma carta cujo Lua estoura na
+    /// condição simplesmente **nunca fica ativável**, sem erro, sem log, sem
+    /// nada — do lado de quem joga ela só não faz nada, para sempre. Ver
+    /// `DuelSession`.
+    /// </summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void OCG_LogHandler(IntPtr payload, [MarshalAs(UnmanagedType.LPStr)] string text, int type);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct OCG_Player
     {

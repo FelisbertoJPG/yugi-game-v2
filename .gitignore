@@ -171,3 +171,19 @@ bancada-home.html
 bancada-revelacao.html
 bancada-loja.html
 bancada-trilha.html
+
+# `modelos-teste/` — pacotes de personagem BAIXADOS para experimentar na
+# Bancada de Modelos (`web/modelos.html`). Fica fora do git por dois motivos, e
+# o segundo e' o que importa:
+#
+#   1. e' material regeneravel: sao downloads publicos, CC0, e o
+#      `tools/conferir-modelos.mjs` diz num comando quais servem;
+#   2. `web/` INTEIRO viaja no `game.zip`. Se estes arquivos morassem la, adotar
+#      um pacote de 2 MB para experimentar dois modelos custaria 2 MB a todo
+#      mundo que baixa o jogo — e a decisao de embarcar arte e' separada da de
+#      testa-la. So' entra em `web/modelos/` o que foi escolhido.
+/modelos-teste/
+
+# A bancada da Cena, como as outras: e SAIDA de `tools/bancada-cena.mjs`,
+# 3 MB regerados num comando.
+bancada-cena.html

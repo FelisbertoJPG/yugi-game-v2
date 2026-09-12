@@ -21,7 +21,7 @@
  */
 // Importa a função DE VERDADE — nada de reimplementar a lógica aqui, senão o
 // teste passa enquanto o jogo quebra.
-import { espelharVisao, CAMPOS_DE_JOGADOR } from './ponte.js';
+import { espelharVisao, CAMPOS_DE_JOGADOR, desfechoDoFim } from './ponte.js';
 import assert from 'node:assert/strict';
 
 let pass = 0, fail = 0;
@@ -179,6 +179,65 @@ t('espelhar DUAS vezes volta ao original (a operacao e simetrica)', () => {
     ended: false,
   };
   assert.deepEqual(espelharVisao(espelharVisao(original, 1), 1), original);
+});
+
+// -------------------------------------------------------------- o FIM da sala
+//
+// O relato: *"quando a battle e' vencida por um jogador a batalha deve encerrar
+// e ambos devem ser redirecionados pra Home. Inclusive se um player desistir o
+// outro tbm... Hoje a sala fica aberta e o duelo n encerra"*.
+//
+// A noticia do fim chega como `{vencedor, motivo}` — um UUID e uma palavra — e
+// quem a traduz para trofeu ou caveira e' o `desfechoDoFim`. Errar essa conta
+// mostra a tela do VENCEDOR para quem perdeu, sem erro nenhum aparecer.
+
+const SALA = { meuId: 'eu-111', jogador_a: 'eu-111', jogador_b: 'ele-222' };
+
+t('o adversario desistiu: eu venci, e a tela sabe POR QUE', () => {
+  const d = desfechoDoFim(SALA, { vencedor: 'eu-111', motivo: 'desistencia' });
+  assert.equal(d.venci, true);
+  assert.equal(d.empate, false);
+  assert.equal(d.desistencia, true, 'sem isto a tela diz "voce venceu!" sem explicar nada');
+});
+
+t('o vencedor e o OUTRO: eu perdi', () => {
+  const d = desfechoDoFim(SALA, { vencedor: 'ele-222', motivo: 'duelo' });
+  assert.equal(d.venci, false);
+  assert.equal(d.empate, false);
+  assert.equal(d.desistencia, false);
+});
+
+t('vencedor NULO e empate — nao vitoria de ninguem', () => {
+  // A 0056 so' grava nulo quando o cliente disse `p_empate`. Antes dela o
+  // empate era gravado como vitoria do adversario, e a tela mentia dos dois
+  // lados: um via trofeu, o outro caveira, numa partida que ninguem ganhou.
+  const d = desfechoDoFim(SALA, { vencedor: null, motivo: 'empate' });
+  assert.equal(d.empate, true);
+  assert.equal(d.venci, false, 'empate nao pode virar vitoria');
+});
+
+t('sem `meuId` na sala, ninguem vence (nao se chuta a vitoria)', () => {
+  // `meuId` nasce no `carregarPartida`. Se um dia ele sumir dali, o certo e'
+  // NAO declarar vitoria — o erro tem de aparecer como "perdi" numa vitoria, e
+  // nao como "venci" numa derrota, que e' o que premiaria quem nao ganhou.
+  const d = desfechoDoFim({ jogador_a: 'eu-111' }, { vencedor: 'eu-111', motivo: 'duelo' });
+  assert.equal(d.venci, false);
+});
+
+t('a rede de seguranca (sem motivo) nao inventa desistencia', () => {
+  // A conferencia periodica le' `partidas.estado`/`vencedor` e nao tem como
+  // saber COMO acabou. Chutar "desistencia" ali escreveria a frase errada.
+  const d = desfechoDoFim(SALA, { vencedor: 'eu-111', motivo: null });
+  assert.equal(d.venci, true);
+  assert.equal(d.desistencia, false);
+});
+
+t('aviso vazio ou nulo nao explode (vira empate, que e o fim mais neutro)', () => {
+  for (const info of [null, undefined, {}]) {
+    const d = desfechoDoFim(SALA, info);
+    assert.equal(d.empate, true, `${JSON.stringify(info)} devia cair em empate`);
+    assert.equal(d.venci, false);
+  }
 });
 
 console.log(`\n  ${pass} passaram, ${fail} falharam`);

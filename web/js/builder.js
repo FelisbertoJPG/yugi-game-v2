@@ -30,9 +30,14 @@ import { hydrateBanlist, getBanlist, validateBanlist, textoDoProblema } from '/w
 import { selosDaBanlist, textoDaBanlist } from '/web/js/selobanlist.js';
 import { annotateDb, allBoosterTags, rarityIndex, hydrateBoosters } from '/web/js/boosters.js';
 import { ordenarPool } from '/web/js/poolordem.js';
+// A ordem DENTRO do deck (Ritual → Efeito → Normal → Magia → Armadilha, e as
+// de 3 cópias na frente). Mora fora daqui porque erra calada: carta na gaveta
+// errada continua sendo um deck plausível.
+import { ordenarDeck, jaOrganizado } from '/web/js/organizardeck.js';
 import {
   carregarDrops, salvarDrops, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
   RARIDADES, MAX_DROPS, planoRapido, chanceDoIcone,
+  bonusVazio, normalizarBonus, MAX_COPIAS_BONUS,
 } from '/web/js/drops.js';
 import { ownsCard, ownedCount, hydrateWallet } from '/web/js/wallet.js';
 // O ícone como prêmio de vitória: a lista sai do catálogo publicado, e quem
@@ -92,6 +97,10 @@ let dropQtd = 0;
 // significam a % que a tela promete (ver `chanceDoIcone` em drops.js).
 let dropIcones = [];
 let dropChanceIcone = 0;
+// O BÔNUS DE PRIMEIRA VITÓRIA deste deck: cartas com quantidade + itens
+// ({tipo, id}). Não é sorteio — sai exatamente o que está aqui, uma vez só.
+let bonus = bonusVazio();
+let estruturaisDoBonus = [];   // catálogo, para o select de itens
 // O catálogo publicado, para a aba oferecer os ícones pelo nome e pela arte.
 let catalogoIcones = [];
 // Sob qual nome o pool foi CARREGADO. Renomear o deck e salvar precisa mover o
@@ -218,14 +227,30 @@ function brief(id) {
  * regras de CONSTRUÇÃO (min/max, 3 cópias) nunca são puladas, nem lá. A lista
  * ativa também não é cobrada do NPC: o adversário é conteúdo de admin, e
  * `salvar_deck` já o trata assim (`p_livre`).
+ *
+ * `livre` é a MESMA dispensa para o deck do próprio admin na Área de Teste
+ * (`gravarLivre`): ali o salvamento vai com `p_livre`, e o servidor não cobra
+ * posse, lista permitida, pontos nem banlist — `iniciar_duelo` (0047) dispensa
+ * o admin igual, com o comentário dizendo "a tela avisa dos dois lados". Barrar
+ * aqui era o builder recusando exatamente o que o banco aceita: a divergência
+ * "cada tela certa pela sua conta" que este projeto já pagou caro, só que
+ * invertida — antes o builder deixava e o banco recusava, agora o builder
+ * recusava e o banco deixaria. O tamanho continua barrando dos dois lados.
  */
-function deckStatus({ ignoreBanlist = false } = {}) {
+function deckStatus({ ignoreBanlist = false, livre = gravarLivre } = {}) {
   const v = deck.validate();
   const bl = ignoreBanlist ? { ok: true, problems: [] } : validateBanlist(deck, banlist);
 
+  // O TAMANHO vale sempre, inclusive no caminho livre: `salvar_deck` o cobra de
+  // admin também, e um main de 12 é deck que o motor recusa.
   if (!v.valid) {
     return { ok: false, message: v.errors[0], color: 'var(--dim)' };
   }
+
+  // As duas perguntas do JOGO, na ordem do prejuízo. Elas se ACUMULAM numa
+  // lista em vez de sair por `return`: no caminho livre não barram nada, viram
+  // aviso, e um `return` já dado não tem como virar aviso depois.
+  const achados = [];
 
   // A LISTA ATIVA — a mesma pergunta que `salvar_deck` faz. Só para o deck do
   // JOGADOR: o deck de adversário é conteúdo de admin e vai pelo caminho livre.
@@ -234,12 +259,8 @@ function deckStatus({ ignoreBanlist = false } = {}) {
                              getCardList(banlist?.listId), brief);
     if (fora.length) {
       const nome = brief(fora[0])?.name ?? fora[0];
-      return {
-        ok: false,
-        color: 'var(--red)',
-        message: `fora da lista permitida: ${nome}`
-               + (fora.length > 1 ? ` (e mais ${fora.length - 1})` : ''),
-      };
+      achados.push(`fora da lista permitida: ${nome}`
+                 + (fora.length > 1 ? ` (e mais ${fora.length - 1})` : ''));
     }
   }
 
@@ -247,10 +268,27 @@ function deckStatus({ ignoreBanlist = false } = {}) {
     // A frase mora em `banlist.js` (`textoDoProblema`): a porta do duelo faz a
     // MESMA pergunta, e duas frases escritas em lugares diferentes recusariam a
     // mesma carta com dois motivos, conforme onde o jogador esbarrasse nela.
-    const message = 'banlist: '
-      + textoDoProblema(bl.problems[0], (id) => brief(id)?.name ?? id);
-    return { ok: false, message, color: 'var(--red)' };
+    achados.push('banlist: '
+      + textoDoProblema(bl.problems[0], (id) => brief(id)?.name ?? id));
   }
+
+  if (achados.length) {
+    // No caminho livre isto AVISA e deixa salvar — ver o doc acima. O aviso não
+    // some de propósito: quem monta o deck precisa enxergar que ele não é
+    // jogável por um jogador comum, que é a informação que o admin perde ao ser
+    // dispensado da regra.
+    if (livre) {
+      return {
+        ok: true,
+        aviso: true,
+        color: 'var(--gold)',
+        message: `admin (deck livre): ${achados[0]}`
+               + (achados.length > 1 ? ` (e mais ${achados.length - 1})` : ''),
+      };
+    }
+    return { ok: false, message: achados[0], color: 'var(--red)' };
+  }
+
   return {
     ok: true,
     message: `deck válido — Main ${deck.main.length}, Extra ${deck.extra.length}`,
@@ -312,7 +350,9 @@ function renderDeck() {
 
   // Desabilita os botões de salvar em vez de só recusar no clique — o
   // usuário vê ANTES de tentar que o deck não bate com as regras.
-  const motivo = st.ok ? '' : `não é possível salvar: ${st.message}`;
+  const motivo = st.ok
+    ? (st.aviso ? st.message : '')
+    : `não é possível salvar: ${st.message}`;
   $('btn-save').disabled = !st.ok;
   $('btn-save').title = motivo;
   if (npcMode) {
@@ -413,6 +453,26 @@ function enterNpcModeUI() {
   $('tab-deck').onclick = () => mostrarAba('deck');
   $('tab-drops').onclick = () => mostrarAba('drops');
   $('drop-rapido').onclick = definirRapido;
+
+  // O BÔNUS. O cabeçalho abre e fecha (é o pedido), e o `aberto` do HTML é só o
+  // estado inicial — ver o comentário do `<section>` em deck.html.
+  const quadroBonus = $('quadro-bonus');
+  $('bonus-head').onclick = () => {
+    const abriu = quadroBonus.classList.toggle('aberto');
+    quadroBonus.querySelector('.seta').textContent = abriu ? '▾' : '▸';
+  };
+  setupBonusZone($('bonus-zona'));
+  $('bonus-item-tipo').onchange = encherSelectDoItem;
+  $('bonus-item-add').onclick = () => {
+    const tipo = $('bonus-item-tipo').value;
+    const id = $('bonus-item-id').value;
+    if (!id) return;
+    if (bonus.itens.some((x) => x.tipo === tipo && x.id === id))
+      return void toast('este item já está no bônus');
+    bonus.itens.push({ tipo, id });
+    markDirty();
+    renderBonus();
+  };
   // Abre o quadro que já tem carta; sem nenhuma, o primeiro. Um quadro aberto
   // desde o começo é o que faz o clique no pool da direita ter para onde ir.
   dropAberto = RARIDADES.find((r) => dropPool[r].length) ?? RARIDADES[0];
@@ -678,6 +738,8 @@ function renderDropPool() {
         + 'destes quadros: primeiro a raridade, pela % de cada quadro, depois uma carta dentro dela.'
       : 'Quantidade <b>0</b> — nada é sorteado. Ajuste "por vitória" aí em cima.';
   renderIcones();
+  encherSelectDoItem();
+  renderBonus();
   atualizaAlvoDeClique();
 }
 
@@ -744,6 +806,142 @@ function renderIcones() {
   caixa.replaceChildren(grade);
   $('icone-conta').textContent = dropIcones.length
     ? `${dropIcones.length} de ${oferecidos.length}` : `nenhum de ${oferecidos.length}`;
+}
+
+/* ------------------------------------------------ bônus de primeira vitória
+ *
+ * As gavetas de raridade acima são a economia CONTÍNUA: sorteio, repetição, e
+ * é ela que faz querer duelar de novo. Este quadro é o contrário — **fixo,
+ * garantido e uma vez só**, na primeira vitória contra ESTE deck.
+ *
+ * Por isso a carta daqui tem QUANTIDADE própria em vez de cair numa gaveta:
+ * não há sorteio para a raridade pesar. Quem paga é o servidor
+ * (`premiar_vitoria`, migration 0050), que também é quem sabe se é a primeira
+ * vitória — a tela não tem como saber, e não deveria.
+ */
+function renderBonus() {
+  const grade = $('bonus-cartas');
+  if (!grade) return;
+
+  const frag = document.createDocumentFragment();
+  for (const { id, qtd } of bonus.cartas) {
+    const c = brief(id);
+    const el = document.createElement('div');
+    el.className = 'thumb';
+    el.title = `${c?.name ?? id}\nclique no × para tirar · mude o número para a quantidade`;
+    el.innerHTML = `<img loading="lazy" src="${ART(id)}" alt="" draggable="false">`;
+
+    // A quantidade é um CONTROLE, não um contador: aqui ela é o que se está
+    // escolhendo, ao contrário do `×N` do pool, que só informa.
+    const n = document.createElement('input');
+    n.type = 'number'; n.className = 'bonus-qtd';
+    n.min = '1'; n.max = String(MAX_COPIAS_BONUS); n.step = '1';
+    n.value = String(qtd);
+    n.title = `quantas cópias desta carta o jogador ganha (1 a ${MAX_COPIAS_BONUS})`;
+    n.onclick = (e) => e.stopPropagation();   // senão o clique na carta a remove
+    n.oninput = () => {
+      const v = Math.max(1, Math.min(MAX_COPIAS_BONUS, Number(n.value) || 1));
+      const alvo = bonus.cartas.find((x) => x.id === id);
+      if (alvo) alvo.qtd = v;
+      markDirty();
+      atualizarContaDoBonus();
+    };
+    el.append(n);
+
+    el.onclick = () => {
+      bonus.cartas = bonus.cartas.filter((x) => x.id !== id);
+      markDirty();
+      renderBonus();
+    };
+    frag.append(el);
+  }
+  grade.replaceChildren(frag);
+  $('bonus-vazio').hidden = bonus.cartas.length > 0;
+
+  renderItensDoBonus();
+  atualizarContaDoBonus();
+}
+
+/** O resumo do cabeçalho — é ele que diz que há algo configurado com o quadro
+ *  fechado, que é justamente quando ninguém está olhando o conteúdo. */
+function atualizarContaDoBonus() {
+  const el = $('bonus-conta');
+  if (!el) return;
+  const cartas = bonus.cartas.reduce((n, c) => n + c.qtd, 0);
+  const partes = [];
+  if (cartas) partes.push(`${cartas} carta(s)`);
+  if (bonus.itens.length) partes.push(`${bonus.itens.length} item(ns)`);
+  el.textContent = partes.length ? partes.join(' + ') : 'nada';
+}
+
+/** O catálogo do tipo escolhido no select — hoje ícones e estruturais. */
+function opcoesDoTipo(tipo) {
+  if (tipo === 'icone') {
+    return catalogoIcones.filter((i) => !i.gratuito)
+      .map((i) => ({ id: i.id, nome: i.nome, imagem: caminhoDoIcone(i) }));
+  }
+  if (tipo === 'estrutural') {
+    return estruturaisDoBonus.map((d) => ({ id: d.id, nome: d.nome ?? d.id, imagem: null }));
+  }
+  return [];
+}
+
+function renderItensDoBonus() {
+  const lista = $('bonus-item-lista');
+  if (!lista) return;
+
+  const frag = document.createDocumentFragment();
+  for (const it of bonus.itens) {
+    const achado = opcoesDoTipo(it.tipo).find((o) => o.id === it.id);
+    const linha = document.createElement('div');
+    linha.className = 'bonus-item';
+
+    const tipo = document.createElement('span');
+    tipo.className = 'tipo';
+    tipo.textContent = it.tipo === 'estrutural' ? 'deck' : it.tipo;
+    linha.append(tipo);
+
+    if (achado?.imagem) {
+      const img = document.createElement('img');
+      img.src = achado.imagem; img.alt = '';
+      linha.append(img);
+    }
+
+    const nome = document.createElement('span');
+    // O item que o catálogo não conhece mais (ícone apagado, estrutural
+    // removido) continua VISÍVEL, e dizendo que sumiu: escondê-lo deixaria uma
+    // configuração fantasma que o servidor ignora e ninguém consegue tirar.
+    nome.textContent = achado ? achado.nome : `${it.id} — não está mais no catálogo`;
+    if (!achado) nome.style.color = 'var(--red)';
+    linha.append(nome);
+
+    const sp = document.createElement('span'); sp.className = 'spacer'; linha.append(sp);
+
+    const tirar = document.createElement('button');
+    tirar.type = 'button'; tirar.textContent = 'tirar';
+    tirar.onclick = () => {
+      bonus.itens = bonus.itens.filter((x) => !(x.tipo === it.tipo && x.id === it.id));
+      markDirty();
+      renderBonus();
+    };
+    linha.append(tirar);
+    frag.append(linha);
+  }
+  lista.replaceChildren(frag);
+}
+
+/** Enche o segundo select com o catálogo do tipo escolhido no primeiro. */
+function encherSelectDoItem() {
+  const sel = $('bonus-item-id');
+  if (!sel) return;
+  const tipo = $('bonus-item-tipo').value;
+  const ops = opcoesDoTipo(tipo);
+  sel.replaceChildren(...(ops.length
+    ? ops.map((o) => Object.assign(document.createElement('option'),
+                                   { value: o.id, textContent: o.nome }))
+    : [Object.assign(document.createElement('option'),
+                     { value: '', textContent: '(nenhum cadastrado)' })]));
+  $('bonus-item-add').disabled = !ops.length;
 }
 
 /* ---------------------------------------------------------------- moldura
@@ -853,13 +1051,20 @@ async function saveNpcDeckFromUI() {
   const porDeck = { ...(doNpc.decks ?? {}) };
   if (nomeDoDropAntigo && nomeDoDropAntigo !== name) delete porDeck[nomeDoDropAntigo];
   const temIcone = dropIcones.length > 0 && dropChanceIcone > 0;
-  // Um deck que só dá ÍCONE é configuração legítima: nem todo adversário
-  // precisa largar carta. Exigir carta aqui faria o ícone sumir junto, calado.
-  if ((temCarta && dropQtd > 0) || temIcone) {
+  // O BÔNUS passa pelo mesmo normalizador do servidor antes de ir: é ele que
+  // prende a quantidade em 1..3, tira id repetido e descarta item de tipo
+  // desconhecido. Gravar o objeto cru deixaria a tela e o banco discordando
+  // sobre o que está configurado — e o banco só fala na hora da vitória.
+  const bonusPronto = normalizarBonus(bonus);
+  // Um deck que só dá ÍCONE (ou só bônus) é configuração legítima: nem todo
+  // adversário precisa largar carta. Exigir carta aqui faria o resto sumir
+  // junto, calado.
+  if ((temCarta && dropQtd > 0) || temIcone || bonusPronto) {
     porDeck[name] = {
       quantidade: temCarta ? dropQtd : 0,
       pool: dropPool,
       ...(temIcone ? { icones: dropIcones, chanceIcone: dropChanceIcone } : {}),
+      ...(bonusPronto ? { bonus: bonusPronto } : {}),
     };
   } else delete porDeck[name];
 
@@ -969,6 +1174,45 @@ function setupQuadroZone(el, rar) {
     el.classList.remove('over', 'reject');
     if (!ok()) return;
     porNoQuadro(drag.id, rar);
+  });
+}
+
+/**
+ * A zona do BÔNUS. Ela aceita de qualquer origem, como os quadros de raridade
+ * — inclusive de um quadro de raridade, e sem tirar a carta de lá: são dois
+ * prêmios diferentes, e a mesma carta pode estar nos dois (uma no sorteio de
+ * toda vitória, outra garantida na primeira).
+ *
+ * O que ela NÃO aceita é a carta que já está nela: repetir não é o gesto — para
+ * mais cópias existe o número no canto da miniatura.
+ */
+function setupBonusZone(el) {
+  const temNoBonus = () => !!drag && bonus.cartas.some((c) => c.id === drag.id);
+  const ok = () => !!drag && !temNoBonus();
+
+  el.addEventListener('dragover', (e) => {
+    if (!drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = ok() ? 'copy' : 'none';
+    el.classList.add('over');
+    el.classList.toggle('reject', !ok());
+  });
+  el.addEventListener('dragleave', (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove('over', 'reject');
+  });
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('over', 'reject');
+    if (!drag) return;
+    if (temNoBonus()) {
+      toast('esta carta já está no bônus — mude o número para dar mais cópias');
+      return;
+    }
+    bonus.cartas.push({ id: drag.id, qtd: 1 });
+    markDirty();
+    renderBonus();
+    toast(`+ ${brief(drag.id)?.name ?? drag.id} (bônus de 1ª vitória)`);
   });
 }
 
@@ -1349,6 +1593,28 @@ $('btn-clear').onclick = () => {
   markDirty();
   refresh();
   toast('deck limpo');
+};
+
+// Organizar deck: reordena Main e Extra sem tirar nem pôr carta nenhuma.
+// Vale para os dois builders — este arquivo serve tanto o deck do JOGADOR
+// quanto o `?npc=<id>` do admin, e a ordem de leitura é a mesma nos dois.
+//
+// Ele NÃO pede confirmação, ao contrário do [limpar deck]: nada se perde, e
+// clicar de novo devolve exatamente a mesma ordem. O que ele faz é sujar o
+// deck (`markDirty`) — a ordem é o que vira o `.ydk`, então organizar e não
+// salvar não organiza nada. Por isso o "já está organizado" sai ANTES: sem
+// ele, o botão marcaria como não-salvo um deck em que não mexeu, e quem
+// saísse da tela levaria o "descartar alterações?" por um clique à toa.
+$('btn-organizar').onclick = () => {
+  if (deck.size === 0) return void toast('o deck está vazio');
+  if (jaOrganizado(deck.main, brief) && jaOrganizado(deck.extra, brief)) {
+    return void toast('o deck já está organizado');
+  }
+  deck.main = ordenarDeck(deck.main, brief);
+  deck.extra = ordenarDeck(deck.extra, brief);
+  markDirty();
+  refresh();
+  toast('deck organizado');
 };
 
 $('deck-select').onchange = (e) => {
@@ -1742,6 +2008,17 @@ if (npc) {
   dropQtd = meuDrop ? meuDrop.quantidade : 0;
   dropIcones = meuDrop?.icones ?? [];
   dropChanceIcone = meuDrop?.chanceIcone ?? 0;
+  // O BÔNUS vem do mesmo lugar (`dropsDoDeck` devolve a configuração inteira),
+  // e por isso não precisou de leitura nova. Uma cópia rasa das listas: o
+  // editor as muta, e mutar o objeto que veio da configuração faria a tela
+  // "salvar" sozinha antes de alguém clicar em salvar.
+  bonus = meuDrop?.bonus
+    ? { cartas: meuDrop.bonus.cartas.map((c) => ({ ...c })), itens: meuDrop.bonus.itens.map((i) => ({ ...i })) }
+    : bonusVazio();
+  // Os estruturais são o outro tipo de item que o bônus sabe pagar. Leitura de
+  // uma vez, como o catálogo de ícones: a lista é curta e muda pouco.
+  try { const e = await listarEstruturaisEx(); estruturaisDoBonus = e.ok ? e.decks : []; }
+  catch { estruturaisDoBonus = []; }
   // O catálogo é de leitura aberta e muda pouco: uma vez no boot basta, e é
   // dele que sai o nome e a arte de cada ícone oferecido na aba.
   try { catalogoIcones = await catalogoDeIcones(); } catch { catalogoIcones = []; }

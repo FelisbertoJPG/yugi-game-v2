@@ -25,6 +25,9 @@ import { RULES } from '/web/js/deck.js';
 import { showCardDetail, configureCardDetail } from '/web/js/carddetail.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { requireLogin } from '/web/js/auth.js';
+import { meusIcones } from '/web/js/icones.js';
+import { meusItens } from '/web/js/itens.js';
+import { itensDoJogador, etiquetaDe } from '/web/js/inventarioitens.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -57,14 +60,26 @@ const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => (
 
 // ------------------------------------------------------------------ abas
 
+/**
+ * As três abas. Antes eram duas e a conta era um booleano (`cards` × o resto),
+ * o que só funciona com dois — a terceira aba obrigou a trocar por uma
+ * comparação por NOME, senão "não é cards" passaria a significar duas coisas.
+ */
+const ABAS = ['cards', 'decks', 'itens'];
+
 function mostrarAba(qual) {
-  const cards = qual === 'cards';
-  $('tab-cards').setAttribute('aria-selected', String(cards));
-  $('tab-decks').setAttribute('aria-selected', String(!cards));
-  $('pane-cards').classList.toggle('on', cards);
-  $('pane-decks').classList.toggle('on', !cards);
-  $('filtros-cards').hidden = !cards;
-  if (!cards) renderDecks();
+  const alvo = ABAS.includes(qual) ? qual : 'cards';
+  for (const a of ABAS) {
+    $(`tab-${a}`).setAttribute('aria-selected', String(a === alvo));
+    $(`pane-${a}`).classList.toggle('on', a === alvo);
+  }
+  // A barra de filtros é da aba CARDS: ela filtra a coleção, e nas outras não
+  // teria o que filtrar. (Ver o comentário do CSS: `hidden` sozinho não a
+  // esconde, porque `.filters` tem `display` próprio — a regra com o `[hidden]`
+  // mora no HTML desta tela.)
+  $('filtros-cards').hidden = alvo !== 'cards';
+  if (alvo === 'decks') renderDecks();
+  if (alvo === 'itens') renderItens();
 }
 
 // ------------------------------------------------------------------ Cards
@@ -346,6 +361,74 @@ function selecionarAcimaDe(limite) {
     : `${copias} cópia${s} acima de ${limite} selecionada${s}`);
 }
 
+// ----------------------------------------------------------- Itens gerais
+//
+// O que o jogador tem fora das cartas e dos decks. As duas fontes de posse
+// (ícone e item) são lidas SEPARADAS e só a apresentação é comum — juntá-las no
+// servidor seria uma terceira verdade sobre posse. A regra de junção mora em
+// `inventarioitens.js`, sem DOM e com teste.
+
+/** Guardado depois da primeira leitura: trocar de aba não precisa reconsultar,
+ *  e o que muda esta lista (ganhar um item) acontece fora desta tela. */
+let itensCache = null;
+
+async function renderItens() {
+  const grade = $('grid-itens');
+  if (!grade) return;
+
+  if (!itensCache) {
+    grade.replaceChildren(Object.assign(document.createElement('div'),
+      { className: 'empty', textContent: 'carregando…' }));
+    // As duas em paralelo: são consultas independentes, e esperar uma para
+    // pedir a outra dobraria a espera à toa.
+    const [icones, itens] = await Promise.all([
+      meusIcones().catch(() => []),
+      meusItens().catch(() => []),
+    ]);
+    itensCache = itensDoJogador(icones, itens);
+  }
+
+  $('n-itens').textContent = `${itensCache.length}`;
+  $('itens-vazio').hidden = itensCache.length > 0;
+
+  const frag = document.createDocumentFragment();
+  for (const it of itensCache) {
+    const el = document.createElement('div');
+    el.className = 'it';
+
+    const arte = document.createElement('div');
+    arte.className = 'arte';
+    if (it.imagem) {
+      const img = document.createElement('img');
+      img.src = it.imagem;
+      img.alt = '';
+      // Só o ícone é redondo, e ele é redondo na ARTE e não na moldura: é
+      // assim que ele aparece no perfil e na lista de amigos, e a miniatura
+      // tem de parecer com o que a pessoa vai ver.
+      if (it.redonda) img.className = 'redonda';
+      arte.append(img);
+    } else {
+      arte.append(Object.assign(document.createElement('span'),
+                                { className: 'sem', textContent: 'SEM ARTE' }));
+    }
+    el.append(arte);
+
+    const corpo = document.createElement('div');
+    corpo.className = 'corpo';
+    // `textContent`, nunca `innerHTML`: o nome vem do banco e é escrito por
+    // gente. É a mesma regra do chat.
+    corpo.append(Object.assign(document.createElement('div'),
+                               { className: 'nome', textContent: it.nome }));
+    corpo.append(Object.assign(document.createElement('span'), {
+      className: 'tag' + (it.tipo === 'icone' ? ' icone' : ''),
+      textContent: etiquetaDe(it.tipo),
+    }));
+    el.append(corpo);
+    frag.append(el);
+  }
+  grade.replaceChildren(frag);
+}
+
 // ------------------------------------------------------------------ Decks
 
 function renderDecks() {
@@ -440,6 +523,7 @@ function renderDP() {
 $('btn-home').onclick = () => (location.href = '/web/index.html');
 $('tab-cards').onclick = () => mostrarAba('cards');
 $('tab-decks').onclick = () => mostrarAba('decks');
+$('tab-itens').onclick = () => mostrarAba('itens');
 
 for (const id of ['f-nome', 'f-rar', 'f-ord']) {
   $(id).addEventListener('input', renderCards);

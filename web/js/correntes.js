@@ -27,6 +27,10 @@
  * Este módulo é só a DECISÃO, sem DOM, para poder ser provado em Node
  * (`correntes.test.mjs`) — quem desenha a janela é o `web/duel.html`.
  */
+// As localizações do motor moram num lugar só. Um `0x02` escrito à mão aqui
+// seria uma segunda verdade para a mesma coisa, e `alvos.js` também é um módulo
+// puro (sem DOM e sem `fetch`), então importá-lo não custa nada em Node.
+import { LOCAL } from './alvos.js';
 
 /** Rótulo de cada modo, na ordem em que aparecem na barra. */
 export const MODOS = {
@@ -40,6 +44,13 @@ export const MODO_PADRAO = 'auto';
 
 /** Bit da End Phase no motor (ver PHASE_NOME em duel.html). */
 export const FASE_END = 0x200;
+/** Bit da Standby Phase. A fase que existe, no jogo inteiro, para os gatilhos
+ *  de tempo acontecerem — ver `momentoDaJanela`. */
+export const FASE_STANDBY = 0x2;
+
+/** Alguma das cartas oferecidas está na MINHA MÃO? */
+const temCartaDaMao = (p) =>
+  (p.choices || []).some((c) => Number(c?.location) === LOCAL.MAO);
 
 /**
  * Modo guardado vira modo válido.
@@ -79,6 +90,36 @@ export function momentoDaJanela(pergunta, { turno = 0, fase = 0, ataqueDeclarado
   if (p.chainTriggerKind === 'summon') return 'uma invocação está em andamento';
   if (p.chainTriggerKind === 'attack') return 'um ataque foi declarado';
   if (ataqueDeclarado) return 'um ataque foi declarado';
+  // **O GATILHO DE TEMPO, que passa uma vez e não volta.** Os três acima são
+  // respostas a alguma coisa; estes dois são o contrário — ninguém fez nada, e
+  // é justamente por isso que a janela é a única que vai existir.
+  //
+  // O relato: a **Golden Ladybug** (87102774) nunca pediu para ser ativada. O
+  // efeito dela é `EVENT_PHASE|PHASE_STANDBY` com `SetRange(LOCATION_HAND)` e
+  // `SetCountLimit(1)`: revelar a carta na mão, na SUA Standby Phase, e ganhar
+  // 500 LP. Nada a invoca, nada a ativa, ninguém ataca — então a janela dela
+  // caía em "rotina" e o modo `auto` (que é o PADRÃO) a passava sozinho, todo
+  // turno, sem uma linha no log da tela. Do lado de quem joga não há defeito
+  // nenhum para ver: a carta simplesmente nunca faz nada.
+  //
+  // As duas condições são proxies, e o comentário existe para não fingirem que
+  // não são — o motor não diz "este efeito é de gatilho e some se você passar":
+  //
+  //   • **carta na MÃO numa janela que ninguém abriu.** Carta em campo com
+  //     livre encadeamento (a Forgotten Temple do Mako) reaparece em TODA
+  //     janela — é a rotina que o modo `auto` existe para calar. Da mão, fora
+  //     de uma resposta, só aparece o que tem hora marcada: hand trap responde
+  //     a ativação/invocação (que já perguntam) e Magia Rápida da mão só sai na
+  //     sua Main Phase, pelo idle, nunca por aqui;
+  //   • **a sua Standby Phase.** É a fase cuja razão de existir são os
+  //     gatilhos de tempo, e ela acontece UMA vez por turno — o teto do
+  //     incômodo é uma pergunta por turno, e só para quem tem o que ativar.
+  //
+  // LIMITE CONHECIDO: um gatilho de tempo de uma carta que já está em CAMPO,
+  // fora da Standby, continua sendo passado no `auto`. Para esse caso o modo é
+  // o `sempre` — e alargar mais devolveria o sufoco que os modos resolvem.
+  if (temCartaDaMao(p)) return 'uma carta da sua mão pode ser ativada agora';
+  if (turno === 0 && fase === FASE_STANDBY) return 'é a sua Standby Phase';
   if (turno === 1 && fase === FASE_END) return 'o turno do oponente vai acabar';
   return null;
 }

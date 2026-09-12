@@ -124,10 +124,25 @@
       <span>Ícones de perfil</span>
       <span class="why">o catálogo de avatares · a arte mora no repositório</span>
     </button>
+    <button id="btn-itens">
+      <span class="k">·</span>
+      <span>Criar item</span>
+      <span class="why">sleeve, playmat, deck box e o genérico · o ícone tem editor próprio</span>
+    </button>
     <button id="btn-mundo">
       <span class="k">9</span>
       <span>Mundo andável (mapa mundi)</span>
       <span class="why">em standby · fora do fluxo do jogador, que usa a Trilha de Duelos</span>
+    </button>
+    <button id="btn-mundo3d">
+      <span class="k">F</span>
+      <span>Mundo andável em 3D (floresta)</span>
+      <span class="why">prova de conceito em three.js · cenário procedural, sem arquivo de arte</span>
+    </button>
+    <button id="btn-cena">
+      <span class="k">C</span>
+      <span>Editor de Cena (3D)</span>
+      <span class="why">montar um lugar movendo pecas · a biblioteca sai de tools/tagforce/pecas.mjs</span>
     </button>
     <button id="btn-ordenar">
       <span class="k">T</span>
@@ -247,7 +262,10 @@ $('btn-campo').onclick = () => (location.href = '/web/campo.html');
 $('btn-banlist').onclick = () => (location.href = '/web/banlist.html');
 $('btn-listas').onclick = () => (location.href = '/web/listas.html');
 $('btn-icones').onclick = () => (location.href = '/web/icones.html');
+$('btn-itens').onclick = () => (location.href = '/web/itens.html');
 $('btn-mundo').onclick = () => (location.href = '/web/mundo.html');
+$('btn-mundo3d').onclick = () => (location.href = '/web/mundo3d.html');
+$('btn-cena').onclick = () => (location.href = '/web/cena.html');
 $('btn-ordenar').onclick = () => (location.href = '/web/ordenar.html');
 $('btn-adv-grade').onclick = () => (location.href = '/web/adversario.html');
 $('btn-home').onclick = () => (location.href = '/web/index.html');
@@ -261,6 +279,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '7') $('btn-banlist').click();
   if (e.key === '8') $('btn-listas').click();
   if (e.key === '9') $('btn-mundo').click();
+  if (e.key === 'f' || e.key === 'F') $('btn-mundo3d').click();
+  if (e.key === 'c' || e.key === 'C') $('btn-cena').click();
   if (e.key === 'Escape') $('btn-home').click();
 });
 </script>

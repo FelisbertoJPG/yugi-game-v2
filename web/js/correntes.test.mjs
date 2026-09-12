@@ -15,7 +15,7 @@
  */
 // Importa a decisão DE VERDADE — nada de reimplementar a regra aqui, senão o
 // teste passa enquanto o jogo incomoda.
-import { decidirCorrente, momentoDaJanela, normalizarModo, MODOS, MODO_PADRAO, FASE_END } from './correntes.js';
+import { decidirCorrente, momentoDaJanela, normalizarModo, MODOS, MODO_PADRAO, FASE_END, FASE_STANDBY } from './correntes.js';
 import assert from 'node:assert/strict';
 
 let pass = 0, fail = 0;
@@ -106,6 +106,82 @@ t('AUTO nao pergunta na End Phase do MEU proprio turno', () => {
   // O momento so' vale no turno DELE: na minha End Phase nao ha nada chegando.
   const d = decidirCorrente({ modo: 'auto', pergunta: janela(), turno: 0, fase: FASE_END });
   assert.equal(d.perguntar, false);
+});
+
+// ------------------------------------- o gatilho de tempo (a Golden Ladybug)
+//
+// O relato: *"a Golden Ladybug nao pediu pra ativar o efeito da standby, ou ele
+// foi consumido por outra coisa"*. Foi consumido: pelo modo `auto`, que e' o
+// PADRAO. O efeito dela e' `EVENT_PHASE|PHASE_STANDBY` +
+// `SetRange(LOCATION_HAND)` + `SetCountLimit(1)` — revelar a carta na MAO, na
+// SUA Standby Phase, e ganhar 500 LP. Ninguem invoca, ninguem ativa, ninguem
+// ataca: a janela caia em "rotina" e era passada sozinha, todo turno, sem uma
+// linha no log. Do lado de quem joga, a carta simplesmente nunca fazia nada.
+
+const MAO = 0x02, CAMPO_ST = 0x08;
+/** A janela que o motor abre na sua Standby Phase, com a carta na mao. */
+const janelaDaLadybug = () => janela({
+  choices: [{ code: 87102774, index: 0, controller: 0, location: MAO, sequence: 0 }],
+});
+
+t('AUTO pergunta pela carta da MAO (o caso da Golden Ladybug)', () => {
+  const d = decidirCorrente({ modo: 'auto', pergunta: janelaDaLadybug(), turno: 0, fase: FASE_STANDBY });
+  assert.equal(d.perguntar, true, 'o gatilho de tempo passa uma vez e nao volta');
+  assert.equal(d.resposta, null);
+});
+
+t('AUTO pergunta na MINHA Standby Phase mesmo com a carta em CAMPO', () => {
+  // A segunda condicao, sozinha: a fase que existe para os gatilhos de tempo
+  // acontece UMA vez por turno, entao o teto do incomodo e' uma pergunta.
+  const d = decidirCorrente({
+    modo: 'auto', turno: 0, fase: FASE_STANDBY,
+    pergunta: janela({ choices: [{ code: 44095762, index: 0, controller: 0, location: CAMPO_ST, sequence: 2 }] }),
+  });
+  assert.equal(d.perguntar, true);
+});
+
+t('CONTROLE: a mesma carta em CAMPO, fora da Standby, continua sendo rotina', () => {
+  // Sem este par, "perguntou" nao provaria nada — bastaria perguntar sempre. E'
+  // a Forgotten Temple do primeiro teste, agora com a localizacao preenchida.
+  const naMain = janela({
+    choices: [{ code: 44095762, index: 0, controller: 0, location: CAMPO_ST, sequence: 2 }],
+  });
+  assert.equal(decidirCorrente({ modo: 'auto', pergunta: naMain, turno: 0, fase: FASE_MAIN1 }).perguntar, false);
+  assert.equal(decidirCorrente({ modo: 'auto', pergunta: naMain, turno: 1, fase: FASE_MAIN1 }).perguntar, false);
+});
+
+t('CONTROLE: a Standby DELE nao e minha — nada meu tem hora marcada ali', () => {
+  const d = decidirCorrente({
+    modo: 'auto', turno: 1, fase: FASE_STANDBY,
+    pergunta: janela({ choices: [{ code: 44095762, index: 0, controller: 0, location: CAMPO_ST, sequence: 2 }] }),
+  });
+  assert.equal(d.perguntar, false);
+});
+
+t('a carta da MAO vale em qualquer fase — o gatilho de tempo nao mora so na Standby', () => {
+  for (const fase of [0x1, FASE_MAIN1, FASE_BATTLE, 0x100]) {
+    assert.equal(
+      decidirCorrente({ modo: 'auto', pergunta: janelaDaLadybug(), turno: 0, fase }).perguntar,
+      true, `fase ${fase}`);
+  }
+});
+
+t('DESLIGADO continua sem perguntar, inclusive isto', () => {
+  // O `off` e' uma escolha do jogador, e ela vale para tudo: alargar o `auto`
+  // nao pode furar o modo de quem pediu silencio.
+  const d = decidirCorrente({ modo: 'off', pergunta: janelaDaLadybug(), turno: 0, fase: FASE_STANDBY });
+  assert.equal(d.perguntar, false);
+  assert.equal(d.resposta, -1);
+});
+
+t('o MOTIVO de cada um vai para o log, e sao diferentes', () => {
+  const m1 = momentoDaJanela(janelaDaLadybug(), { turno: 0, fase: FASE_STANDBY });
+  const m2 = momentoDaJanela(
+    janela({ choices: [{ code: 44095762, index: 0, location: CAMPO_ST }] }),
+    { turno: 0, fase: FASE_STANDBY });
+  assert.match(m1, /m[aã]o/i);
+  assert.match(m2, /standby/i);
+  assert.notEqual(m1, m2);
 });
 
 // ------------------------------------------------------------------- a travada

@@ -107,9 +107,20 @@ export const abandonar = (partida) => rpc('abandonar_partida', { p_partida: part
  * Encerra a partida. Sem `vencedor` = eu desisti, e o outro ganha.
  * Funciona com o duelo EM ANDAMENTO — o `abandonar_partida` só cobre a sala que
  * ainda não formou.
+ *
+ * É também o que AVISA o outro lado: desde a 0056 o servidor escreve um lance
+ * de 'fim' na caixa do adversário. Antes disso, quem desistia sumia sem deixar
+ * recado e o outro ficava com o tabuleiro aberto para sempre.
+ *
+ * O `p_empate` só é MANDADO quando é empate, de propósito: um servidor que
+ * ainda não tenha a 0056 não conhece esse argumento e recusaria a chamada — do
+ * jeito que está, só o empate (que lá já era gravado errado) deixa de funcionar,
+ * e a desistência continua saindo.
  */
-export const encerrar = (partida, vencedor = null) =>
-  rpc('encerrar_partida', { p_partida: partida, p_vencedor: vencedor });
+export const encerrar = (partida, vencedor = null, empate = false) =>
+  rpc('encerrar_partida', empate
+    ? { p_partida: partida, p_vencedor: null, p_empate: true }
+    : { p_partida: partida, p_vencedor: vencedor });
 
 /**
  * A válvula de escape: encerra tudo que eu tenho em aberto e me tira da fila.

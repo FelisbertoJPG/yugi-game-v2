@@ -1,0 +1,9 @@
+{
+  "corpo": {
+    "arquivo": "generico/generico.glb"
+  },
+  "animacoes": {
+    "parado": "anim/parado.fbx",
+    "andar": "anim/andar.fbx"
+  }
+}

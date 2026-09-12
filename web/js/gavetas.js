@@ -42,7 +42,12 @@ export const gavetasVazias = () => ({ UR: [], SR: [], R: [], N: [] });
  *     se está comprando;
  *   • `selos(id)` — HTML de selo extra na miniatura. Hoje é a banlist, e é a
  *     resposta para *"de quantas cópias desta eu preciso?"* na hora em que a
- *     pergunta importa: antes de gastar DP atrás da terceira.
+ *     pergunta importa: antes de gastar DP atrás da terceira;
+ *   • `aoAmpliar(id)` / `ligarGesto(el, acao)` — **segurar para ler a carta**,
+ *     o mesmo gesto do Deck Builder. Chegam de fora, e não por `import`,
+ *     porque as duas peças são da TELA: `wireLongPress` (`interact.js`) e a
+ *     janela de detalhes (`carddetail.js`), que precisa do banco de cartas já
+ *     carregado. Sem eles a miniatura fica como sempre foi — inerte.
  *
  * "Você tem" é lido da COLEÇÃO inteira, não do que veio DESTE conteúdo: uma
  * carta que você tem pode ter vindo de um booster ou de um drop, e ainda assim
@@ -56,6 +61,11 @@ export function renderGavetas(alvo, pool, {
   // HTML de selo extra na miniatura — hoje a banlist (`selobanlist.js`). Quem
   // sabe se ela se aplica e' a tela que chama, nao esta.
   selos = null,
+  // Segurar para LER a carta. Os dois andam juntos: `ligarGesto` sozinho nao
+  // tem o que abrir, e `aoAmpliar` sozinho vale como "so' clique e botao
+  // direito" — que e' um estado honesto, e nao um meio-conserto.
+  aoAmpliar = null,
+  ligarGesto = null,
 } = {}) {
   alvo.replaceChildren();
   let tem = 0, total = 0;
@@ -78,15 +88,36 @@ export function renderGavetas(alvo, pool, {
       const n = copias ? copias(id) : 1;
 
       const c = document.createElement('div');
-      c.className = `carta${possuo ? ' tenho' : ''}`;
+      c.className = `carta${possuo ? ' tenho' : ''}${aoAmpliar ? ' lupa' : ''}`;
       c.title = nomeDe(id)
         + (n > 1 ? ` — ${n} cópias neste conteúdo` : '')
-        + (possuo ? ` — você tem ${ownedCount(id)}` : ' — você ainda não tem');
-      c.innerHTML = `<img src="${arte(id)}" alt="" loading="lazy">`
+        + (possuo ? ` — você tem ${ownedCount(id)}` : ' — você ainda não tem')
+        + (aoAmpliar ? '\nsegurar (ou clicar): ler a carta' : '');
+      // `draggable="false"` na arte, e isso NAO e' enfeite: o navegador comeca
+      // a arrastar uma imagem ao primeiro pixel de movimento com o botao
+      // apertado, e o `dragstart` CANCELA a contagem do "segurar"
+      // (`interact.js`). Sem ele o gesto falha para quem nao segura a mao
+      // parada — e falha calado, porque nada acontece.
+      c.innerHTML = `<img src="${arte(id)}" alt="" loading="lazy" draggable="false">`
         + (n > 1 ? `<span class="qtd">×${n}</span>` : '')
         + (possuo ? '<span class="marca">✔</span>' : '')
         + (selos ? selos(id) : '')
         + `<div class="nm">${escapar(nomeDe(id))}</div>`;
+
+      // **Segurar, clicar ou botao direito abrem a mesma janela.** No Deck
+      // Builder o clique tem dono (adicionar uma copia) e por isso so' o
+      // "segurar" abre o detalhe; aqui nao ha' o que fazer com a carta alem de
+      // le-la, e uma miniatura que responde ao "segurar" mas ignora o clique
+      // se le como tela travada.
+      if (aoAmpliar) {
+        const abrir = () => aoAmpliar(id);
+        // `ligarGesto` devolve um "consumiu?" — sem consultar isso, soltar o
+        // botao depois de segurar dispararia o clique logo atras e abriria a
+        // janela duas vezes.
+        const segurou = ligarGesto ? ligarGesto(c, abrir) : null;
+        c.onclick = () => { if (segurou?.()) return; abrir(); };
+        c.oncontextmenu = (e) => { e.preventDefault(); abrir(); };
+      }
       cartas.append(c);
     }
     g.append(cartas);

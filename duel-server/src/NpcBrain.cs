@@ -175,6 +175,49 @@ namespace DuelServer
         const uint KAZEJIN = 62340868;           // 2400/2200 Nv7 (WIND/Spellcaster)
         static readonly HashSet<uint> PECAS_GATE_GUARDIAN = new() { SANGA, SUIJIN, KAZEJIN };
 
+        // ---- O SUPORTE do arquétipo (entrou no deck em 30/08/2026) ----
+        //
+        // Ele mudou uma premissa antiga deste cérebro. Até aqui o Gate Guardian
+        // no cemitério era carta MORTA — ele não volta de lá (precisa ter sido
+        // corretamente invocado antes), e por isso a fila de descarte o protegia
+        // acima de tudo. Com a **Dark Element** o cemitério virou o INTERRUPTOR:
+        // ter um monstro "Gate Guardian" lá é a CONDIÇÃO da carta.
+        //
+        // E não é reanimação — o corpo que ela põe em campo vem da **mão, do
+        // deck ou do Extra**, nunca do cemitério. Quem está no cemitério só
+        // liga a chave. É por isso que a regra do Foolish Burial precisou de uma
+        // razão nova em vez de caber nas duas que já existiam (ver 5.56): as
+        // duas antigas perguntam "eu consigo trazer este corpo de volta?", e
+        // aqui a resposta é não — e mesmo assim enterrar é a jogada.
+        const uint CHEERFUL_COFFIN = 41142615;   // descarta ATÉ 3 monstros da mão, sem custo
+        const uint DARK_ELEMENT = 53194323;      // Nv11+ do arquétipo, pagando METADE dos LP
+        const uint DOUBLE_ATTACK_WT = 60176682;  // Quick-Play: destrói 1 carta do campo
+        const uint RIRYOKU_GUARDIAN = 96661780;  // metade dos LP dele viram ATK no meu Guardião
+
+        /// <summary>
+        /// As três magias do arquétipo. Todas dividem o MESMO segundo efeito:
+        /// **banir a si mesmas do cemitério para buscar 1 Sanga/Kazejin/Suijin**
+        /// do deck ou do banimento. É recurso de graça — a carta já foi gasta —,
+        /// e é o que faz o deck continuar produzindo depois da primeira mão.
+        /// </summary>
+        static readonly HashSet<uint> MAGIAS_DO_GUARDIAO =
+            new() { DARK_ELEMENT, DOUBLE_ATTACK_WT, RIRYOKU_GUARDIAN };
+
+        /// <summary>
+        /// O que conta como "monstro Gate Guardian" para a condição da Dark
+        /// Element: o Nv11 do main mais as fusões do arquétipo. Escrito por id
+        /// porque o `IsSetCard` é do MOTOR — aqui do lado de fora não há
+        /// arquétipo nenhum para consultar.
+        /// </summary>
+        static readonly HashSet<uint> MONSTROS_GUARDIAO = new()
+        {
+            GATE_GUARDIAN,   // Nv11
+            8505920,         // Gate Guardians Combined (Nv12, Extra)
+            34904525,        // Gate Guardian of Thunder and Wind (Nv9, Extra)
+            61398234,        // Gate Guardian of Wind and Water  (Nv9, Extra)
+            97783338,        // Gate Guardian of Water and Thunder (Nv9, Extra)
+        };
+
         // Magia de CAMPO. O efeito não é uma invocação alternativa da carta que
         // está na mão (então o monstro NÃO aparece em `summonable`): é um efeito
         // de IGNIÇÃO do próprio Mausoléu, que aparece em `activatable` com
@@ -229,6 +272,12 @@ namespace DuelServer
             COCOON_OF_EVOLUTION, INSECT_ARMOR_LASER, INSECT_IMITATION,
             SUMMONERS_ART, ANCIENT_RULES, ARMORY_CALL,
             FORGOTTEN_TEMPLE,
+            // A Dark Element é marcada como INVOCAÇÃO ESPECIAL no banco, então a
+            // regra genérica do "corpo de graça" (5.375) a ativaria sozinha — e
+            // de graça ela não é: cobra METADE dos LP. Quem decide é a 5.96, com
+            // o piso. A Riryoku Guardian entra pelo mesmo motivo: mexe em LP e a
+            // hora dela é uma só.
+            DARK_ELEMENT, RIRYOKU_GUARDIAN,
         };
 
         const byte DECK = 0x1, HAND = 0x2, MZONE = 0x4, SZONE = 0x8, GRAVE = 0x10;
@@ -678,6 +727,14 @@ namespace DuelServer
         /// regra que dependa dela dispara — o comportamento de antes.
         /// </summary>
         readonly Func<int, IReadOnlyList<uint>> _listaDoDeck;
+        /// <summary>Os monstros VIRADOS do outro lado, com a faixa de nível que
+        /// os tributos denunciam. Informação PÚBLICA — ver
+        /// `InteractiveDuel.ViradosDele`.</summary>
+        readonly Func<int, IReadOnlyList<(int seq, int nivelMax)>> _viradosDele;
+        /// <summary>O que eu vi ir para a mão dele — busca, recuperação, resgate.
+        /// Público: pelas regras, carta adicionada à mão por efeito é mostrada ao
+        /// adversário. Ver <see cref="DefesaEsperadaDoVirado"/>.</summary>
+        readonly Func<int, IReadOnlyList<uint>> _vistosNaMao;
         readonly Func<int, int> _stCountOf;                 // zonas de magia/armadilha ocupadas
         readonly Func<int, int> _setStCountOf;              // dessas, quantas estão VIRADAS
         readonly Func<int, IReadOnlyList<uint>> _faceUpStOf; // magias/armadilhas ABERTAS
@@ -707,6 +764,130 @@ namespace DuelServer
         readonly Action<string> _log;
 
         const int POS_ATAQUE = 0x1, POS_DEFESA = 0x4, POS_DEFESA_VIRADA = 0x8;
+
+        /// <summary>
+        /// **O ATK minimo para atacar uma carta VIRADA** — o alvo de que o NPC
+        /// iniciante nao sabe nada.
+        ///
+        /// Nao e' um numero de gosto: batendo num monstro deitado com ATK menor
+        /// que a DEF dele, quem ataca nao perde o corpo, mas **leva a diferenca
+        /// como dano**. Entao o prejuizo cresce quanto MENOR for o atacante, e o
+        /// corpo pequeno paga o preco inteiro por uma informacao que ele nao tem.
+        /// Com 0 de ATK nao ha' nem o lado bom: nao existe DEF que ele vença.
+        ///
+        /// Vale so' para o NPC **iniciante**, e nao por escolha: o avancado LE a
+        /// carta virada pela DEF real (`--test-leitura`), entao para ele a lista
+        /// de alvos nunca chega vazia e este ramo nao roda.
+        /// </summary>
+        const int PISO_ATAQUE_AS_CEGAS = 500;
+
+        /// <summary>
+        /// **O TETO DE DEFESA que uma carta virada pode ter**, por faixa de
+        /// nível — e a faixa quem denuncia são os TRIBUTOS que ela custou.
+        ///
+        /// O relato: *"ele está com medo de bater em qualquer card meu em
+        /// defesa"*. Estava mesmo, e a razão é que uma carta virada não valia
+        /// nada para ele: ou era ignorada (e ele atacava às cegas) ou o piso
+        /// acima o segurava. Faltava a conta que qualquer jogador faz de
+        /// cabeça: *"ele só SETOU, então é nível 4 ou menos, então tem no
+        /// máximo tanto de defesa — e meu monstro passa por cima"*.
+        ///
+        /// **Os números são MEDIDOS no pool do jogo (a Lista 1), não chutados.**
+        /// No banco INTEIRO eles não serviriam: existe um nível 4 com 3000 de
+        /// DEF (Super Crashbug), e um teto de 3000 para "nível ≤ 4" não
+        /// discrimina nada — seria o mesmo medo, com mais código. No pool que o
+        /// jogo realmente usa a conta fecha, e é ela que está aqui.
+        ///
+        /// Medido em 30/08/2026 sobre a lista publicada, e **conferido por
+        /// teste**: `node web/js/tetodefesa.test.mjs` re-mede e falha quando
+        /// alguém acrescenta ao pool uma carta que fura o teto. Sem esse
+        /// guarda, a constante envelheceria calada — e o sintoma seria o NPC
+        /// entregando o corpo numa batalha que a conta dele dizia ganhar, que é
+        /// exatamente o defeito que ela veio consertar.
+        /// </summary>
+        /// <summary>
+        /// **NÃO é o teto, é a APOSTA.** A diferença é a feature inteira.
+        ///
+        /// O pior caso do pool para nível ≤4 é 2400, e apostar no pior caso é
+        /// voltar ao medo: o NPC deixaria de atacar por causa de um punhado de
+        /// cartas que quase nunca estão ali. Um deck de 40 a 60 leva no máximo
+        /// três cópias de UM monstro de defesa alta — a chance de a carta setada
+        /// ser justamente ela é pequena, e um jogador arrisca.
+        ///
+        /// Então estes números são o que uma carta virada **provavelmente** vale
+        /// no máximo, e não o que ela pode valer. Quem os fura existe, é contado,
+        /// e o preço de errar é UMA batalha — enquanto o preço de nunca atacar é
+        /// o duelo inteiro.
+        ///
+        /// **A aposta é descartada quando há informação melhor**: se o NPC VIU o
+        /// jogador buscar/recuperar um monstro de defesa alta e ele ainda não
+        /// apareceu, a carta setada é quase certamente aquela — e aí vale a DEF
+        /// dela, não a aposta. Ver `DefesaEsperadaDoVirado`.
+        ///
+        /// `node web/js/tetodefesa.test.mjs` mede quantas cartas do pool furam
+        /// cada aposta: ele não deixa o número virar chute nem ficar tão baixo
+        /// que o NPC passe a se jogar contra qualquer parede.
+        /// </summary>
+        const int APOSTA_DEF_ATE_NV4 = 2000;
+        const int APOSTA_DEF_NV5_6   = 2500;
+        const int APOSTA_DEF_NV7_MAIS = 3000;
+
+        /// <summary>A aposta de DEF de um virado, pela faixa de nível que os
+        /// tributos denunciam (ver `InteractiveDuel.ViradosDele`).</summary>
+        static int ApostaDeDefesa(int nivelMax) =>
+            nivelMax <= 4 ? APOSTA_DEF_ATE_NV4
+          : nivelMax <= 6 ? APOSTA_DEF_NV5_6
+          : APOSTA_DEF_NV7_MAIS;
+
+        /// <summary>
+        /// **Quanto vale, para mim, aquela carta virada?**
+        ///
+        /// Duas respostas, e a ordem é o ponto:
+        ///
+        ///   1. **o que eu VI.** Se ele buscou/recuperou um monstro que cabe
+        ///      nesta faixa de nível e ele ainda não apareceu em campo, a carta
+        ///      setada é quase certamente essa — e aí a conta é a DEF DELA. É a
+        ///      mesma leitura que um humano faz: *"ele acabou de pegar aquele
+        ///      muro no deck e setou uma carta; não vou bater aí"*;
+        ///   2. **a aposta**, quando não há nada visto que sirva.
+        ///
+        /// Havendo mais de um candidato visto, vale o MAIOR: entre dois corpos
+        /// que ele pode ter setado, supor o mais fraco é o erro que custa o
+        /// monstro.
+        /// </summary>
+        int DefesaEsperadaDoVirado(int foe, int nivelMax)
+        {
+            int aposta = ApostaDeDefesa(nivelMax);
+            int visto = 0;
+            foreach (var c in _vistosNaMao(foe))
+            {
+                var st = _cards.Stats(c);
+                if (!st.IsMonster) continue;
+                // Só conta o que caberia NAQUELA faixa: um Nv7 visto na mão não
+                // explica uma carta setada sem tributo.
+                if (st.Level > nivelMax) continue;
+                if (st.DefValue > visto) visto = st.DefValue;
+            }
+            return visto > aposta ? visto : aposta;
+        }
+
+        /// <summary>
+        /// **Quanto custa a carta que sai JUNTO com o corpo** — o equipamento,
+        /// que vai para o cemitério com quem ele reforça.
+        ///
+        /// É um câmbio, e é bom dizer isso em voz alta: está trocando "uma
+        /// carta" por "pontos de ATK", coisas que não têm cotação. O número é a
+        /// ordem de grandeza do maior corpo do jogo — quer dizer, *perder uma
+        /// carta custa mais ou menos o que custa perder o melhor monstro da
+        /// mesa*. Nesta escala ele resolve o caso do relato (um 300 com +700
+        /// deixa de ser o corpo mais barato de um campo com um 1700) sem
+        /// atropelar a conta quando o outro corpo é grande de verdade.
+        ///
+        /// Ele soma em vez de mandar para o fim da fila justamente para
+        /// continuar legível no log: um "vale 4000" se lê, um "vale 100300" só
+        /// denuncia que há um truque no meio. Ver <see cref="ValorDoMeuCorpo"/>.
+        /// </summary>
+        const int CUSTO_DA_CARTA_QUE_SAI_JUNTO = 3000;
 
         /// <summary>
         /// Os DOIS bits de "carta com a face para baixo" (0x2 virada em ataque,
@@ -772,7 +953,16 @@ namespace DuelServer
                         Func<int, IReadOnlyList<uint>> setStOf = null,
                         Func<int, int, (int atk, int def)?> statsEmCampoOf = null,
                         Func<int, int, bool> corpoCondenadoOf = null,
-                        Func<int, IReadOnlyList<uint>> listaDoDeckOf = null)
+                        Func<int, IReadOnlyList<uint>> listaDoDeckOf = null,
+                        // Os monstros VIRADOS do outro lado, com a faixa de nível
+                        // que os tributos denunciam. Sem quem informe, ninguém
+                        // está virado — o comportamento de antes, e o certo para
+                        // os testes de decisão isolada, que montam o campo com
+                        // códigos e não têm carta virada nenhuma.
+                        Func<int, IReadOnlyList<(int seq, int nivelMax)>> viradosDeleOf = null,
+                        // O que o NPC VIU ir para a mao dele (busca, recuperacao).
+                        // Publico: um humano do outro lado lembraria do mesmo.
+                        Func<int, IReadOnlyList<uint>> vistosNaMaoOf = null)
         {
             _cards = cards;
             _corpoCondenado = corpoCondenadoOf ?? ((_, _) => false);
@@ -807,6 +997,11 @@ namespace DuelServer
             // ADIANTA o enterro simplesmente não dispara — é o comportamento
             // anterior, e é o que os testes de decisão isolada montam.
             _listaDoDeck = listaDoDeckOf ?? (_ => Array.Empty<uint>());
+            _viradosDele = viradosDeleOf
+                        ?? (_ => (IReadOnlyList<(int seq, int nivelMax)>)Array.Empty<(int, int)>());
+            // Sem quem informe, ele não viu nada: a aposta vale sozinha, que é o
+            // comportamento dos testes de decisão isolada.
+            _vistosNaMao = vistosNaMaoOf ?? (_ => Array.Empty<uint>());
         }
 
         /// <summary>
@@ -896,6 +1091,12 @@ namespace DuelServer
         /// pensando num corpo e uma seleção que paga com outro decidem coisas
         /// diferentes.
         /// </summary>
+        /// <summary>O <see cref="CorpoMaisBarato"/> visto de fora, para as
+        /// suítes: a escolha do tributo é uma decisão como qualquer outra e
+        /// precisa ser afirmável sem montar um duelo inteiro em volta.</summary>
+        internal (uint code, int pos, int seq, int valor) CorpoMaisBarataParaTeste(int me) =>
+            CorpoMaisBarato(me);
+
         (uint code, int pos, int seq, int valor) CorpoMaisBarato(int me)
         {
             (uint code, int pos, int seq, int valor) menor = (0, 0, -1, int.MaxValue);
@@ -932,11 +1133,40 @@ namespace DuelServer
         /// Os monstros do oponente (inclusive os VIRADOS, com a DEF real), já
         /// avaliados pelo número que a batalha usa.
         /// </summary>
-        List<(uint code, int valor)> MonstrosDele(int foe) =>
-            _todoFieldPosOf(foe)
+        /// <summary>
+        /// Os monstros do outro lado, com o número que a BATALHA usa.
+        ///
+        /// Os VIRADOS entram aqui desde 30/08/2026, e não pela carta: pelo TETO
+        /// de defesa que os tributos deles denunciam (`TetoDeDefesa`). Antes
+        /// eles simplesmente não existiam para o NPC iniciante — e um campo
+        /// "vazio" que na verdade tem duas paredes setadas é a razão de ele ora
+        /// atacar às cegas, ora não atacar nunca.
+        ///
+        /// **O teto é uma estimativa PESSIMISTA, de propósito.** Ele responde
+        /// "no pior caso, quanto isso pode ter?", então o NPC só ataca quando
+        /// vence o pior caso — e nunca entrega o corpo por uma conta otimista.
+        /// O preço é deixar de atacar um alvo que ele venceria; o preço do
+        /// avesso é perder o monstro, que é muito mais caro.
+        /// </summary>
+        List<(uint code, int valor)> MonstrosDele(int foe)
+        {
+            var lista = _todoFieldPosOf(foe)
                 .Where(m => _cards.Stats(m.code).IsMonster)
                 .Select(m => (m.code, valor: ValorNaBatalha(m.code, m.pos, foe, m.seq)))
                 .ToList();
+
+            // As zonas que a visão acima já cobriu — para o virado não entrar
+            // duas vezes quando o NPC é AVANÇADO (ele lê a carta virada com a
+            // DEF real, e essa leitura é melhor que o teto).
+            var jaVistas = new HashSet<int>(_todoFieldPosOf(foe).Select(m => m.seq));
+
+            foreach (var v in _viradosDele(foe))
+            {
+                if (jaVistas.Contains(v.seq)) continue;
+                lista.Add((0u, DefesaEsperadaDoVirado(foe, v.nivelMax)));
+            }
+            return lista;
+        }
 
         /// <summary>A carta mais ameaçadora na mão do jogador, na escala do
         /// <see cref="Peso"/>. (0,0) quando não há nada que atrapalhe.</summary>
@@ -1007,6 +1237,18 @@ namespace DuelServer
 
         bool Ativavel(InteractiveDuel.Question q, uint code) => q.activatable.Any(a => a.code == code);
         int IdxAtivavel(InteractiveDuel.Question q, uint code) => q.activatable.First(a => a.code == code).index;
+
+        /// <summary>
+        /// A oferta desta carta VINDA DAQUELE LUGAR.
+        ///
+        /// O `Ativavel` de cima olha só o código, e isso não basta para carta com
+        /// **dois efeitos em lugares diferentes**: as três magias do Guardião
+        /// aparecem da MÃO (o efeito principal) e do CEMITÉRIO (banir-se para
+        /// buscar) com o mesmo id. Pegar a primeira faria o cérebro pedir um
+        /// efeito achando que pediu o outro — e o motor obedeceria.
+        /// </summary>
+        InteractiveDuel.Act AtivavelEm(InteractiveDuel.Question q, uint code, byte local) =>
+            q.activatable.FirstOrDefault(a => a.code == code && a.location == local);
         bool NaMao(int me, uint code) => _handOf(me).Contains(code);
         bool EhArmadilha(uint code) => (_cards.Stats(code).Type & TYPE_TRAP) != 0;
         bool EhRitual(uint code) { var t = _cards.Stats(code).Type; return (t & TYPE_SPELL) != 0 && (t & TYPE_RITUAL) != 0; }
@@ -1203,6 +1445,32 @@ namespace DuelServer
             if (Ativavel(q, TOON_WORLD))
                 return new Play("activate", IdxAtivavel(q, TOON_WORLD),
                     "Toon World o quanto antes — habilita invocacao especial e ataque direto dos Toons");
+
+            // 0.3 RECURSO DE GRAÇA DO CEMITÉRIO — as magias do Guardião banindo
+            //     a si mesmas para buscar 1 Sanga/Kazejin/Suijin do deck ou do
+            //     banimento.
+            //
+            //     Vem cedo, junto das compras, porque **não custa nada**: a carta
+            //     já foi gasta e está no cemitério: banir o que já acabou para
+            //     pôr uma peça na mão é ganho puro. Segurar isso para o fim do
+            //     turno só arrisca perder o turno inteiro com a carta parada lá.
+            //
+            //     O `AtivavelEm(..., GRAVE)` não é preciosismo: as três aparecem
+            //     também DA MÃO, com o mesmo id e o efeito principal (a Dark
+            //     Element cobra metade dos LP!). Sem separar por lugar, esta
+            //     regra "de graça" acabaria pagando meia vida.
+            //
+            //     Uma por turno cada (o motor cobra o `SetCountLimit`), então
+            //     três turnos de Foolish/Dark Element viram três peças na mão —
+            //     que é literalmente o que o deck precisa para invocar o Guardião.
+            foreach (var mg in MAGIAS_DO_GUARDIAO)
+            {
+                var doGy = AtivavelEm(q, mg, GRAVE);
+                if (doGy.code != 0)
+                    return new Play("activate", doGy.index,
+                        $"bane {mg} do cemiterio para buscar uma peca do Guardiao — " +
+                        "a carta ja' estava gasta, entao a busca sai de graca");
+            }
 
             int ameaca = MaiorAtkEmCampo(foe);
             int meuMelhor = MaiorAtkEmCampo(me);
@@ -1816,6 +2084,44 @@ namespace DuelServer
                     .Where(c => reanimacoes.Any(r => _cards.ReanimacaoAlcanca(r, c)))
                     .ToList();
 
+                // (c) ENTERRAR PARA LIGAR UMA CARTA — a razão que as duas de cima
+                //     não alcançam, porque as duas perguntam *"eu consigo trazer
+                //     este corpo de volta?"* e aqui a resposta é **não**.
+                //
+                //     A Dark Element pede um monstro "Gate Guardian" no MEU
+                //     cemitério como CONDIÇÃO; o corpo que ela invoca vem da
+                //     mão/deck/Extra. Então o Guardião enterrado não volta — ele
+                //     vira o interruptor, e é isso que faz valer a pena gastar o
+                //     Foolish nele.
+                //
+                //     **"Não jogar todos lá"** é a outra metade, e ela é o motivo
+                //     de a regra existir: o deck leva DUAS cópias, e enterrar as
+                //     duas deixa a chave ligada e nada para invocar.
+                //
+                //     Este cérebro não enxerga o cemitério (não há acessador, e
+                //     abrir um custaria plumbing em todo teste que monta um
+                //     NpcBrain), então quem responde *"já tem Guardião lá?"* é o
+                //     MOTOR: a Dark Element só é OFERECIDA com a condição
+                //     cumprida. Estando ela ativável, a chave já está ligada e
+                //     não se enterra outro. A bandeira cobre o caso em que ela
+                //     ainda está no deck, e portanto nunca aparece em
+                //     `activatable` para dizer isso — é a mesma dedução da
+                //     `--test-cegas`: perguntar ao motor em vez de adivinhar.
+                bool temDarkElement = _handOf(me).Contains(DARK_ELEMENT)
+                                   || _listaDoDeck(me).Contains(DARK_ELEMENT);
+                bool chaveJaLigada = AtivavelEm(q, DARK_ELEMENT, HAND).code != 0
+                                  || _guardiaoEnterrado;
+
+                if (temDarkElement && !chaveJaLigada)
+                {
+                    _enterroCodigoAlvo = GATE_GUARDIAN;
+                    _guardiaoEnterrado = true;
+                    MarcarEnterro(me, ameacaReal);
+                    return new Play("activate", enterrar.index,
+                        "enterra o Gate Guardian para LIGAR a Dark Element — ele nao volta do " +
+                        "cemiterio, e' o interruptor dela (e so' UM: o resto fica para invocar)");
+                }
+
                 uint naMao = _handOf(me).FirstOrDefault(c => Perfil(c).ReanimaDoCemiterio);
 
                 // Sem decklist informada nada mudou: quem responde e' a MAO, como
@@ -1841,6 +2147,38 @@ namespace DuelServer
                         : $"as {reanimacoes.Count} reanimacao(oes) que eu tenho nao alcancam corpo " +
                           "nenhum do meu deck") +
                      " — enterrar seria so' perder carta");
+            }
+
+            // 5.565 DESCARTAR DA MÃO PARA LIGAR A DARK ELEMENT (The Cheerful
+            //       Coffin). É a irmã da razão (c) da 5.56, pela outra porta: lá
+            //       o Guardião sai do DECK, aqui sai da MÃO.
+            //
+            //       O relato que a trouxe: *"ele tinha 1 Gate Guardian e 1 Dark
+            //       Element na mão, podia descartar o Guardião e sair jogando —
+            //       como não fez, perdeu"*. O Coffin descarta ATÉ 3 monstros e
+            //       não cobra nada: com a Dark Element na mão, mandar UM Guardião
+            //       para o cemitério é o combo inteiro num par de cartas.
+            //
+            //       **Ela precisa de um descarte DIRIGIDO**, e é por isso que não
+            //       cabia na regra genérica: o `ValorDescarte` dá −3 ao Gate
+            //       Guardian de propósito, para PROTEGÊ-LO do descarte. Essa
+            //       proteção continua certa em todo outro caso — o que muda aqui
+            //       é que o descarte é o objetivo, não o preço.
+            //
+            //       A mesma trava de "não jogar todos lá" da 5.56: a chave já
+            //       ligada (Dark Element ativável, ou a bandeira) e o Coffin fica
+            //       na mão para outra coisa.
+            if (Ativavel(q, CHEERFUL_COFFIN)
+                && _handOf(me).Contains(DARK_ELEMENT)
+                && _handOf(me).Contains(GATE_GUARDIAN)
+                && AtivavelEm(q, DARK_ELEMENT, HAND).code == 0
+                && !_guardiaoEnterrado)
+            {
+                _descarteCodigoAlvo = GATE_GUARDIAN;
+                _guardiaoEnterrado = true;
+                return new Play("activate", IdxAtivavel(q, CHEERFUL_COFFIN),
+                    "Cheerful Coffin: descarta o Gate Guardian da mao para LIGAR a Dark Element " +
+                    "(que esta' aqui do lado) — o Guardiao volta pelo efeito dela, do deck");
             }
 
             // 5.57 REFORCO PERMANENTE do meu campo (Yellow Luster Shield, Banner
@@ -2161,6 +2499,59 @@ namespace DuelServer
                 return new Play("activate", IdxAtivavel(q, MAGICAL_LABYRINTH),
                     "Magical Labyrinth: equipa o muro (e depois troca por Wall Shadow 1600/3000)");
 
+            // 5.96 DARK ELEMENT — o Guardião entra pela porta dos fundos.
+            //
+            //      O motor só a oferece com a condição cumprida (um monstro
+            //      "Gate Guardian" no MEU cemitério e um Nv11+ alcançável na
+            //      mão/deck/Extra), então o que sobra para decidir aqui é o
+            //      PREÇO: **metade dos LP**, que é o custo mais alto que este
+            //      deck paga em qualquer carta.
+            //
+            //      Duas travas, e as duas vieram do que o custo é:
+            //
+            //        • **não pagar até a morte.** Metade de 8000 é 4000 e não
+            //          dói; metade de 1500 são 750 e o duelo passa a ser decidido
+            //          por qualquer queima. O piso é o mesmo `LP_PISO` das outras
+            //          cartas deste cérebro que cobram vida;
+            //        • **não pagar por um corpo que eu já tenho.** Um 3750 na
+            //          mesa não fica melhor com o segundo — e o LP gasto seria
+            //          exatamente o que o oponente precisa para virar o duelo.
+            //          Só sai quando ele domina a mesa ou quando estou sem corpo.
+            {
+                var dark = AtivavelEm(q, DARK_ELEMENT, HAND);
+                if (dark.code != 0)
+                {
+                    int lp = _lpOf(me);
+                    int depois = lp / 2;
+                    bool jaDomino = meuMelhor >= 3000 && meuMelhor >= ameaca;
+                    if (depois < LP_PISO)
+                        _log($"guarda a Dark Element: metade de {lp} LP me deixa em {depois}, " +
+                             $"abaixo do piso ({LP_PISO})");
+                    else if (jaDomino)
+                        _log($"guarda a Dark Element: ja' tenho {meuMelhor} em campo contra {ameaca} — " +
+                             "meia vida por um corpo que nao muda a mesa");
+                    else
+                        return new Play("activate", dark.index,
+                            $"Dark Element: paga metade dos LP ({lp} -> {depois}) e poe um " +
+                            $"Guardiao Nv11+ em campo (tenho {meuMelhor} contra {ameaca})");
+                }
+            }
+
+            // 5.97 RIRYOKU GUARDIAN — o desempate, e só quando ELE está na frente.
+            //
+            //      A carta exige que os MEUS LP estejam abaixo dos dele (o motor
+            //      cobra isso), corta os LP dele pela metade e põe esse tanto de
+            //      ATK no meu Guardião. É a carta que transforma "estou perdendo"
+            //      em "ganho neste turno", e por isso não tem critério nenhum a
+            //      não ser: se o motor está oferecendo, é a hora.
+            {
+                var riryoku = AtivavelEm(q, RIRYOKU_GUARDIAN, HAND);
+                if (riryoku.code != 0)
+                    return new Play("activate", riryoku.index,
+                        $"Riryoku Guardian: corta os LP dele ({_lpOf(foe)}) pela metade e " +
+                        "poe esse tanto de ATK no meu Guardiao");
+            }
+
             // 6. Beatdown: monstros grandes (sacrificando os fracos) ou beater Nv4.
             //    O filtro `TributoCompensa` impede o NPC de tributar um corpo
             //    melhor do que o que vai entrar. Vale para as DUAS listas: o Set
@@ -2448,6 +2839,26 @@ namespace DuelServer
                 _proximoEnterroDoDeck = false;
                 var preciso = _enterroPara;
                 _enterroPara = PrecisoDe.Corpo;
+
+                // A regra que pediu o enterro já sabia QUAL corpo queria — não é
+                // o maior, nem o que volta do cemitério: é o que LIGA uma carta
+                // (o Gate Guardian, interruptor da Dark Element). Sem esta
+                // passagem, a cascata abaixo escolheria pelo critério de sempre e
+                // enterraria outra coisa, deixando a chave desligada com a carta
+                // já gasta.
+                uint desejado = _enterroCodigoAlvo;
+                _enterroCodigoAlvo = 0;
+                if (desejado != 0)
+                {
+                    var exato = q.choices.FirstOrDefault(c => c.code == desejado);
+                    if (exato.code != 0)
+                    {
+                        _log($"enterro dirigido: {desejado} (a regra que pediu sabia qual queria)");
+                        return new List<int> { exato.index };
+                    }
+                    _log($"enterro dirigido: {desejado} nao esta' entre os oferecidos — " +
+                         "cai no criterio de sempre");
+                }
 
                 // PRIMEIRO a pergunta que manda: **eu consigo trazer este corpo de
                 // volta?** Nao "algum dia alguem conseguiria" — a reanimacao que
@@ -2796,8 +3207,20 @@ namespace DuelServer
                 }
             }
 
+            // DESCARTE DIRIGIDO: a regra que ativou a carta já sabia QUAL monstro
+            // queria no cemitério — o Gate Guardian, interruptor da Dark Element
+            // (regra 5.565). Sem esta passagem o `ValorDescarte` faria o oposto
+            // do pedido: ele dá −3 ao Guardião justamente para PROTEGÊ-LO do
+            // descarte, e essa proteção continua certa em todo outro caso. Aqui o
+            // descarte é o objetivo, não o preço.
+            uint descarteAlvo = _descarteCodigoAlvo;
+            _descarteCodigoAlvo = 0;
+            if (descarteAlvo != 0)
+                _log($"descarte dirigido: {descarteAlvo} (a regra que pediu sabia qual queria)");
+
             var ordem = loc == HAND
-                ? q.choices.OrderByDescending(ValorDescarte)                       // descarta o maior monstro
+                ? q.choices.OrderByDescending(                                     // descarta o maior monstro
+                    c => descarteAlvo != 0 && c.code == descarteAlvo ? int.MaxValue : ValorDescarte(c))
                 : q.choices.OrderByDescending(c => _cards.Stats(c.code).AtkValue); // alvo/reborn: o mais forte
 
             foreach (var c in ordem)
@@ -3148,7 +3571,38 @@ namespace DuelServer
             if (_corpoCondenado(me, seq)) return 0;
 
             foreach (var m in _todoFieldPosOf(me))
-                if (m.seq == seq && m.code == code) return ValorNaBatalha(code, m.pos, me, seq);
+                if (m.seq == seq && m.code == code)
+                {
+                    int vivo = ValorNaBatalha(code, m.pos, me, seq);
+                    // **CORPO REFORÇADO VAI PARA O FIM DA FILA DE SACRIFÍCIO.**
+                    //
+                    // O relato: *"o Wevil equipa spell num monstro e tributa ele
+                    // logo em seguida"*. O equipamento vai JUNTO para o cemitério,
+                    // então tributar quem está equipado paga o atalho com DUAS
+                    // cartas — e o número vivo sozinho não impede: um Petit Moth
+                    // de 300 com +700 continua sendo o corpo mais barato de um
+                    // campo que tenha um Battle Ox de 1700.
+                    //
+                    // A regra do Insect Imitation (5.4) já sabia disso e resolvia
+                    // recusando a jogada inteira; aqui a resposta é a mesma um
+                    // nível abaixo, no PREÇO — e assim vale para todo atalho que
+                    // cobra tributo (a invocação da regra 6, Tribute Doll,
+                    // Metamorphosis, Monster Gate), sem cada um precisar lembrar.
+                    //
+                    // O tamanho do acréscimo, e por que ele é um câmbio assumido,
+                    // estão em <see cref="CUSTO_DA_CARTA_QUE_SAI_JUNTO"/>. Todo
+                    // corpo reforçado leva o mesmo, então a ordem ENTRE eles
+                    // continua sendo a de sempre.
+                    //
+                    // LIMITE CONHECIDO: mede "reforçado", não "equipado" — uma
+                    // magia de CAMPO também levanta o número vivo, e o bônus dela
+                    // não sai com o corpo. É o mesmo idioma que a 5.4 já usava, e
+                    // o erro cai para o lado seguro (poupa um corpo que dava para
+                    // gastar, em vez de gastar um que não dava).
+                    return vivo > ValorImpressoNaPosicao(code, m.pos)
+                         ? vivo + CUSTO_DA_CARTA_QUE_SAI_JUNTO
+                         : vivo;
+                }
             // Sem casar a zona (testes de decisão isolada, campo montado só com
             // códigos), cai no ATK impresso — o comportamento de antes.
             return ValorNaBatalha(code, POS_ATAQUE, me, seq);
@@ -3319,9 +3773,37 @@ namespace DuelServer
             var maisForte = q.attackers.OrderByDescending(x => AtkEmCampo(x.code, me, x.sequence)).First();
             if (doOponente.Count == 0)
             {
-                _atacanteAtk = AtkEmCampo(maisForte.code, me, maisForte.sequence);
+                // **"Campo vazio" e "campo que eu nao consigo LER" nao sao a mesma
+                // coisa** — e ate' aqui eram.
+                //
+                // O NPC iniciante decide so' com o que esta' com a face para cima
+                // (`MonstrosHonestos` filtra as viradas), entao um campo com
+                // monstros SETADOS chega nesta lista como VAZIO. O ramo dizia
+                // "campo do oponente sem monstro" e mandava atacar, com a
+                // justificativa de dano de graca — que ali nao existe. Foi assim
+                // que uma Parede do Labirinto (0/3000) declarou ataque contra uma
+                // carta virada: ela nao pode ganhar batalha nenhuma.
+                //
+                // Que o campo NAO esta' vazio, quem diz e' o proprio MOTOR: o
+                // ataque direto so' e' oferecido quando nao ha' monstro do outro
+                // lado, e um `diretos` nao-vazio teria retornado la' em cima.
+                // Chegar aqui e', portanto, "ha' corpo la', e eu nao sei qual" —
+                // sem acessador novo, sem adivinhacao, so' o byte do motor.
+                //
+                // O prejuizo e' ASSIMETRICO, e e' isso que faz o palpite ser ruim:
+                // batendo num monstro deitado com ATK menor que a DEF dele, quem
+                // ataca **nao perde o corpo, mas leva a diferenca como dano**. Com
+                // 0 de ATK nao existe nem o lado bom — nenhuma batalha se ganha.
+                int atkAsCegas = AtkEmCampo(maisForte.code, me, maisForte.sequence);
+                if (atkAsCegas < PISO_ATAQUE_AS_CEGAS)
+                    return new BattlePlay(false, 0,
+                        $"so' ha' carta VIRADA do outro lado e meu melhor ATK e' {atkAsCegas} " +
+                        $"(piso {PISO_ATAQUE_AS_CEGAS}) — atacar as cegas so' me da' dano");
+
+                _atacanteAtk = atkAsCegas;
                 return new BattlePlay(true, maisForte.index,
-                    $"campo do oponente sem monstro — ataca com {maisForte.code}");
+                    $"do outro lado so' ha' carta virada — ataca as cegas com o maior que tenho " +
+                    $"({maisForte.code}, ATK {atkAsCegas})");
             }
 
             // Basta UM alvo que eu vença: o motor pergunta o alvo em seguida.
@@ -3823,6 +4305,20 @@ namespace DuelServer
         /// nunca mais sai do cemitério. O combo vai junto, calado.
         /// </summary>
         bool _proximoEnterroDoDeck;
+        /// <summary>Qual carta o enterro tem de escolher, quando a regra que o
+        /// pediu sabe QUAL corpo quer (o Gate Guardian, para ligar a Dark
+        /// Element). `0` = a escolha volta a ser a de sempre.</summary>
+        uint _enterroCodigoAlvo;
+        /// <summary>Qual carta o DESCARTE tem de escolher, quando a regra que o
+        /// pediu sabe qual quer (o Gate Guardian, pelo Cheerful Coffin — ver a
+        /// regra 5.565). `0` = a fila de descarte de sempre, que PROTEGE o
+        /// Guardião.</summary>
+        uint _descarteCodigoAlvo;
+        /// <summary>Já enterrei um Guardião nesta partida. É o que impede a
+        /// segunda cópia de ir para o cemitério enquanto a Dark Element ainda
+        /// está no deck (e por isso não aparece em `activatable` para dizer que
+        /// a chave já está ligada). Ver a razão (c) da regra 5.56.</summary>
+        bool _guardiaoEnterrado;
 
         /// <summary>
         /// A próxima seleção é o alvo de uma REMOÇÃO DE CAMPO (a Chaos Scepter

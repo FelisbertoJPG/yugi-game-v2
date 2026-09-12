@@ -477,6 +477,18 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-trava") >= 0)
                 return TestTrava.Run(streamingAssets);
 
+            if (Array.IndexOf(args, "--test-synthesis") >= 0)
+                return TestSynthesis.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-cegas") >= 0)
+                return TestCegas.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-campo") >= 0)
+                return TestCampo.Run(streamingAssets);
+
+            if (Array.IndexOf(args, "--test-guardiao") >= 0)
+                return TestGuardiao.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-flip") >= 0)
                 return TestFlip.Run(streamingAssets);
 

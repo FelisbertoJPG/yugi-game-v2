@@ -56,6 +56,17 @@ const RAIZES = [
   { nome: 'instalado', dir: join(process.env.LOCALAPPDATA ?? '', 'ClassicDuels', 'game') },
 ].filter((r) => r.dir && existsSync(r.dir));
 
+/**
+ * As chaves que o front publica por padrão de nome, e não uma a uma. Elas TÊM
+ * de casar com `conteudo_chave_check` (`supabase/migrations/`): a tela aceitar
+ * um nome que o banco recusa deixa a edição presa na fila de pendências para
+ * sempre, e o único sinal é uma faixa grudada na tela do admin.
+ */
+const PUBLICAVEIS = [
+  /^lista[a-z0-9-]{0,31}$/,
+  /^cena-[a-z0-9][a-z0-9-]{0,30}$/,   // Editor de Cena — `chaveDaCena`, migration 0057
+];
+
 let problemas = 0;
 const ok = (m) => console.log(`  \x1b[32mOK\x1b[0m   ${m}`);
 const falha = (m) => { problemas++; console.log(`  \x1b[31mFALTA\x1b[0m ${m}`); };
@@ -96,7 +107,18 @@ for (const raiz of RAIZES) {
     const chave = arq.replace(/\.json$/, '');
     // store/ também guarda coisa que NÃO é conteúdo publicado (a carteira, as
     // sessões, as contas): só confere o que o banco conhece como chave.
-    if (!noBanco.has(chave) && !/^lista/.test(chave)) continue;
+    //
+    // PUBLICAVEIS é o outro lado: chave que o front SABE publicar e que o banco
+    // não tem é falta, não "arquivo que não é conteúdo". Sem esta lista, uma
+    // chave que a constraint `conteudo_chave_check` recusa some daqui em
+    // silêncio — foi o que aconteceu com `cena-*` (migration 0057): o editor
+    // gravava o espelho, o banco recusava toda vez, e este comando, que existe
+    // exatamente para responder "está tudo publicado?", dizia que sim.
+    if (!noBanco.has(chave) && !PUBLICAVEIS.some((re) => re.test(chave))) continue;
+    if (!noBanco.has(chave)) {
+      falha(`${chave} (${raiz.nome}) — existe SO no disco: o banco nunca aceitou esta chave`);
+      continue;
+    }
     let disco;
     try { disco = JSON.parse(readFileSync(join(dirStore, arq), 'utf8')); } catch { continue; }
     if (igual(disco, noBanco.get(chave))) ok(`${chave} (${raiz.nome}) bate com o banco`);

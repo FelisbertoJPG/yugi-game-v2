@@ -11,6 +11,7 @@
 import {
   normalizarDrops, dropsDoNpc, dropsDoDeck, chancesDe, totalDoPool, poolVazio,
   MAX_DROPS, DROP_ODDS, RARIDADES, planoRapido, chanceDoIcone,
+  normalizarBonus, bonusVazio, TIPOS_DE_ITEM, MAX_COPIAS_BONUS,
 } from './drops.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -516,6 +517,92 @@ t('RARIDADES esta na ordem da mais alta para a mais baixa', () => {
     assert.match(html, /\.quadro:not\(\.aberto\)\s*\.quadro-corpo\s*\{[^}]*display:\s*none/);
   });
 }
+
+// ---------------------------------------------- BONUS DE PRIMEIRA VITORIA
+//
+// O pool das gavetas e' a economia CONTINUA: sorteio, repeticao, e e' ela que
+// faz valer a pena duelar de novo. O bonus e' o contrario — fixo, garantido e
+// uma vez so'. Por isso ele nao reaproveita a estrutura por raridade: raridade
+// ali existe para PESAR o sorteio, e aqui nao ha' sorteio nenhum.
+
+t('a carta do bonus tem QUANTIDADE propria, presa em 1..3', () => {
+  const b = normalizarBonus({ cartas: [{ id: 25833572, qtd: 2 }, { id: 53194323, qtd: 99 },
+                                       { id: 41142615, qtd: 0 }] });
+  assert.deepEqual(b.cartas, [
+    { id: 25833572, qtd: 2 },
+    { id: 53194323, qtd: MAX_COPIAS_BONUS },   // o teto e' o mesmo 3 da construcao
+    { id: 41142615, qtd: 1 },                  // quantidade torta vira uma copia
+  ]);
+});
+
+t('id solto (sem objeto) vale UMA copia — o que uma mao escreveria', () => {
+  assert.deepEqual(normalizarBonus({ cartas: [25833572] }).cartas, [{ id: 25833572, qtd: 1 }]);
+});
+
+t('carta repetida entra UMA vez: quem repete quer quantidade, e ela ja existe', () => {
+  const b = normalizarBonus({ cartas: [{ id: 7, qtd: 1 }, { id: 7, qtd: 3 }] });
+  assert.equal(b.cartas.length, 1);
+});
+
+t('lixo no lugar do id nao entra', () => {
+  assert.equal(normalizarBonus({ cartas: ['abc', null, -3, 0, {}] }), null);
+});
+
+t('o item e um PAR {tipo, id}, e o tipo desconhecido cai fora', () => {
+  const b = normalizarBonus({ itens: [
+    { tipo: 'icone', id: 'guardiao' },
+    { tipo: 'estrutural', id: 'labirinto' },
+    { tipo: 'nave-espacial', id: 'x' },        // tipo que ninguem sabe pagar
+    { tipo: 'icone', id: 'MAIUSCULA' },        // fora do formato de slug do banco
+    { tipo: 'icone', id: 'guardiao' },         // repetido
+  ] });
+  assert.deepEqual(b.itens, [
+    { tipo: 'icone', id: 'guardiao' },
+    { tipo: 'estrutural', id: 'labirinto' },
+  ]);
+});
+
+t('o MESMO id em tipos diferentes sao itens diferentes', () => {
+  // Icone e estrutural tem o mesmo formato de slug — a chave e' o PAR.
+  const b = normalizarBonus({ itens: [{ tipo: 'icone', id: 'labirinto' },
+                                      { tipo: 'estrutural', id: 'labirinto' }] });
+  assert.equal(b.itens.length, 2);
+});
+
+t('os dois tipos de hoje estao declarados, e a lista e aberta', () => {
+  assert.deepEqual(TIPOS_DE_ITEM, ['icone', 'estrutural']);
+  assert.deepEqual(bonusVazio(), { cartas: [], itens: [] });
+});
+
+t('bonus vazio vira null — nao grava objeto vazio em todo deck do jogo', () => {
+  assert.equal(normalizarBonus({ cartas: [], itens: [] }), null);
+  assert.equal(normalizarBonus(null), null);
+  assert.equal(normalizarBonus('nao sou objeto'), null);
+});
+
+t('um deck que SO tem bonus continua existindo na configuracao', () => {
+  // Sem esta metade, o `normalizarUm` descartaria o deck inteiro (sem pool e
+  // sem icone) e o bonus sumiria na gravacao seguinte, calado.
+  const cfg = normalizarDrops({ para_dox: { decks: { guardiao: {
+    bonus: { cartas: [{ id: 25833572, qtd: 1 }] },
+  } } } });
+  const d = dropsDoDeck(cfg, 'para_dox', 'guardiao');
+  assert.ok(d, 'o deck sumiu da configuracao');
+  assert.deepEqual(d.bonus.cartas, [{ id: 25833572, qtd: 1 }]);
+});
+
+t('o bonus viaja no dropsDoDeck junto com o resto (o erro do icone, de novo)', () => {
+  const cfg = normalizarDrops({ para_dox: { decks: { guardiao: {
+    quantidade: 2, pool: { N: [7] },
+    icones: ['guardiao'], chanceIcone: 10,
+    bonus: { cartas: [{ id: 9, qtd: 3 }], itens: [{ tipo: 'icone', id: 'x' }] },
+  } } } });
+  const d = dropsDoDeck(cfg, 'para_dox', 'guardiao');
+  assert.equal(d.quantidade, 2);
+  assert.equal(d.chanceIcone, 10);
+  assert.deepEqual(d.bonus.cartas, [{ id: 9, qtd: 3 }]);
+  assert.deepEqual(d.bonus.itens, [{ tipo: 'icone', id: 'x' }]);
+});
 
 console.log(`\n  ${pass} passaram, ${fail} falharam`);
 process.exit(fail === 0 ? 0 : 1);

@@ -29,6 +29,15 @@ import { req } from './supabase.js';
 import { acharServidor } from './servidor.js';
 const INTERVALO_MS = 900;
 
+/**
+ * De quantas em quantas voltas a ponte confere se a partida ainda existe.
+ *
+ * Cinco (~4,5 s) é o meio-termo: o fim que passa pelo botão chega na hora, pelo
+ * lance de 'fim', e esta consulta é só a rede embaixo. Uma por volta dobraria o
+ * tráfego do duelo inteiro para cobrir um caso raro.
+ */
+const VOLTAS_POR_CONFERENCIA = 5;
+
 async function rpcLocal(caminho, corpo) {
   const SRV = await acharServidor();
   const r = await fetch(`${SRV}${caminho}`, {
@@ -128,6 +137,10 @@ export async function carregarPartida(id, meuId) {
   const souA = p.jogador_a === meuId;
   return {
     ...p,
+    // Quem sou eu, para comparar com `partidas.vencedor` na hora do fim. Sem
+    // isto o `duel.html` teria de pedir a conta de novo justo no momento em que
+    // a partida acabou — e uma consulta que falha ali viraria "voce perdeu".
+    meuId,
     // O jogador 0 do MOTOR é sempre o `jogador_a` da sala. Sem essa amarração
     // fixa, os dois lados discordariam sobre quem é quem — e cada um veria a
     // mão do outro como sendo a sua.
@@ -139,17 +152,58 @@ export async function carregarPartida(id, meuId) {
 }
 
 /**
+ * **O desfecho, do meu ponto de vista.**
+ *
+ * O que chega de fora é sempre o mesmo `{vencedor, motivo}` — um id e uma
+ * palavra. Quem traduz para "venci / perdi / empatou" é esta função, e ela é
+ * pura de propósito: é a conta que o `duel.html` usa para escolher o troféu ou a
+ * caveira, e errá-la mostra a tela do vencedor para quem perdeu.
+ *
+ * `vencedor` nulo é EMPATE. Não é "não sei": `encerrar_partida` (0056) só grava
+ * nulo quando o cliente disse `p_empate`; a desistência já chega com o id de
+ * quem ganhou por WO.
+ */
+export function desfechoDoFim(sala, info) {
+  const vencedor = info?.vencedor ?? null;
+  const empate = !vencedor;
+  return {
+    empate,
+    venci: !empate && !!sala?.meuId && vencedor === sala.meuId,
+    // A palavra existe para a tela poder dizer POR QUE acabou. Sem ela, quem
+    // ganha por desistência lê um "você venceu!" que não aconteceu na mesa.
+    desistencia: info?.motivo === 'desistencia',
+  };
+}
+
+/**
  * Abre a ponte.
  *
  * @param {object} sala   o que `carregarPartida` devolveu
  * @param {(visao) => void} aoAtualizar chamado a cada visão nova PARA MIM
+ * @param {(info) => void} aoEncerrar   a partida ACABOU do outro lado — recebe
+ *   `{vencedor, motivo}`. Chamado no máximo uma vez, e a ponte já se fechou.
  */
-export function abrirPonte(sala, aoAtualizar) {
+export function abrirPonte(sala, aoAtualizar, aoEncerrar = () => {}) {
   let ultimoLance = 0;
   let vivo = true;
   let ocupado = false;   // uma jogada por vez: o motor é sequencial
+  let timer = null;
+  let voltas = 0;
 
   const outro = sala.meuJogador === 0 ? 1 : 0;
+
+  /**
+   * Desliga a ponte e avisa a tela, uma vez só.
+   *
+   * Fechar ANTES de avisar não é detalhe: o `aoEncerrar` mostra o quadro de fim,
+   * e uma volta do laço que passasse por ali de novo o mostraria duas vezes.
+   */
+  function encerrarLocal(info) {
+    if (!vivo) return;
+    vivo = false;
+    clearInterval(timer);
+    aoEncerrar(info ?? {});
+  }
 
   /** Tudo que chega ao `duel.html` passa por aqui — e sai já virado para mim. */
   const entregar = (visao) => aoAtualizar(espelharVisao(visao, sala.meuJogador));
@@ -221,6 +275,16 @@ export function abrirPonte(sala, aoAtualizar) {
         ultimoLance = Math.max(ultimoLance, l.id);
         if (!vivo) return;
 
+        // A PARTIDA ACABOU (migration 0056). Chega pelo mesmo canal das jogadas
+        // porque é o canal que os dois lados já estão ouvindo — e por isso a
+        // notícia leva o mesmo tempo que uma jogada, e não uma consulta nova.
+        //
+        // Vem depois do último 'estado' na ordem dos ids, então o golpe final
+        // já está aplicado (ou na fila) quando isto roda. Quem espera a fila
+        // esvaziar é a tela, no `aoEncerrar` — aqui não há como saber o que
+        // ainda está sendo animado.
+        if (l.tipo === 'fim') { encerrarLocal(l.dados); return; }
+
         if (sala.souAnfitriao && l.tipo === 'jogada') {
           // A jogada do convidado entra no motor COMO SENDO DELE. É `jogador`
           // que impede o convidado de jogar na vez do anfitrião — a recusa vem
@@ -236,6 +300,18 @@ export function abrirPonte(sala, aoAtualizar) {
           entregar(l.dados);
         }
       }
+
+      // A REDE DE SEGURANÇA. O lance de 'fim' é o caminho rápido e cobre quem
+      // desiste pela tela; isto cobre todo o resto — a linha fechada por fora
+      // (o SQL Editor), um servidor que ainda não tem a 0056, um lance perdido.
+      //
+      // A verdade de "acabou" é `partidas.estado`, e ela está a uma consulta de
+      // distância: não custa nada perguntar de vez em quando, e custa MUITO não
+      // perguntar nunca — era o jogador olhando um tabuleiro morto para sempre.
+      if (vivo && ++voltas % VOLTAS_POR_CONFERENCIA === 0) {
+        const fim = await conferirFim();
+        if (fim) { encerrarLocal(fim); return; }
+      }
     } catch (e) {
       // Uma volta que falha não derruba o duelo: a próxima tenta de novo, e o
       // `ultimoLance` garante que nada é processado duas vezes.
@@ -245,7 +321,25 @@ export function abrirPonte(sala, aoAtualizar) {
     }
   }
 
-  const timer = setInterval(olhar, INTERVALO_MS);
+  /**
+   * A linha da partida ainda está de pé? Devolve `{vencedor, motivo}` quando
+   * NÃO está, e `null` enquanto o duelo vale.
+   *
+   * Uma consulta que falha devolve `null`: sem rede, o certo é continuar o
+   * duelo com o último estado conhecido — nunca declarar o fim por silêncio.
+   */
+  async function conferirFim() {
+    try {
+      const r = await req(`partidas?select=estado,vencedor&id=eq.${sala.id}&limit=1`);
+      const p = r.ok ? r.dados?.[0] : null;
+      if (!p || p.estado === 'em_andamento') return null;
+      // Sem `motivo`: daqui não dá para saber se foi desistência ou o golpe
+      // final, e chutar escreveria a frase errada na tela de fim.
+      return { vencedor: p.vencedor ?? null, motivo: null };
+    } catch { return null; }
+  }
+
+  timer = setInterval(olhar, INTERVALO_MS);
   olhar();
 
   return {

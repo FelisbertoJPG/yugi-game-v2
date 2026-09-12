@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de Cena — Classic Duels</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  /* O guarda do `hidden`: ele é uma regra da folha do NAVEGADOR, a
+     especificidade mais baixa que existe, e qualquer `display` nosso ganha
+     dela — o elemento fica na tela com `el.hidden === true` e sem erro nenhum.
+     Ver `web/js/esconder.test.mjs`. */
+  [hidden] { display: none !important; }
+
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .corpo { flex: 1; display: flex; min-height: 0; }
+
+  #palco { flex: 1; position: relative; min-width: 0; background: #0e1119; }
+  #palco canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  #palco canvas.arrastando { cursor: grabbing; }
+
+  /* Os atalhos ficam no canto, agrupados por assunto — `<dl>` porque é isso
+     que eles são: termo (o modo) e definição (o que as teclas fazem ali). */
+  #ajuda { position: absolute; left: 12px; bottom: 10px; font-size: 11px; color: var(--dim);
+           line-height: 1.6; pointer-events: none; text-shadow: 0 1px 3px #000;
+           max-width: 46ch; }
+  #ajuda dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+  #ajuda dt { color: var(--gold); text-align: right; white-space: nowrap; }
+  #ajuda dd { margin: 0; }
+  #ajuda kbd { background: #1e293b88; border: 1px solid var(--line); border-radius: 3px;
+               padding: 0 4px; font: 11px ui-monospace, monospace; }
+  #medidor { position: absolute; right: 12px; top: 10px; font-size: 11px; color: var(--dim);
+             text-align: right; pointer-events: none; text-shadow: 0 1px 3px #000; }
+
+  /* O MODO é a informação mais importante do editor: é ele que explica por que
+     o clique põe em vez de selecionar. Sem ele à vista, quem pegou uma peça na
+     gaveta e tenta apagar outra conclui que o editor está quebrado. */
+  #modo { position: absolute; left: 50%; transform: translateX(-50%); top: 10px;
+          font-size: 11px; color: var(--dim); background: #0f172acc; padding: 4px 12px;
+          border: 1px solid var(--line); border-radius: 20px; pointer-events: none; }
+  #modo.pondo { color: var(--gold); border-color: var(--gold); }
+  #proximo { position: absolute; left: 50%; transform: translateX(-50%); top: 36px;
+             font-size: 11px; color: var(--gold); pointer-events: none;
+             text-shadow: 0 1px 3px #000; }
+  aside footer .rot { color: var(--dim); font-size: 11px; align-self: center; }
+  aside footer select { flex: 1; }
+  #btn-colisoes.ligado { border-color: #51d88a; color: #51d88a; }
+  #btn-relevo.ligado { border-color: #d8a24a; color: #d8a24a; }
+  #modo.relevo { color: #d8a24a; border-color: #d8a24a; }
+  #btn-apagar-modo.ligado { border-color: #e06c6c; color: #e06c6c; }
+  #modo.apagando { color: #e06c6c; border-color: #e06c6c; }
+  /* Os interruptores de REGRA, na gaveta. Três estados de propósito — ver
+     `interruptor` em `cenagaveta.js`: "padrão" não é "não". */
+  .grupo > .regras { display: flex; gap: 4px; padding: 4px 8px 6px; }
+  .grupo > .regras.excecao { padding-top: 0; padding-left: 22px; opacity: .8; }
+  .regra { flex: 1; font-size: 10px; padding: 2px 4px; background: var(--bg);
+           color: var(--dim); border: 1px solid var(--line); border-radius: 4px; }
+  #colisor > summary { cursor: pointer; color: var(--dim); font-size: 11px;
+                       list-style: none; padding: 2px 0; }
+  #colisor > summary::-webkit-details-marker { display: none; }
+  #colisor > summary::before { content: '▸ '; }
+  #colisor[open] > summary::before { content: '▾ '; }
+  #colisor .linha { margin-top: 4px; }
+  #colisor input[type=checkbox] { margin: 0; }
+  #colisor button { font-size: 10px; padding: 2px 6px; }
+  #btn-testar.ligado { border-color: #51d88a; color: #51d88a; }
+  #modo.testando { color: #51d88a; border-color: #51d88a; }
+  #lateral-edicao { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #linha-tempo button { flex: 0 0 auto; min-width: 38px; }
+  #linha-tempo button:disabled { opacity: .35; cursor: default; }
+  #semwebgl { position: absolute; inset: 0; display: flex; align-items: center;
+              justify-content: center; text-align: center; padding: 24px; color: var(--dim); }
+
+  aside { width: 300px; border-left: 1px solid var(--line); background: var(--bg2);
+          display: flex; flex-direction: column; min-height: 0; }
+  aside header { padding: 8px 12px; border-bottom: 1px solid var(--line);
+                 font-size: 11px; color: var(--dim); display: flex;
+                 flex-direction: column; gap: 6px; }
+  #btn-largar { width: 100%; }
+  #busca { width: 100%; box-sizing: border-box; }
+  #gaveta { flex: 1; overflow-y: auto; padding: 8px; display: flex;
+            flex-direction: column; gap: 4px; align-content: start; }
+  /* Os GRUPOS da gaveta. `<details>` é HTML: abrir e fechar é do navegador,
+     sem estado nosso e sem ouvinte de clique — e sem o defeito clássico do
+     acordeão escrito à mão, o `display` que some junto com a classe e deixa a
+     seção aberta e vazia. */
+  .grupo { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .grupo > summary { padding: 7px 10px; cursor: pointer; font-size: 11px;
+                     background: var(--bg); display: flex; justify-content: space-between;
+                     align-items: center; gap: 8px; user-select: none; list-style: none; }
+  .grupo > summary::-webkit-details-marker { display: none; }
+  /* o triângulo é nosso, e gira com o estado — o marcador nativo some acima
+     porque ele é desenhado de forma diferente em cada navegador */
+  .grupo > summary::before { content: '▸'; color: var(--dim); transition: transform .12s; }
+  .grupo[open] > summary::before { transform: rotate(90deg); }
+  .grupo > summary .conta { color: var(--dim); font-size: 10px; margin-left: auto; }
+  .grupo > .peca { margin: 3px 6px; }
+  .grupo > .peca:first-of-type { margin-top: 6px; }
+  .grupo > .peca:last-child { margin-bottom: 6px; }
+  .grupo > .nota { padding: 4px 10px 8px; font-size: 10px; color: var(--dim); }
+
+
+  .peca { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+          padding: 6px 8px; cursor: pointer; color: var(--fg); font: inherit; font-size: 11px;
+          text-align: left; display: flex; justify-content: space-between; gap: 8px; }
+  .peca:hover { border-color: var(--gold); }
+  .peca.ativa { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+  .peca .medida { color: var(--dim); font-size: 10px; white-space: nowrap; }
+
+  #selecao { border-top: 1px solid var(--line); padding: 10px 12px; font-size: 11px;
+             display: flex; flex-direction: column; gap: 6px; }
+  #selecao .linha { display: flex; align-items: center; gap: 6px; }
+  #selecao label { color: var(--dim); width: 52px; }
+  #selecao input[type=range] { flex: 1; }
+
+  aside footer { border-top: 1px solid var(--line); padding: 10px 12px; display: flex;
+                 flex-direction: column; gap: 6px; }
+  aside footer .linha { display: flex; gap: 6px; }
+  aside footer button { flex: 1; }
+
+  #semlib { padding: 14px; font-size: 12px; color: var(--dim); line-height: 1.6; }
+  #semlib code { color: var(--gold); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>▚ EDITOR DE CENA</h1>
+  <span class="sub" id="sub">carregando…</span>
+  <span class="spacer"></span>
+  <button id="btn-testar" title="põe o jogador na cena e anda nela (T)">▶ testar</button>
+  <button id="btn-mundo">Mundo</button>
+  <button id="btn-teste">← área de teste</button>
+</div>
+
+<div class="corpo">
+  <div id="palco">
+    <canvas id="cv"></canvas>
+    <div id="medidor"></div>
+    <div id="modo"></div>
+    <div id="proximo" hidden></div>
+    <!-- Os atalhos, por ASSUNTO. Antes eram cinco linhas corridas em que
+         câmera, peça e relevo se misturavam: para achar um, lia-se tudo. -->
+    <div id="ajuda">
+      <dl>
+        <dt>câmera</dt>
+        <dd><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> anda
+            (<kbd>Shift</kbd> corre) &nbsp;·&nbsp;
+            <kbd>botão direito</kbd> gira &nbsp;·&nbsp; <kbd>roda</kbd> aproxima</dd>
+
+        <dt>pondo</dt>
+        <dd>a peça segue o mouse; <kbd>clique</kbd> deixa uma cópia &nbsp;·&nbsp;
+            <kbd>Q</kbd>/<kbd>E</kbd> gira &nbsp;·&nbsp;
+            <kbd>Ctrl</kbd>+<kbd>roda</kbd> tamanho<br>
+            chão em cima de chão <b>troca</b> o de baixo</dd>
+
+        <dt>escolhendo</dt>
+        <dd><kbd>clique</kbd> seleciona, <kbd>arraste</kbd> move &nbsp;·&nbsp;
+            <kbd>Q</kbd>/<kbd>E</kbd> gira &nbsp;·&nbsp;
+            <kbd>Ctrl</kbd>+<kbd>roda</kbd> tamanho<br>
+            <kbd>Shift</kbd>+arraste ou <kbd>PgUp</kbd>/<kbd>PgDn</kbd> altura
+            &nbsp;·&nbsp; <kbd>F</kbd> assenta no que está embaixo<br>
+            <kbd>Ctrl</kbd>+<kbd>D</kbd> duplica &nbsp;·&nbsp;
+            <kbd>Backspace</kbd> apaga a selecionada</dd>
+
+        <dt>apagando</dt>
+        <dd><kbd>Del</kbd> liga o modo: cada <kbd>clique</kbd> apaga o que
+            acertar</dd>
+
+        <dt>relevo</dt>
+        <dd><kbd>R</kbd> liga; arraste no chão &nbsp;·&nbsp; o seletor diz se é
+            levantar, cavar ou aplainar e <kbd>Shift</kbd> inverte os dois
+            primeiros<br>só onde há placa de terreno</dd>
+
+        <dt>testando</dt>
+        <dd><kbd>T</kbd> entra e sai; o jogador anda com
+            <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+            (<kbd>Shift</kbd> corre) &nbsp;·&nbsp; <kbd>Esc</kbd> sai<br>
+            a colisão é a MESMA do Mundo</dd>
+
+        <dt>sempre</dt>
+        <dd><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz &nbsp;·&nbsp;
+            <kbd>Ctrl</kbd>+<kbd>Y</kbd> refaz &nbsp;·&nbsp;
+            <kbd>C</kbd> colisões &nbsp;·&nbsp;
+            <kbd>Esc</kbd> larga o que estiver na mão</dd>
+      </dl>
+    </div>
+    <div id="semwebgl" hidden>
+      Este navegador não abriu o 3D (WebGL). O editor precisa dele.
+    </div>
+  </div>
+
+  <aside>
+    <header>
+      <input id="busca" type="search" placeholder="procurar peça…" autocomplete="off">
+      <button id="btn-largar" hidden>✕ largar a peça (Esc)</button>
+    </header>
+    <div id="semlib" hidden></div>
+    <!-- Tudo o que EDITA a cena vive aqui dentro, e some no modo testar: mexer
+         na cena por baixo do boneco mudaria justamente os colisores que se
+         está provando. -->
+    <div id="lateral-edicao">
+    <div id="gaveta"></div>
+
+    <div id="selecao" hidden>
+      <div class="linha"><b id="sel-nome"></b></div>
+      <div class="linha">
+        <label for="sel-giro">giro</label>
+        <input id="sel-giro" type="range" min="0" max="360" step="1" value="0">
+        <span id="sel-giro-v" class="medida"></span>
+      </div>
+      <div class="linha">
+        <label for="sel-escala">tamanho</label>
+        <input id="sel-escala" type="range" min="10" max="400" step="5" value="100">
+        <span id="sel-escala-v" class="medida"></span>
+      </div>
+      <div class="linha">
+        <label for="sel-altura">altura</label>
+        <input id="sel-altura" type="range" min="-500" max="1500" step="5" value="0">
+        <span id="sel-altura-v" class="medida"></span>
+      </div>
+      <div class="linha">
+        <button id="btn-assentar" title="põe no topo do que está embaixo (F)">assentar</button>
+        <button id="btn-duplicar">duplicar</button>
+        <button id="btn-apagar">apagar</button>
+      </div>
+
+      <!-- O COLISOR desta peça — as alças verdes da Unity, em números. Fica
+           dentro de um `<details>` porque é ajuste fino: quem está montando o
+           mapa não quer seis controles a mais na frente o tempo todo. -->
+      <details id="colisor">
+        <summary>colisor <span id="col-estado" class="medida"></span></summary>
+        <div class="linha">
+          <label for="col-liga">colide</label>
+          <input id="col-liga" type="checkbox" checked>
+          <button id="col-zerar" title="volta ao colisor do tamanho da peça">padrão</button>
+        </div>
+        <div class="linha">
+          <label for="col-ex">largura</label>
+          <input id="col-ex" type="range" min="5" max="300" step="5" value="100">
+          <span id="col-ex-v" class="medida"></span>
+        </div>
+        <div class="linha">
+          <label for="col-ey">altura</label>
+          <input id="col-ey" type="range" min="5" max="300" step="5" value="100">
+          <span id="col-ey-v" class="medida"></span>
+        </div>
+        <div class="linha">
+          <label for="col-ez">fundo</label>
+          <input id="col-ez" type="range" min="5" max="300" step="5" value="100">
+          <span id="col-ez-v" class="medida"></span>
+        </div>
+        <div class="linha">
+          <label for="col-dy">sobe</label>
+          <input id="col-dy" type="range" min="-300" max="300" step="5" value="0">
+          <span id="col-dy-v" class="medida"></span>
+        </div>
+      </details>
+    </div>
+
+    <footer>
+      <div class="linha">
+        <label for="passo" class="rot">grade</label>
+        <select id="passo" title="a peça gruda neste passo — o chão gruda no tamanho dele">
+          <option value="0">livre</option>
+          <option value="0.25">0,25 m</option>
+          <option value="0.5">0,5 m</option>
+          <option value="1" selected>1 m</option>
+          <option value="2">2 m</option>
+          <option value="4">4 m</option>
+        </select>
+        <button id="btn-colisoes" title="mostra a caixa de colisão de cada peça (C)">colisões</button>
+      </div>
+      <div class="linha" id="linha-tempo">
+        <button id="btn-desfazer" title="desfazer (Ctrl+Z)">↶</button>
+        <button id="btn-refazer" title="refazer (Ctrl+Y)">↷</button>
+        <button id="btn-apagar-modo" title="cada clique apaga o que acertar (Del)">modo apagar</button>
+      </div>
+      <div class="linha">
+        <button id="btn-relevo" title="esculpir o chão — só onde há placa de terreno (R)">relevo</button>
+        <select id="pincel-modo" title="o que o pincel faz — Shift inverte levantar e cavar">
+          <option value="levantar" selected>levantar</option>
+          <option value="cavar">cavar (fenda)</option>
+          <option value="aplainar">aplainar</option>
+        </select>
+      </div>
+      <div class="linha">
+        <select id="pincel-raio" title="tamanho do pincel">
+          <option value="2">pincel 2 m (fenda)</option>
+          <option value="4">pincel 4 m</option>
+          <option value="6" selected>pincel 6 m</option>
+          <option value="10">pincel 10 m</option>
+          <option value="18">pincel 18 m</option>
+        </select>
+      </div>
+      <div class="linha">
+        <input id="nome-cena" type="text" placeholder="nome da cena" value="nova" spellcheck="false">
+      </div>
+      <div class="linha">
+        <button id="btn-abrir">abrir</button>
+        <button id="btn-salvar" class="primary">salvar</button>
+      </div>
+    </footer>
+    </div>
+  </aside>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module" src="/web/js/bootguard.js"></script>
+<script type="module" src="/web/js/cenapagina.js"></script>
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
+</body>
+</html>

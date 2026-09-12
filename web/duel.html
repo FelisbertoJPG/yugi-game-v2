@@ -218,7 +218,11 @@
   /* [bancada:lp] --- fim --- */
   /* o verso do fantasma é o mesmo `.back` de cima — antes esta regra repetia
      o degradê inteiro, e as duas cópias podiam divergir sem ninguém notar */
-  /* tremor do alvo quando é atingido por um ataque */
+  /* [bancada:tremor] --- inicio --- */
+  /* Tremor do alvo quando é atingido por um ataque. Desde que a investida
+     deixou de ir ATÉ o alvo (ver `resolverInvestida`), este tremor é o que diz
+     que houve colisão — e ele mexe ±3px na carta que está na zona, sem nunca
+     tirá-la de lá. */
   @keyframes fx-shake {
     0%,100% { transform: translate(0,0); }
     20% { transform: translate(-3px,2px) rotate(-2deg); }
@@ -227,6 +231,7 @@
     80% { transform: translate(2px,-1px) rotate(1deg); }
   }
   .fx-hit { animation: fx-shake .28s ease-in-out; }
+  /* [bancada:tremor] --- fim --- */
 
   /* [bancada:seta] --- inicio ---
      As sentinelas `[bancada:...]` delimitam o que `tools/bancada-visual.mjs`
@@ -280,6 +285,50 @@
     65%  { opacity: .95; transform: scale(.98); }
     100% { opacity: .75; transform: scale(1); }
   }
+  /* ---------- a MIRA: a mesma seta, mas seguindo o mouse ----------
+     Declarar o ataque abria uma JANELA com as cartas do outro lado: escolhia-se
+     o alvo olhando uma lista de miniaturas, fora da mesa, com a seta — que e' o
+     desenho de "quem bate em quem" — esperando do lado de fora ate' a escolha
+     estar feita. Hoje o clique no atacante acende a MESMA seta e ela acompanha
+     o ponteiro: passa-se de alvo em alvo olhando o campo, e o clique fixa.
+
+     O traco e' repintado a cada movimento do mouse, entao NADA aqui pode ter
+     animacao de entrada: `seta-cresce` recomecaria sessenta vezes por segundo
+     (uma seta piscando), `seta-ponta` tem 300ms de atraso e a cabeca nunca
+     apareceria, e `seta-alvo` faria a mancha do alvo bater como um pisca-pisca.
+     Na mira tudo nasce pronto. */
+  #atk-seta.mira .corpo, #atk-seta.mira .halo { stroke-dasharray: none; stroke-dashoffset: 0; }
+  #atk-seta.mira .ponta { opacity: 1; animation: none; }
+  #atk-seta.mira .alvo  { opacity: .8; animation: none; transform: none; }
+  /* SEM alvo sob o ponteiro a seta e' DOURADA. O vermelho e' a cor de "vai
+     bater aqui", e a unica coisa que esta seta nao pode fazer e' prometer isso
+     apontando para o vazio — a diferenca de cor e' o que separa "estou
+     escolhendo" de "escolhi". */
+  #atk-seta.mira.livre .corpo { stroke: var(--gold); }
+  #atk-seta.mira.livre .ponta { fill: var(--gold); }
+
+  /* A zona sob o ponteiro. As candidatas ja' piscam (`.selectable`); esta e' a
+     que o clique vai levar, e por isso para de piscar e fica cheia.
+     A dupla `.selectable.mira-alvo` NAO e' enfeite: as duas regras tem a mesma
+     especificidade e `.selectable` e' escrita mais abaixo neste arquivo, entao
+     ela ganharia no desempate por ordem e a zona sob o cursor continuaria
+     dourada e piscando — igualzinha as outras candidatas. */
+  .zone.selectable.mira-alvo, .zone.mira-alvo {
+    outline: 3px solid var(--red); outline-offset: -3px; animation: none;
+  }
+
+  /* A frase que a janela dizia e que a mesa nao diz sozinha. Mora dentro do
+     `#fx` (que e' `pointer-events: none` e nao intercepta o clique no alvo) em
+     vez de virar markup novo: ela e' um ESTADO da mira, e some junto com ela.
+     Na mesma prateleira da faixa da batalha (`top: 9%`), que e' o passo
+     seguinte deste mesmo gesto — e que nunca esta' na tela ao mesmo tempo. */
+  #fx .mira-dica {
+    position: fixed; top: 9%; left: 50%; transform: translateX(-50%);
+    padding: 5px 14px; border: 1px solid var(--red); border-radius: 3px;
+    background: #150b0ce8; color: var(--ink);
+    font: 700 11px/1 ui-monospace, monospace;
+    letter-spacing: 2px; text-transform: uppercase; white-space: nowrap;
+  }
   /* [bancada:seta] --- fim --- */
   /* [bancada:brilho] --- inicio --- */
   /* Brilho de quem ACABOU de aparecer com a face para cima: a magia ativada, o
@@ -293,6 +342,53 @@
   }
   .fx-activate { animation: fx-flash .55s ease-in-out; z-index: 4; }
   /* [bancada:brilho] --- fim --- */
+
+  /* [bancada:virar] --- inicio --- */
+  /* ---------- a VIRADA de uma carta em campo ----------
+     A carta com a face para baixo que ABRE: a Invocacao-Virar, o alvo do
+     ataque abrindo dentro da etapa de dano, a armadilha baixada que e'
+     ativada. Ela trocava de arte entre dois quadros de video — onde havia um
+     verso passava a haver a carta, sem nada no meio —, e o instante mais
+     dramatico do duelo (descobrir contra o que se esta' batendo) nao tinha
+     gesto nenhum. O brilho de `fx-activate` chegava DEPOIS, sobre uma carta
+     que ja' estava aberta: ele diz "olhe aqui", nunca "isto acabou de abrir".
+
+     E' a MESMA cerimonia da revelacao do drop e do pacote (`revelacao.css`):
+     `rotateY` sobre `preserve-3d`, verso e frente costas com costas, mesma
+     curva e mesmo tempo. Escrita aqui porque la' ela e' da GRADE daquela
+     caixa e aqui e' de um fantasma solto por cima da mesa — o que nao podia
+     divergir e' o GESTO: uma virada mais lenta na mesa do que na Loja seria
+     lida como travamento.
+
+     O `.deita` e' a metade que a revelacao nao tem: em campo a carta virada
+     esta' DEITADA (defesa virada) e pode abrir DE PE' — a Invocacao-Virar
+     sempre abre em ATAQUE. Girar e levantar sao dois eixos, e num elemento
+     so' a segunda rotacao come a primeira (o `rotate(90deg)` gira tambem o
+     eixo Y do giro, e o que sai e' a carta capotando de lado). Por isso os
+     90 graus moram FORA do `preserve-3d`, num pai. */
+  #fx .virar { position: fixed; perspective: 700px; }
+  /* Os dois transicionam juntos, e com a mesma duracao de proposito: quem
+     abre de pe' esta' levantando e girando no mesmo movimento. */
+  #fx .virar .deita, #fx .virar .giro {
+    width: 100%; height: 100%;
+    transition: transform var(--vira-ms, .56s) cubic-bezier(.2,.7,.3,1);
+  }
+  #fx .virar .giro { position: relative; transform-style: preserve-3d; }
+  #fx .virar.aberta .giro { transform: rotateY(180deg); }
+  #fx .virar .face {
+    position: absolute; inset: 0; backface-visibility: hidden;
+    border-radius: 2px; overflow: hidden; background: #0c141d;
+    box-shadow: 0 4px 14px #000a;
+  }
+  #fx .virar .face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* A frente nasce de costas: e' este `rotateY(180deg)` que a poe do outro
+     lado do papel, e e' o que faz meia volta do pai trocar uma face pela
+     outra. Sem ele as duas ficam do mesmo lado e a carta abre... no verso. */
+  #fx .virar .frente {
+    transform: rotateY(180deg);
+    border: 1px solid var(--gold); box-sizing: border-box;
+  }
+  /* [bancada:virar] --- fim --- */
 
   /* soltar SOBRE um monstro = tributá-lo */
   .zone.drop-tribute { outline: 2px dashed #c98b2e; outline-offset: -2px; }
@@ -564,6 +660,65 @@
     font-size: 9px; padding: 0 3px;
   }
   .sel-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ---------- DE QUEM É A CARTA (ver web/js/alvos.js) ----------
+     A lista do motor mistura os dois lados e não diz de quem é nada. Com
+     grupos, o `#sel-cards` deixa de ser a grade e passa a ser a coluna dos
+     grupos — cada um com a SUA grade, debaixo do próprio título. A regra de
+     grade continua valendo para quem enche o `#sel-cards` direto (o seletor
+     do Extra Deck), que não tem dono para separar. */
+  .sel-cards.grupos { display: block; }
+  .sel-grupo + .sel-grupo { margin-top: 12px; }
+  .sel-grupo-h {
+    font: 700 10px/1 ui-monospace, monospace; letter-spacing: 2px;
+    color: var(--dim); margin: 0 0 5px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sel-grupo-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .sel-grupo.dele .sel-grupo-h { color: #ff8d97; }
+  .sel-grade {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
+  }
+  /* O selo fica NA carta, e não só no título: o título sai da vista assim que a
+     grade rola, e é justamente aí que a carta virada do oponente volta a ser um
+     verso igual ao meu. */
+  .sel-card .dono {
+    position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+    background: #000d; color: var(--dim); text-align: center;
+    font: 700 8px/1.7 ui-monospace, monospace;
+    text-transform: uppercase; pointer-events: none;
+    /* Sem `letter-spacing`: o selo passou a carregar DUAS palavras ("sua ·
+       mão") e cada pixel entre letras saía do que dá para ler numa miniatura
+       de 64px. A reticência é a rede de segurança do caso mais longo
+       ("dele · cemitério") — cortado ele ainda diz o que precisa. */
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  /* As três juntas de propósito: escritas depois de `.sel-card:hover` e de
+     `.sel-card.on`, elas venceriam as duas por ordem — e a carta escolhida
+     perderia a moldura dourada que diz que está escolhida. */
+  .sel-card.dele { border-color: #7d3b41; }
+  .sel-card.dele:hover { border-color: #ff8d97; }
+  .sel-card.dele.on { border-color: var(--gold); }
+  .sel-card.dele .dono { color: #ff8d97; }
+
+  /* ESCOLHA NA MESA: o quadro vira uma BARRA e o vidro sai. As cartas estão
+     todas no tabuleiro, onde `.zone.selectable` já pisca nelas — e é o
+     tabuleiro que diz de quem é cada uma, um lado em cima e o outro embaixo,
+     sem depender de rótulo nenhum. Mesma decisão da MIRA do ataque.
+     O `pointer-events: none` tem de valer no overlay INTEIRO: ele é
+     `inset: 0`, então mesmo transparente ele engoliria todo clique na mesa —
+     e a mesa é justamente onde a resposta é dada. A caixa o reativa.
+     `display` fica de fora daqui: quem o decide continua sendo o
+     `#sel-overlay[hidden]`, que tem a mesma especificidade e vem antes. */
+  #sel-overlay.no-campo {
+    background: none; pointer-events: none;
+    align-items: flex-start; justify-content: center;
+  }
+  #sel-overlay.no-campo .sel-box {
+    pointer-events: auto; width: auto; max-width: min(560px, 92vw);
+    margin-top: 5vh; box-shadow: 0 6px 24px #000c;
+  }
+  #sel-overlay.no-campo .sel-cards { display: none; }
 
   /* ---------- arrastar da mão para a zona ---------- */
   .card.draggable { cursor: grab; }
@@ -844,6 +999,12 @@
     <div class="sel-info" id="sel-info"></div>
     <div class="sel-cards" id="sel-cards"></div>
     <div class="sel-acts">
+      <!-- A SAÍDA da escolha na mesa. Ela só existe quando a escolha está sendo
+           feita no tabuleiro, e é o que impede a feature de virar um beco sem
+           saída: se a carta não estiver à vista, se a zona não responder, se o
+           jogador simplesmente não a achar, o quadro de sempre volta com um
+           clique. Um duelo já parou aqui. -->
+      <button id="sel-lista" hidden title="mostrar as cartas numa lista, como antes">ver a lista</button>
       <button id="sel-ok" class="btn-primary">confirmar</button>
       <button id="sel-finish">encerrar seleção</button>
     </div>
@@ -984,7 +1145,7 @@ import { requireLogin, contaAtual } from '/web/js/auth.js';
 // reexporta o `perfilAtual`, e o caminho curto é o mesmo que as outras telas de
 // admin já usam.
 import { perfilAtual } from '/web/js/supabase.js';
-import { carregarPartida, abrirPonte, idsDoYdk } from '/web/js/ponte.js';
+import { carregarPartida, abrirPonte, idsDoYdk, desfechoDoFim } from '/web/js/ponte.js';
 import { encerrar as encerrarPartida } from '/web/js/multiplayer.js';
 import { decidirCorrente, normalizarModo, MODOS, MODO_PADRAO } from '/web/js/correntes.js';
 import { criarFilaDeVisoes } from '/web/js/filavisoes.js';
@@ -999,6 +1160,16 @@ import { rotuloReposicao, estaVirada } from '/web/js/posicao.js';
 // `node web/js/banimento.test.mjs`.
 import { banir, desbanir, topoBanido, contarAbertas, LOCATION_BANIDO } from '/web/js/banimento.js';
 import { ofertasPorMao, linhasDeAtivacao, textoDoEfeito } from '/web/js/ofertas.js';
+// DE QUEM e' a carta que estou escolhendo. A lista do motor mistura os dois
+// lados e nao diz de quem e' nada — e a carta SETADA dele chega sem codigo,
+// desenhada com o mesmo verso das minhas. Ver `web/js/alvos.js`.
+import { escolhaNoCampo, agruparEscolhas, eixosQueVariam, seloDaCarta,
+         donoDaCarta, nomeDoLocal, ROTULO, LOCAL,
+         estaNoCampo, ancoraDe } from '/web/js/alvos.js';
+// PARA ONDE a carta foi. A MAO nao e' uma zona, entao ela nao tinha ancora — e
+// `flyGhost` desiste calado sem destino: a carta sumia da mesa entre dois
+// quadros. Ver `web/js/movimento.js`.
+import { lugarDaCarta, ancoraDaCarta } from '/web/js/movimento.js';
 import { geometriaDaSeta, centroDe, haloDoAlvo, mostrarCamada, esconderCamada } from '/web/js/setaataque.js';
 // Os CINCO momentos do ataque (declaracao, a virada do alvo, a janela de
 // resposta, a colisao e o calculo). A regra mora fora da tela porque erra
@@ -1732,6 +1903,15 @@ async function act(action, arg, label, args) {
   // cada evento da resposta chama render(), que antes reabria o popup de posição
   // já respondido e permitia um segundo clique (o motor então emitia RETRY).
   const perguntaRespondida = question;
+  // Qualquer ação encerra a mira: ou ela é a resposta que estávamos mirando, ou
+  // é outra coisa e a seta ficaria pendurada apontando para uma escolha morta.
+  // `select` com a mira no ar só pode ser a resposta dela: a janela está
+  // escondida e as únicas zonas clicáveis são os alvos que ela mesma acendeu.
+  pararMira(action === 'select');
+  // Só depois de um `attack` é que um SELECT_CARD de monstros do outro lado é
+  // "em quem bater". Sem esta marca, a remoção que mira o campo dele abriria uma
+  // seta de ataque saindo de um monstro que não está atacando (`alvosDoAtaque`).
+  aguardandoAlvo = action === 'attack';
   // A janela de corrente consumiu o ataque que a abriu: da próxima vez o modo
   // `auto` tem de julgar pelo que vier, não por este ataque já respondido.
   if (action === 'chain') ataqueDeclarado = false;
@@ -1764,6 +1944,35 @@ async function act(action, arg, label, args) {
 // e escolha incremental, uma carta por vez (selectunselect). O overlay abaixo
 // atende os dois; a soma de níveis do ritual o servidor resolve sozinho.
 const picked = new Set();
+
+/**
+ * O jogador pediu o QUADRO nesta escolha (o botão [ver a lista]).
+ *
+ * Zera a cada pergunta nova, em `apply`, junto do `picked`: é uma decisão sobre
+ * ESTA escolha, não uma preferência — deixá-la ligada faria a pergunta seguinte
+ * abrir no quadro sem ninguém ter pedido.
+ */
+let listaForcada = false;
+/** A última pergunta que o diagnóstico abaixo já comentou no log. */
+let selecaoDiagnosticada = null;
+
+/**
+ * **A zona desta âncora aceita clique NESTA escolha?**
+ *
+ * Lê a classe que o próprio `zoneEl` põe no elemento no mesmo `if` em que
+ * instala o `onclick` — a mesma condição, no mesmo elemento. Antes aqui se
+ * perguntava só se a âncora EXISTIA no documento, e essa é uma segunda
+ * condição: ela discorda da primeira exatamente no caso ruim. `zoneEl` só torna
+ * a zona clicável quando ela tem CARTA desenhada (`if (cell && selKey)`), e uma
+ * zona que o motor oferece mas a tela desenha vazia existe no documento e não
+ * responde a clique nenhum — a escolha ia para a mesa e ficava sem resposta
+ * possível. Foi assim que um duelo parou: o log mostra a pergunta chegando, o
+ * jogador clicando por 39 segundos e nenhum `/respond` saindo.
+ *
+ * Depende de o `render()` ter rodado ANTES — e roda: os dois andam juntos em
+ * todos os chamadores (`render(); renderSelection();`).
+ */
+const zonaClicavel = (a) => !!elDaAncora(a)?.classList.contains('selectable');
 
 function selectionQuestion() {
   if (!question || question.player !== 0) return null;
@@ -1808,6 +2017,13 @@ function somaValida(q) {
 function renderExtraPicker() {
   const box = $('sel-overlay');
   box.hidden = false;
+  // Este quadro é MODAL e não tem dono para separar: as cartas do Extra são
+  // todas minhas e nenhuma está na mesa. As duas classes são da seleção de
+  // cartas e ficariam penduradas da pergunta anterior — a `no-campo` deixaria
+  // este quadro sem o vidro (e o clique atravessando para a mesa), e a
+  // `grupos` desmontaria a grade dele, que é preenchida direto.
+  box.classList.remove('no-campo');
+  $('sel-cards').classList.remove('grupos');
   $('sel-title').textContent = 'Invocação Especial — Extra Deck';
   $('sel-info').textContent = 'clique numa carta para invocar';
   const frag = document.createDocumentFragment();
@@ -1826,12 +2042,94 @@ function renderExtraPicker() {
   $('sel-ok').hidden = true;
 }
 
+/**
+ * Uma carta do quadro de seleção.
+ *
+ * O SELO de dono fica NA carta, e não só no título do grupo: o título sai da
+ * vista assim que a grade rola, e é justamente aí que a carta virada do
+ * oponente volta a ser um verso igual ao meu. O `title` diz a mesma coisa por
+ * escrito e ainda de ONDE ela veio — a mesma lista pode misturar mão e campo
+ * (o custo da Dark Factory), e "qual destas é a do campo" é a segunda pergunta
+ * sem resposta na tela.
+ */
+function cartaDaSelecao(c, soma, incremental, eixos) {
+  const dono = donoDaCarta(c);
+  const rot = ROTULO[dono];
+  const el = document.createElement('div');
+  el.className = 'sel-card'
+    + (dono === 'dele' ? ' dele' : '')
+    + (picked.has(c.index) ? ' on' : '');
+  // Carta virada do oponente (o servidor omite o código): mostra o verso, não a arte.
+  const oculta = c.hidden || !c.code;
+  // O selo carrega o que VARIA nesta escolha (ver `seloDaCarta`): de quem é, de
+  // onde é, ou os dois. Carimbar sempre as duas coisas seria ruído — e ruído
+  // esconde justamente a que importa.
+  const selo = seloDaCarta(c, eixos);
+  el.innerHTML = (oculta
+      ? `<div class="back" style="width:100%;height:100%"></div>`
+      : `<img src="${ART(c.code)}" alt="">`)
+    + (soma ? `<span class="lvl">Nv ${c.param ?? '?'}</span>` : '')
+    + (selo ? `<span class="dono">${selo}</span>` : '');
+  // O `title` continua dizendo TUDO, inclusive o que o selo omitiu por não
+  // variar — ele é a leitura completa, não o feedback.
+  el.title = `${oculta ? 'carta virada' : nameOf(c.code)} — ${rot.selo}, ${nomeDoLocal(c.location)}`
+           + (soma ? ` — nível ${c.param}` : '');
+  espiar(el, oculta ? 0 : c.code);   // carta virada do oponente nao mostra nada
+  el.onclick = () => {
+    if (incremental) { act('pick', c.index, `pick ${c.code}`); picked.clear(); return; }
+    picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
+    renderSelection();
+  };
+  return el;
+}
+
 function renderSelection() {
   if (extraPicker) { renderExtraPicker(); return; }
   const q = selectionQuestion();
   const box = $('sel-overlay');
   if (!q) { box.hidden = true; return; }
+  // A escolha do ALVO do ataque é feita NA MESA, com a seta seguindo o mouse
+  // (`iniciarMira`) — a janela cobria o tabuleiro justamente no momento em que
+  // o que importa é o tabuleiro. As zonas continuam sendo as mesmas candidatas
+  // clicáveis de sempre (`SELECIONAVEIS`); o que sai é só o vidro por cima.
+  if (aMiraCuidaDisto()) { box.hidden = true; return; }
   box.hidden = false;
+
+  // **A ESCOLHA NO CAMPO.** Quando toda carta oferecida está numa zona do
+  // tabuleiro, o quadro não abre por cima dele: vira uma barra, o vidro sai, e
+  // a resposta é dada clicando na carta mesmo — as zonas já são candidatas
+  // clicáveis (`SELECIONAVEIS`, no ramo `selectable` do `zoneEl`), o que faltava
+  // era deixar o clique chegar nelas. É o que separa as minhas cartas das dele
+  // sem depender de rótulo nenhum: um lado desenha em cima, o outro embaixo.
+  //
+  // A regra — e o porquê de cada condição — mora em `web/js/alvos.js`. A metade
+  // que só a TELA sabe responder é se a zona existe mesmo no documento: uma
+  // carta sem zona à vista (material de Xyz) sumiria da escolha em silêncio, e
+  // aí a pergunta fica sem resposta possível e o duelo para.
+  const naMesa = listaForcada ? null : escolhaNoCampo(q, zonaClicavel);
+  box.classList.toggle('no-campo', !!naMesa);
+  // A SAÍDA. Aparece só na mesa, e devolve o quadro de sempre para ESTA
+  // escolha — sem ela, uma carta que a mesa não consegue oferecer trava o
+  // duelo, e a única porta é o "desistir".
+  const btLista = $('sel-lista');
+  btLista.hidden = !naMesa;
+  btLista.onclick = () => { listaForcada = true; render(); renderSelection(); };
+
+  // DIAGNÓSTICO, uma linha por pergunta: a escolha tinha TUDO no campo e mesmo
+  // assim abriu o quadro — quer dizer que alguma zona candidata não estava
+  // clicável (o motor oferece uma carta que a tela desenha em zona vazia). O
+  // quadro salva o duelo; esta linha diz QUAL zona, que é o que faltou no
+  // relato em que o duelo parou. Presa à identidade da pergunta porque
+  // `renderSelection` roda de novo a cada carta marcada.
+  if (selecaoDiagnosticada !== q) {
+    selecaoDiagnosticada = q;
+    const cs = q.choices || [];
+    if (!naMesa && !listaForcada && cs.length && cs.every(estaNoCampo)) {
+      const mudas = cs.map(ancoraDe).filter((a) => !zonaClicavel(a));
+      log(`⊙ escolha no quadro: ${mudas.length ? `zona sem clique (${mudas.join(', ')})`
+                                               : 'duas cartas na mesma zona'}`);
+    }
+  }
 
   const incremental = q.kind === 'selectunselect';
   const soma = q.kind === 'selectsum';
@@ -1855,34 +2153,55 @@ function renderSelection() {
          : falta > 0 ? ` — faltam ${falta}`
          : ' — tem tributo sobrando');
   } else {
-    $('sel-info').textContent = incremental
-      ? `clique numa carta (faltam ${need})`
-      : `selecione ${need}${q.selMax > need ? ` a ${q.selMax}` : ''} — ${picked.size} escolhida(s)`;
+    const alvo = `${need}${q.selMax > need ? ` a ${q.selMax}` : ''}`;
+    $('sel-info').textContent = naMesa
+      ? (incremental || q.selMax === 1
+          ? 'clique na carta no TABULEIRO'
+          : `clique no TABULEIRO — ${picked.size} de ${alvo}`)
+      : incremental
+        ? `clique numa carta (faltam ${need})`
+        : `selecione ${alvo} — ${picked.size} escolhida(s)`;
   }
 
-  const frag = document.createDocumentFragment();
-  for (const c of q.choices || []) {
-    const el = document.createElement('div');
-    el.className = 'sel-card' + (picked.has(c.index) ? ' on' : '');
-    // Carta virada do oponente (o servidor omite o código): mostra o verso, não a arte.
-    const oculta = c.hidden || !c.code;
-    el.innerHTML = (oculta
-        ? `<div class="back" style="width:100%;height:100%"></div>`
-        : `<img src="${ART(c.code)}" alt="">`)
-      + (soma ? `<span class="lvl">Nv ${c.param ?? '?'}</span>` : '');
-    el.title = oculta ? 'carta virada' : `código ${c.code}` + (soma ? ` — nível ${c.param}` : '');
-    espiar(el, oculta ? 0 : c.code);   // carta virada do oponente nao mostra nada
-    el.onclick = () => {
-      if (incremental) { act('pick', c.index, `pick ${c.code}`); picked.clear(); return; }
-      picked.has(c.index) ? picked.delete(c.index) : picked.add(c.index);
-      renderSelection();
-    };
-    frag.append(el);
+  // Com a escolha na mesa não há grade para desenhar — e ela precisa ser
+  // ESVAZIADA, não apenas escondida pelo CSS: as miniaturas da pergunta
+  // anterior ficariam penduradas no DOM com os `onclick` delas vivos, prontas
+  // para responder a pergunta errada quando o quadro voltasse a abrir.
+  const cards = $('sel-cards');
+  if (naMesa) {
+    cards.classList.remove('grupos');
+    cards.replaceChildren();
+  } else {
+    // AGRUPADAS POR DONO **E LUGAR**. A lista do motor mistura os dois lados e
+    // os dois lugares, e não diz nada sobre nenhum dos dois: com as cartas
+    // SETADAS dele — que chegam sem código, todas desenhadas com o mesmo verso —
+    // a grade solta era um sorteio; e com duas cópias MINHAS da mesma carta, uma
+    // na mão e outra no campo, ela era um sorteio outra vez, agora entre cartas
+    // idênticas. Um ritual tributou o Lustro Negro do campo em vez do da mão
+    // exatamente assim.
+    const eixos = eixosQueVariam(q.choices || []);
+    const frag = document.createDocumentFragment();
+    for (const g of agruparEscolhas(q.choices || [])) {
+      const sec = document.createElement('div');
+      sec.className = 'sel-grupo' + (g.dono === 'dele' ? ' dele' : '');
+      const h = document.createElement('div');
+      h.className = 'sel-grupo-h';
+      h.textContent = `${g.titulo} (${g.cartas.length})`;
+      const grade = document.createElement('div');
+      grade.className = 'sel-grade';
+      for (const c of g.cartas) grade.append(cartaDaSelecao(c, soma, incremental, eixos));
+      sec.append(h, grade);
+      frag.append(sec);
+    }
+    cards.classList.add('grupos');
+    cards.replaceChildren(frag);
   }
-  $('sel-cards').replaceChildren(frag);
 
   const ok = $('sel-ok');
-  ok.hidden = incremental;
+  // Na mesa, a escolha de UMA carta já é enviada pelo clique na zona (o ramo
+  // `selectable` do `zoneEl`) — o botão ficaria ali desligado para sempre,
+  // parecendo que falta um passo que não existe.
+  ok.hidden = incremental || !!(naMesa && q.selMax === 1);
   // No ritual o que libera não é a quantidade, é a SOMA ser válida (exata ou
   // "ou mais", conforme o modo que o motor pediu).
   ok.disabled = soma
@@ -2172,15 +2491,26 @@ function containerRect(id) {
   const r = el && el.getBoundingClientRect();
   return r && r.width ? r : null;
 }
-/** loc do motor → âncora de zona/pilha. */
-function locAnchor(ctrl, loc, seq) {
-  if (loc === 4) return `${ctrl}:4:${seq}`;
-  if (loc === 8) return `${ctrl}:8:${seq}`;
-  if (loc === 0x100) return `${ctrl}:8:5`;   // zona de campo
-  if (loc === 0x10) return `${ctrl}:gy`;
-  if (loc === LOCATION_BANIDO) return `${ctrl}:banido`;
-  if (loc === 1) return `${ctrl}:deck`;
-  return null;
+/** loc do motor → âncora de zona/pilha. A regra mora em `movimento.js`; aqui
+ *  fica o apelido que o resto da tela já usava. Devolve `null` para a MÃO, que
+ *  não é uma zona — quem precisa alcançá-la é `rectDoLugar`, abaixo. */
+const locAnchor = (ctrl, loc, seq) => ancoraDaCarta(ctrl, loc, seq);
+
+/**
+ * O retângulo de um lugar (`lugarDaCarta`), pronto para o fantasma voar.
+ *
+ * A MÃO não tem lugar por carta — a fileira é centralizada e reflui a cada
+ * carta que entra —, então quem chega aterrissa no MEIO dela. É a mesma conta
+ * que a compra já fazia; ela mora aqui agora porque a compra deixou de ser o
+ * único movimento que termina na mão.
+ */
+function rectDoLugar(lugar, base = null) {
+  if (!lugar) return null;
+  if (lugar.tipo === 'ancora') return anchorRect(lugar.ancora);
+  const cont = containerRect(lugar.caixa);
+  if (!cont) return null;
+  const w = base?.width || 54, h = base?.height || 78;
+  return { left: cont.left + cont.width / 2 - w / 2, top: cont.top, width: w, height: h };
 }
 function spawnGhost(rect, code, face) {
   const g = document.createElement('div');
@@ -2193,6 +2523,25 @@ function spawnGhost(rect, code, face) {
 }
 /** Lança um fantasma de `from` até `to` (centro→centro). `endScale` encolhe o
  *  fantasma na chegada — útil pra "encaixar" numa pilha pequena (cemitério). */
+/**
+ * A carta SOME NO LUGAR — encolhendo, onde ela está.
+ *
+ * É o que se faz quando não há destino para onde voar (uma localização que o
+ * motor mandou e a tela não desenha). O buraco é que era ilegível: a carta
+ * desaparecia da zona entre dois quadros de vídeo, e quem estava olhando
+ * inventava um destino para ela — em geral "foi para a mão do oponente".
+ */
+async function sumirGhost(from, code, face, dur = 200) {
+  if (prefersReduced || !from) return;
+  const g = spawnGhost(from, code, face);
+  g.style.setProperty('--fxdur', dur + 'ms');
+  await nextFrame();
+  g.style.transform = 'scale(.55)';
+  g.style.opacity = '0';
+  await sleep(dur);
+  g.remove();
+}
+
 async function flyGhost(from, to, code, face, dur = 280, endScale = 1) {
   if (prefersReduced || !from || !to) return;
   const g = spawnGhost(from, code, face);
@@ -2312,13 +2661,19 @@ function renderBatalha() {
 /** Onde o ataque começa e onde termina, em pixels de tela. */
 function pontosDoAtaque(a) {
   const from = centroDe(anchorRect(`${a.atkCtrl}:4:${a.atkSeq}`));
-  const alvo = a.direct
-    ? containerRect(a.atkCtrl === 0 ? 'hand-opp' : 'hand-you')
+  // `a.ponto` é a MIRA com o cursor fora de qualquer alvo: a ponta é o próprio
+  // ponteiro, e não uma zona. Sem alvo não há retângulo — e é o que apaga a
+  // mancha do halo, que só faz sentido em cima de uma carta.
+  const alvo = a.ponto ? null
+    : a.direct ? containerRect(a.atkCtrl === 0 ? 'hand-opp' : 'hand-you')
     : anchorRect(`${a.defCtrl}:4:${a.defSeq}`);
   return {
-    from, to: centroDe(alvo), rect: alvo,
-    // O quanto a ponta recua: metade da carta, para não terminar debaixo da arte.
-    raio: alvo ? Math.max(alvo.width, alvo.height) * 0.62 : 0,
+    from, to: a.ponto || centroDe(alvo), rect: alvo,
+    // O quanto a ponta recua: metade da carta, para não terminar debaixo da
+    // arte. Mirando o cursor é só o tamanho da cabeça da seta — o recuo de uma
+    // carta deixaria a ponta um dedo atrás do ponteiro.
+    raio: alvo ? Math.max(alvo.width, alvo.height) * 0.62
+        : a.ponto ? RECUO_DO_CURSOR : 0,
   };
 }
 
@@ -2327,6 +2682,7 @@ function pontosDoAtaque(a) {
 function limparSeta() {
   const svg = $('atk-seta');
   svg.replaceChildren();
+  svg.classList.remove('mira', 'livre');
   esconderCamada(svg);
 }
 
@@ -2345,6 +2701,11 @@ function desenharSeta(a = ataquePendente) {
   if (!g) { limparSeta(); return; }
 
   svg.replaceChildren();
+  // Fora da mira: a seta desenhada aqui é a declaração de verdade, e as classes
+  // da mira desligam justamente as animações de entrada que ela quer ter.
+  // (`desenharMira` as repõe depois de chamar isto, no mesmo passo — o
+  // navegador só pinta no fim da tarefa, então não há quadro pelo meio.)
+  svg.classList.remove('mira', 'livre');
   // Visível ANTES de medir: com `display:none` o `getTotalLength()` abaixo pode
   // devolver 0, e aí o traço nasceria já inteiro (sem o "cresce") ou invisível.
   // O viewBox sai do tamanho real do elemento, não de `innerWidth`: com barra
@@ -2381,12 +2742,202 @@ function desenharSeta(a = ataquePendente) {
 // Redimensionar a janela move as zonas e a seta ficaria apontando para onde
 // elas estavam. Repintar é barato e não tem estado: as coordenadas saem do
 // documento de agora.
-window.addEventListener('resize', () => { if (ataquePendente) desenharSeta(); });
+window.addEventListener('resize', () => {
+  if (ataquePendente) desenharSeta();
+  else if (mira) desenharMira();   // a mira mede zonas: elas acabaram de andar
+});
+
+// ---------------- a MIRA: escolher o alvo NA MESA ----------------
+//
+// Declarar o ataque abria uma JANELA com as cartas do outro lado: escolhia-se
+// em quem bater olhando uma lista de miniaturas — fora do campo, e com a seta
+// (que e' justamente o desenho de "quem bate em quem") esperando do lado de
+// fora ate' a escolha estar feita. O tabuleiro inteiro ficava atras de um vidro
+// no unico momento em que o que importa e' o tabuleiro.
+//
+// Agora o clique no atacante acende a MESMA seta, e ela segue o ponteiro: passa-
+// se de alvo em alvo olhando a mesa, o alvo sob o cursor acende, e o clique fixa
+// e declara — dali para a frente e' tudo como sempre foi.
+//
+// **Quem diz quais sao os alvos continua sendo o MOTOR** — a lista do
+// `MSG_SELECT_CARD` que ele manda logo depois da declaracao. Adivinhar aqui
+// ("todo monstro do outro lado serve") acertaria quase sempre e erraria calado
+// na carta que obriga a ataca-la ou na que nao pode ser atacada, que e'
+// exatamente quando a resposta importa.
+let mira = null;              // { atacante, alvos: Map<ancora, Sel>, alvo, ponto }
+let aguardandoAlvo = false;   // o ultimo `act` foi um `attack`?
+let declarante = null;        // de que zona ele saiu: 'ctrl:4:seq'
+
+/** Quanto a ponta recua do CURSOR — so' o bastante para a cabeca da seta nao
+ *  ficar debaixo dele. Sobre um alvo o recuo e' meia carta (`pontosDoAtaque`);
+ *  zero cairia no RECUO_MIN de `setaataque.js`, que parcaria a seta 26px atras
+ *  do ponteiro — uma seta que nao encosta em nada. */
+const RECUO_DO_CURSOR = 5;
+
+/**
+ * Esta pergunta e' a de EM QUEM bater? Devolve os alvos indexados pela ancora
+ * da zona, ou `null` — e ai' a janela de sempre continua valendo.
+ *
+ * Sao quatro condicoes, e nenhuma e' decorativa:
+ *   • viemos de um `attack` (`aguardandoAlvo`). Sem isso, qualquer selecao de
+ *     monstros do outro lado — a remocao que mira o campo dele — viraria mira,
+ *     com uma seta de ATAQUE saindo de um monstro que nao esta' atacando;
+ *   • a lista tem a FORMA de alvos de batalha: so' zona de monstro, so' do
+ *     oponente;
+ *   • escolhe-se UMA, e exatamente uma. A mira nao tem onde acumular: quem some
+ *     e' a janela, e com ela o botao de confirmar — uma pergunta de duas cartas
+ *     deixaria o jogador sem como responder. O `selMax === 1` e' tambem o que
+ *     faz o clique na zona ENVIAR na hora (ver o ramo `selectable` do `zoneEl`),
+ *     e nao juntar em `picked`;
+ *   • ha' um atacante conhecido. A seta precisa de origem.
+ */
+function alvosDoAtaque() {
+  const q = question;
+  if (!aguardandoAlvo || !declarante) return null;
+  if (!q || q.player !== 0 || q.kind !== 'selectcard') return null;
+  const cs = q.choices || [];
+  if (!cs.length || q.selMax !== 1 || q.selMin > 1) return null;
+  if (!cs.every((c) => c.location === 4 && c.controller === 1)) return null;
+  const alvos = new Map();
+  for (const c of cs) alvos.set(`${c.controller}:${c.location}:${c.sequence}`, c);
+  return alvos;
+}
+
+/**
+ * Liga a mira, se esta pergunta for a do alvo. Devolve se ligou.
+ *
+ * **`prefersReduced` cai na janela de sempre, e nao numa mira sem seta.** Quem
+ * pediu ao sistema para nao animar nada nao recebe seta nenhuma (`desenharSeta`
+ * ja' desistia antes disto), e sem a seta a mira nao tem o que mostrar: seria
+ * tirar a janela e nao pôr nada no lugar. Por isso a condicao mora em
+ * `aMiraCuidaDisto`, e e' a MESMA que a janela consulta para nao abrir.
+ */
+function aMiraCuidaDisto() {
+  return !prefersReduced && !!alvosDoAtaque();
+}
+
+function iniciarMira() {
+  if (mira || !aMiraCuidaDisto()) return false;
+  const alvos = alvosDoAtaque();
+  if (!alvos) return false;
+  // Nasce apontando para o PRIMEIRO alvo, e nao para o vazio: o mouse pode nao
+  // se mexer nunca, e uma seta sem ponta nao diz que ha' uma escolha em curso.
+  mira = { atacante: declarante, alvos, alvo: [...alvos.keys()][0], ponto: null };
+  document.addEventListener('mousemove', aoMoverMira, { passive: true });
+  mostrarDicaDaMira(true);
+  desenharMira();
+  log('⚔ escolha o alvo: passe o mouse pelas cartas do oponente e clique');
+  return true;
+}
+
+/**
+ * Desliga a mira e devolve a mesa ao estado de sempre. No-op sem mira — e' o
+ * que deixa `act()` chamar isto sem saber se ha' uma.
+ *
+ * `fixando` e' o clique que RESPONDE a mira: ali a seta ja' aponta para o alvo
+ * escolhido, e apaga-la deixaria a mesa sem seta nenhuma entre a escolha e a
+ * declaracao que o motor devolve um instante depois — um piscar bem no unico
+ * quadro em que a pessoa esta' olhando para ela. Ela fica congelada onde esta'
+ * ate' o evento `attack` chegar e repinta-la como a seta de verdade.
+ */
+function pararMira(fixando = false) {
+  if (!mira) return;
+  document.removeEventListener('mousemove', aoMoverMira);
+  for (const z of document.querySelectorAll('.zone.mira-alvo')) z.classList.remove('mira-alvo');
+  mira = null;
+  mostrarDicaDaMira(false);
+  if (!fixando) limparSeta();
+}
+
+function aoMoverMira(e) {
+  if (!mira) return;
+  mira.ponto = { x: e.clientX, y: e.clientY };
+  mira.alvo = alvoSobOPonteiro(e.clientX, e.clientY);
+  desenharMira();
+}
+
+/** A ancora da zona sob o ponteiro, quando ela e' um alvo DESTA mira. */
+function alvoSobOPonteiro(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const zona = el && el.closest ? el.closest('.zone[data-anchor]') : null;
+  const a = zona && zona.dataset.anchor;
+  return a && mira.alvos.has(a) ? a : null;
+}
+
+/**
+ * Repinta a mira. E' a MESMA `desenharSeta` do ataque de verdade — a seta da
+ * escolha nao pode ser um segundo desenho parecido, senao as duas divergem no
+ * primeiro ajuste e o jogador passa a mirar com uma coisa e a ver outra. O que
+ * muda e' so' o destino: uma zona quando o ponteiro esta' sobre um alvo, o
+ * PONTO do cursor quando nao esta'.
+ */
+function desenharMira() {
+  if (!mira) return;
+  const svg = $('atk-seta');
+  const [, , atkSeq] = mira.atacante.split(':');
+  const alvo = mira.alvo ? mira.alvo.split(':') : null;
+  desenharSeta({
+    atkCtrl: 0, atkSeq: +atkSeq,
+    defCtrl: alvo ? +alvo[0] : 1, defSeq: alvo ? +alvo[2] : 0,
+    direct: false,
+    ponto: alvo ? null : mira.ponto,
+  });
+  // DEPOIS de desenhar: `desenharSeta` limpa as classes da camada (é ela que
+  // devolve a seta ao normal quando a declaração de verdade chega). O navegador
+  // só pinta no fim desta tarefa, então não existe quadro entre uma e outra.
+  svg.classList.add('mira');
+  svg.classList.toggle('livre', !alvo);
+  for (const z of document.querySelectorAll('.zone.mira-alvo')) z.classList.remove('mira-alvo');
+  const zAlvo = mira.alvo && elDaAncora(mira.alvo);
+  if (zAlvo) zAlvo.classList.add('mira-alvo');
+}
+
+/** A frase que a janela dizia. Vive dentro do `#fx`, que nao intercepta clique
+ *  e some junto com a seta — a dica e' um estado da mira, nao um pedaco da tela. */
+function mostrarDicaDaMira(ligar) {
+  const antiga = document.querySelector('#fx .mira-dica');
+  if (antiga) antiga.remove();
+  if (!ligar) return;
+  const d = document.createElement('div');
+  d.className = 'mira-dica';
+  d.textContent = 'escolha o alvo do ataque';
+  $('fx').append(d);
+}
+
+/**
+ * O AVANÇO da investida: fração do caminho até o alvo, com teto em pixels.
+ *
+ * O teto é a metade que resolve o caso normal. As duas fileiras de monstro são
+ * VIZINHAS, então a distância entre uma zona e a outra é da ordem de uma carta:
+ * uma fração sozinha já daria um avanço grande o bastante para o fantasma
+ * aterrissar em cima do alvo — que é exatamente o que ele fazia.
+ */
+const INVESTIDA_FRACAO = 0.34;
+const INVESTIDA_TETO = 34;
 
 /**
  * A investida — o golpe de verdade. Só sai quando o motor resolve a batalha,
  * que é depois da janela de resposta: a armadilha que impede o ataque impede
  * também a animação dele.
+ *
+ * **O atacante avança na DIREÇÃO do alvo, e não até ele.** Ia até: o fantasma
+ * tem o tamanho de uma carta e era levado CENTRO A CENTRO, então pousava em
+ * cima da carta atacada, cobria-a por um terço de segundo e voltava para a zona
+ * de quem atacou. Quem estava olhando a carta atacada via uma carta sair de
+ * cima dela e ir embora — e, com o NPC atacando, "ir embora" é para CIMA, na
+ * direção da mão dele. A leitura era "o monstro alvejado foi para a mão do
+ * oponente", sobre uma carta que nunca saiu do lugar (o estado sempre esteve
+ * certo: nenhum evento move o alvo de uma batalha).
+ *
+ * Hoje é um avanço curto: o bastante para ler como investida, nunca o bastante
+ * para encostar no alvo. Quem diz que houve colisão continua sendo o tremor do
+ * alvo (`fx-hit`), os dois números da faixa e o dano voando até os LP — nenhum
+ * deles precisa mexer na carta atacada.
+ *
+ * Vale igual no ataque DIRETO, e não por simetria: ali o alvo é o retângulo da
+ * MÃO do oponente, e o fantasma acabava dentro da fileira de cartas dela. Era o
+ * segundo (e último) caminho pelo qual uma carta em movimento chegava àquele
+ * canto da tela.
  */
 async function resolverInvestida() {
   const a = ataquePendente;
@@ -2399,11 +2950,17 @@ async function resolverInvestida() {
     : anchorRect(`${a.defCtrl}:4:${a.defSeq}`);
   if (!from || !alvo) return;
   const code = field[a.atkCtrl]?.m?.[a.atkSeq]?.code || 0;
-  const g = spawnGhost(from, code, 'art');
   const dx = (alvo.left + alvo.width / 2) - (from.left + from.width / 2);
   const dy = (alvo.top + alvo.height / 2) - (from.top + from.height / 2);
+  const dist = Math.hypot(dx, dy);
+  // Sem distância não há direção — investida nenhuma, e uma divisão por zero
+  // poria `NaN` no `transform`, que o navegador ignora em silêncio (a mesma
+  // armadilha que `geometriaDaSeta` documenta).
+  if (!(dist > 1)) return;
+  const passo = Math.min(dist * INVESTIDA_FRACAO, INVESTIDA_TETO) / dist;
+  const g = spawnGhost(from, code, 'art');
   g.style.setProperty('--fxdur', '170ms');
-  await nextFrame(); g.style.transform = `translate(${dx}px, ${dy}px)`;
+  await nextFrame(); g.style.transform = `translate(${dx * passo}px, ${dy * passo}px)`;
   await sleep(170);
   if (!a.direct) flashZone(`${a.defCtrl}:4:${a.defSeq}`, 'fx-hit', 280);
   await sleep(140);
@@ -2458,6 +3015,47 @@ function flashZone(anchor, cls = 'fx-activate', ms = 500) {
   setTimeout(() => el.classList.remove(cls), ms);
 }
 
+/**
+ * A carta da zona VIRA para cima — o verso girando ate' a arte, no lugar dela.
+ *
+ * Roda em `animateEvent`, isto e', ANTES de `handle` mutar o estado: a zona por
+ * baixo ainda mostra o verso, entao o fantasma cai exatamente por cima dele e o
+ * giro comeca de onde o olho ja' estava. Depois de `render()` quem esta' ali e'
+ * a carta aberta de verdade — o fantasma so' cobre o intervalo.
+ *
+ * Ele e' removido com uma folga DEPOIS do giro (e sem `await`) de proposito:
+ * removido no milissegundo exato, sobra um quadro de video em que a zona ainda
+ * nao foi redesenhada e o verso reaparece — um piscar para tras, que e' pior
+ * que nao animar nada.
+ */
+async function virarNaZona(v) {
+  const r = v && anchorRect(v.anchor);
+  if (prefersReduced || !r) return;
+  const g = document.createElement('div');
+  g.className = 'virar';
+  g.style.left = r.left + 'px'; g.style.top = r.top + 'px';
+  g.style.width = r.width + 'px'; g.style.height = r.height + 'px';
+  g.style.setProperty('--vira-ms', v.ms + 'ms');
+  // A mesma transformacao que `zoneEl` poe na arte de um monstro deitado —
+  // duas contas diferentes deixariam o fantasma de um tamanho e a carta por
+  // baixo de outro, e a troca no fim do giro daria um salto.
+  const DEITADA = 'rotate(90deg) scale(.82)';
+  g.innerHTML = `<div class="deita" style="transform:${v.deitadaAntes ? DEITADA : 'none'}">`
+              + '<div class="giro">'
+              + '<div class="face verso"><div class="back"></div></div>'
+              + `<div class="face frente"><img src="${ART(v.code)}" alt=""></div>`
+              + '</div></div>';
+  $('fx').append(g);
+  // Sem o quadro em branco o estado inicial nunca chega a existir para o
+  // navegador: ele ve' um elemento que ja' nasce virado e nao transita nada.
+  await nextFrame();
+  g.classList.add('aberta');
+  const deita = g.querySelector('.deita');
+  if (deita) deita.style.transform = v.deitadaDepois ? DEITADA : 'none';
+  await sleep(v.ms);
+  setTimeout(() => g.remove(), 140);
+}
+
 /** Animação 3D da moeda girando */
 function animateCoinFlip(results, player) {
   const box = $('coin-overlay');
@@ -2505,10 +3103,10 @@ async function animateEvent(ev) {
     }
     if (ev.type === 'draw') {
       const from = anchorRect(`${ev.player}:deck`);
-      const cont = containerRect(ev.player === 0 ? 'hand-you' : 'hand-opp');
-      const w = from?.width || 54, h = from?.height || 78;
-      // Mira o CENTRO da mão (as cartas ficam centralizadas), não a borda.
-      const to = cont ? { left: cont.left + cont.width / 2 - w / 2, top: cont.top, width: w, height: h } : from;
+      // O CENTRO da fileira da mão (as cartas ficam centralizadas), e não a
+      // borda. A conta é a de `rectDoLugar`, que era daqui e virou de todo
+      // mundo quando a mão deixou de ser destino só da compra.
+      const to = rectDoLugar(lugarDaCarta(ev.player, LOCAL.MAO), from) || from;
       const n = ev.cards?.length || 1;
       for (let i = 0; i < n; i++) { flyGhost(from, to, 0, 'back', 240); await sleep(130); }
       await sleep(150);
@@ -2520,13 +3118,32 @@ async function animateEvent(ev) {
         if (ev.fromCtrl === 0) { const hh = hand[0].indexOf(ev.code); fromAnchor = hh >= 0 ? `0:hand:${hh}` : null; }
         else fromAnchor = '1:hand:0';
       } else fromAnchor = locAnchor(ev.fromCtrl, ev.fromLoc, ev.fromSeq);
+      // A carta que sai da MÃO tem lugar exato quando é minha (a posição dela
+      // na fileira); a do oponente, não — todas são o mesmo verso —, então ali
+      // vale o meio da fileira, como em qualquer outro movimento.
       const from = anchorRect(fromAnchor)
-        || (ev.fromLoc === 2 ? containerRect(ev.fromCtrl === 0 ? 'hand-you' : 'hand-opp') : null);
-      const to = anchorRect(locAnchor(ev.controller, ev.loc, ev.seq));
+        || rectDoLugar(lugarDaCarta(ev.fromCtrl, ev.fromLoc, ev.fromSeq));
+      // **PARA ONDE ELA VAI** — inclusive quando o destino é a MÃO, que não é
+      // uma zona e por isso não tinha âncora nenhuma. Sem isto, `flyGhost`
+      // desistia calado e a carta sumia da mesa entre dois quadros de vídeo:
+      // era o relato do "card alvo indo para a mão do oponente", que é o que
+      // se lê quando uma carta desaparece e a contagem da mão dele sobe.
+      const to = rectDoLugar(lugarDaCarta(ev.controller, ev.loc, ev.seq), from);
       const face = (ev.hidden || !ev.code) ? 'back' : 'art';
       // Indo pro cemitério (pilha pequena): encolhe na chegada pra "encaixar".
       const endScale = ev.loc === 0x10 ? 0.55 : 1;
-      await flyGhost(from, to, ev.code, face, 300, endScale);
+      // Sem destino nenhum ela SOME NO LUGAR. Nunca em silêncio: carta que
+      // desaparece sem movimento é a única coisa que a mesa não sabe explicar.
+      if (to) await flyGhost(from, to, ev.code, face, 300, endScale);
+      else await sumirGhost(from, ev.code, face);
+      return;
+    }
+    // A carta em campo ABRINDO. A posicao anterior e' lida daqui mesmo, e nao
+    // recebida pronta: `animateEvent` roda ANTES de `handle`, entao o estado
+    // ainda e' o de antes da virada — que e' exatamente o que se precisa saber.
+    if (ev.type === 'pos') {
+      const antes = cartaNaZona(ev.controller, ev.loc, ev.seq)?.pos ?? 0;
+      await virarNaZona(viradaDaCarta(ev, antes));
       return;
     }
     // DECLARAÇÃO: só a seta, e ela fica. O golpe é na resolução, abaixo.
@@ -2594,7 +3211,7 @@ async function apply(j) {
       // forma de saber que um `pos` foi um FLIP (virada → para cima) e não uma
       // troca de ataque para defesa, que não devia acender nada.
       const viradaAntes = ev.type === 'pos' && ev.loc === 4
-        && estaVirada(field[ev.controller]?.m?.[ev.seq]?.pos ?? 0);
+        && estaVirada(cartaNaZona(ev.controller, 4, ev.seq)?.pos ?? 0);
       // O momento do ataque anda ANTES da animação: é ele que a faixa desenha,
       // e a animação de cada evento já conta com o passo em que está.
       etapaDaBatalha = proximaEtapa(etapaDaBatalha, ev);
@@ -2628,6 +3245,7 @@ async function apply(j) {
     // mostrar nenhuma, porque parece atual.
     if (raioXLigado) await lerMaoDoNpc();
     picked.clear();
+    listaForcada = false;   // o [ver a lista] vale por ESCOLHA, não é preferência
     fecharMenuCarta();      // a pergunta mudou: o menu aberto é de outro momento
     extraPicker = null;     // idem para a escolha pendente no Extra Deck
     render();
@@ -2663,7 +3281,9 @@ async function apply(j) {
       if (question && question.kind === 'selectcard' && question.player === 0) {
         const i = (question.choices || []).findIndex((c) => c.location === alvo.loc && c.sequence === alvo.seq);
         if (i >= 0) { busy = false; act('select', 0, 'alvo do ataque', [question.choices[i].index]); return; }
-        log('o alvo arrastado não está entre as opções — escolha na janela.');
+        // Cai na MIRA (ou na janela, quando ela não cuida daquela pergunta):
+        // o arrasto errou o alvo, mas a escolha continua aberta logo abaixo.
+        log('o alvo arrastado não está entre as opções — escolha com a seta.');
       }
     }
     if (pendingZone) {
@@ -2675,6 +3295,17 @@ async function apply(j) {
         log('a zona arrastada não está mais livre — escolha uma destacada.');
       }
     }
+    // A MIRA vem por ÚLTIMO, depois das auto-respostas acima: quem atacou
+    // arrastando já escolheu o alvo, e ligar a mira antes deixaria a seta
+    // piscar por um quadro antes de o `pendingTarget` respondê-la sozinho.
+    //
+    // A regra que fecha o ciclo: SEM ataque em curso e SEM mira, não pode
+    // haver seta na tela. Quem responde a mira deixa a seta congelada de
+    // propósito (ver `pararMira`), contando que a declaração venha logo atrás
+    // e a repinte — e quando ela NÃO vem (o motor recusou, a corrente engoliu
+    // o ataque) a seta ficaria pendurada apontando para uma batalha que não
+    // houve, pelo resto do duelo.
+    if (!iniciarMira() && !ataquePendente && !etapaDaBatalha) limparSeta();
   } catch (e) {
     console.error('[apply]', e, j);
     warn('ERRO na tela: ' + (e && e.message ? e.message : e) + ' — abra o console (F12) e/ou dê "novo duelo".');
@@ -2708,6 +3339,54 @@ function brilhoDaEntrada(ev, viradaAntes) {
   if (ev.type === 'pos' && ev.loc === 4 && viradaAntes && paraCima)
     return { anchor: locAnchor(ev.controller, 4, ev.seq), ms: 300 };
   return null;
+}
+
+/** A carta que esta' NAQUELA zona agora — a mesma leitura que o `pos` do
+ *  `handle` faz para atualizar o estado. A zona de campo tem dois enderecos
+ *  (loc 8 seq 5 e loc 0x100), e escrever isso duas vezes ja' deixou uma das
+ *  duas para tras antes. */
+function cartaNaZona(ctrl, loc, seq) {
+  const f = field[ctrl];
+  if (!f) return null;
+  if (loc === 4) return f.m?.[seq] ?? null;
+  if (loc === 8) return (seq === 5 ? f.f : f.s?.[seq]) ?? null;
+  if (loc === 0x100) return f.f ?? null;
+  return null;
+}
+
+/**
+ * Este `pos` e' uma carta ABRINDO? Devolve o que a virada precisa saber, ou
+ * `null` quando nao ha' virada nenhuma.
+ *
+ * Um `pos` e' tres coisas diferentes na mesma mensagem, e so' uma delas revela
+ * carta: deitar em defesa e levantar em ataque nao mostram nada de novo
+ * (animar as duas seria um giro anunciando que nada mudou), e uma carta pode
+ * ate' mudar de posicao CONTINUANDO virada. O que decide e' o par — estava
+ * virada ANTES, esta' para cima AGORA — e por isso a posicao anterior tem de
+ * ser lida antes de `handle` sobrescreve-la.
+ *
+ * Sem `code` nao ha' o que revelar: e' a carta virada do oponente que mudou de
+ * posicao sem abrir (`Projetar` manda `code: 0`), e girar um verso para chegar
+ * a outro verso so' diria que ali ha' alguma coisa.
+ *
+ * As duas ultimas respostas sao a INCLINACAO, e valem so' na zona de monstro:
+ * magia e armadilha ficam sempre em pe'. A carta virada esta' quase sempre
+ * DEITADA (defesa virada) e a Invocacao-Virar a abre DE PE', entao a virada
+ * levanta a carta no mesmo movimento em que a gira.
+ */
+function viradaDaCarta(ev, posAntes) {
+  if (ev.type !== 'pos') return null;
+  if (ev.loc !== 4 && ev.loc !== 8 && ev.loc !== 0x100) return null;
+  if (!estaVirada(posAntes) || estaVirada(ev.pos) || !ev.code) return null;
+  return {
+    anchor: locAnchor(ev.controller, ev.loc, ev.seq),
+    code: ev.code,
+    deitadaAntes: ev.loc === 4 && (posAntes & 0xc) !== 0,
+    deitadaDepois: ev.loc === 4 && (ev.pos & 0xc) !== 0,
+    // O mesmo tempo do giro da revelacao (`revelacao.css`, .55s): o gesto e' o
+    // mesmo, e o olho compara com o do pacote sem ninguem pedir.
+    ms: 560,
+  };
 }
 
 async function handle(ev) {
@@ -2818,9 +3497,7 @@ async function handle(ev) {
     }
     case 'pos': {
       // Mudança de posição: a carta continua na zona, só muda a orientação.
-      const f = field[ev.controller];
-      const alvo = ev.loc === 4 ? f?.m?.[ev.seq]
-                 : ev.loc === 8 ? (ev.seq === 5 ? f?.f : f?.s?.[ev.seq]) : null;
+      const alvo = cartaNaZona(ev.controller, ev.loc, ev.seq);
       // Ao REVELAR (flip), o pos traz o código real: atualiza para a arte aparecer.
       // Continua virada (code=0) => mantém o que tinha.
       if (alvo) { alvo.pos = ev.pos; if (ev.code) alvo.code = ev.code; }
@@ -2956,16 +3633,24 @@ async function handle(ev) {
       //
       // Os dois lados chamam, e tudo bem: `encerrar_partida` é idempotente e
       // não reescreve o vencedor já gravado.
+      //
+      // O EMPATE viaja como empate (`p_empate`, migration 0056), e não como
+      // "vencedor nulo": nulo ali quer dizer *desistência*, e o duelo empatado
+      // era gravado como vitória de quem não ganhou.
       if (ehMultiplayer() && sala) {
         const vencedor = empate ? null
           : venci ? (sala.meuJogador === 0 ? sala.jogador_a : sala.jogador_b)
                   : (sala.meuJogador === 0 ? sala.jogador_b : sala.jogador_a);
-        try { await encerrarPartida(sala.id, vencedor); }
+        try { await encerrarPartida(sala.id, vencedor, empate); }
         catch (e) { console.warn('[ponte] nao consegui encerrar a partida:', e.message); }
+        // A ponte fica pesquisando o banco a cada 900 ms enquanto viver. Depois
+        // do fim não há mais lance nenhum para buscar — e uma tela de fim aberta
+        // com um laço de rede atrás dela era o duelo que "não encerrava".
+        ponte?.fechar();
       }
 
       const premio = await concederRecompensa(venci, empate);
-      mostrarFimDuelo(venci, empate, premio);
+      mostrarFimDuelo(venci, empate, premio, { soHome: ehMultiplayer() });
       break;
     }
   }
@@ -2977,6 +3662,25 @@ let SELECIONAVEIS = new Map();   // recalculado a cada render
 function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   const z = document.createElement('div');
   z.className = 'zone ' + cls;
+  /**
+   * **TODA saída de `zoneEl` passa por aqui.**
+   *
+   * Com um tabuleiro ativo as zonas são posicionadas uma a uma, em pixel
+   * (`applyZonePosition`), e isso era a ÚLTIMA linha da função. O ramo da
+   * seleção sai da função 90 linhas antes — e uma zona que pule essa linha
+   * perde a posição e cai no FLUXO do flexbox, isto é, **muda de lugar na
+   * tela**. Era o relato, com todas as letras: *"na hora de selecionar, os
+   * cards saem de suas posições originais"*.
+   *
+   * Ficou anos invisível porque o quadro de seleção era um modal com vidro por
+   * cima: o tabuleiro se desmontava atrás dele e ninguém via. Quando a escolha
+   * passou a ser feita NA MESA, a mesa virou a interface — e o defeito ficou na
+   * cara, no pior momento possível.
+   *
+   * Existe como função, e não como duas chamadas iguais, porque o próximo
+   * `return` cedo esqueceria a linha de novo. `alvos.test.mjs` varre isto.
+   */
+  const pronta = () => { applyZonePosition(z, zoneIdFromAnchor(selKey)); return z; };
   // Consome o gesto de "segurar": sem isso, soltar o dedo depois de abrir os
   // detalhes dispararia o clique logo atrás e abriria o menu por cima deles.
   let segurouZona = () => false;
@@ -3047,6 +3751,9 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
       // que o motor lia como "coloque no campo do jogador 1".
       atacando = null;
       pendingTarget = null;   // sem alvo definido: o motor vai perguntar
+      // De onde a seta sai. O motor não devolve isto na pergunta do alvo (o
+      // SELECT_CARD lista só as cartas dele), então quem sabe é quem clicou.
+      declarante = `0:4:${atk.seq}`;
       act('attack', atk.act.index, `atacar com ${nameOf(cell.code)}`);
     };
   }
@@ -3067,6 +3774,7 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
       if (!a) return;
       // Guarda o alvo: o motor pergunta em seguida, num SELECT_CARD.
       pendingTarget = cell ? { loc: atk.loc, seq: atk.seq } : null;
+      declarante = `0:4:${a.seq}`;
       act('attack', a.index, `atacar com ${nameOf(a.code)}`);
     });
   }
@@ -3098,7 +3806,7 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
         render();
         renderSelection();
       };
-      return z;   // nesta pergunta a zona não faz mais nada
+      return pronta();   // nesta pergunta a zona não faz mais nada
     }
   }
 
@@ -3187,8 +3895,7 @@ function zoneEl(cell, cls, label, onClick, drop, campoOpts, atk, selKey) {
   }
 
   if (!cell && onClick) { z.classList.add('free'); z.onclick = onClick; }
-  applyZonePosition(z, zoneIdFromAnchor(selKey));
-  return z;
+  return pronta();
 }
 
 /**
@@ -3795,6 +4502,7 @@ segurar: ver detalhes" alt="" draggable="false">`;
 
   const yourIdle = question && question.kind === 'idle' && question.player === 0;
   const yourPlace = question && question.kind === 'place' && question.player === 0;
+  const suaSelecao = !!selectionQuestion();
 
   // O que fazer com a carta escolhida agora sai no menu colado nela
   // (`abrirMenuCarta`), não numa barra no rodapé — a barra virou só o aviso.
@@ -3807,6 +4515,12 @@ segurar: ver detalhes" alt="" draggable="false">`;
       : yourPlace ? `Escolha uma zona ${question.zoneType === 's' ? 'de magia/armadilha' : 'de monstro'} livre (destacada).`
       : dragging ? 'Solte a carta numa zona verde.'
       : yourIdle ? 'Sua vez: clique numa carta pra escolher o que fazer, ou arraste até a zona.'
+      // Enquanto a escolha era um quadro modal, a barra podia dizer "aguarde…"
+      // — o quadro explicava tudo e não havia mais nada para fazer. Com a
+      // escolha NA MESA, o tabuleiro é a interface, e a barra dizendo "aguarde"
+      // é o jogo pedindo uma resposta e afirmando que está esperando outra
+      // coisa. Foi a segunda metade de um duelo que travou.
+      : suaSelecao ? 'Sua vez: escolha a(s) carta(s) destacada(s).'
       : 'aguarde…'
   }));
 }
@@ -4211,13 +4925,28 @@ function liberarSaidaDoFim(pode) {
   $('end-again').disabled = !pode;
 }
 
-/** Popup de fim de duelo: quem venceu + recompensa + o drop para revelar. */
-function mostrarFimDuelo(venci, empate, premio) {
+/**
+ * Popup de fim de duelo: quem venceu + recompensa + o drop para revelar.
+ *
+ * `opcoes.motivo` é a linha que explica POR QUE acabou — só existe quando não
+ * foi pelo tabuleiro ("seu adversário desistiu"). Sem ela, ganhar por WO é um
+ * troféu que aparece do nada no meio do seu turno.
+ *
+ * `opcoes.soHome` deixa **uma** saída: [voltar para a home]. É o multiplayer —
+ * a sala acabou para os dois, e "novo duelo" ali reabriria uma partida que não
+ * existe mais. Vem como opção, e não de um `ehMultiplayer()` lido aqui dentro,
+ * porque esta função é FATIADA e executada em Node (`fimduelo.test.mjs`): uma
+ * chamada a mais lá dentro seria um `ReferenceError` no teste — e, no jogo, um
+ * acoplamento entre desenhar a tela e saber o modo do duelo.
+ */
+function mostrarFimDuelo(venci, empate, premio, opcoes = {}) {
   const box = document.querySelector('#end-overlay .end-box');
   box.classList.toggle('lose', !venci && !empate);
   $('end-emoji').textContent = empate ? '🤝' : venci ? '🏆' : '💀';
   $('end-title').textContent = empate ? 'Duelo empatado' : venci ? 'Você venceu!' : 'Você perdeu';
-  let sub = `LP — você ${Math.max(0, lp[0])} · oponente ${Math.max(0, lp[1])}`;
+  $('end-again').hidden = !!opcoes.soHome;
+  let sub = opcoes.motivo ? `<b style="color:var(--gold)">${opcoes.motivo}</b><br>` : '';
+  sub += `LP — você ${Math.max(0, lp[0])} · oponente ${Math.max(0, lp[1])}`;
   const drops = premio?.drops ?? [];
   if (premio) {
     const novas = drops.filter((d) => d.nova).length;
@@ -4283,18 +5012,67 @@ $('btn-desistir').onclick = async () => {
     if (ehMultiplayer() && sala) {
       await encerrarPartida(sala.id);        // sem vencedor = o outro ganha
       ponte?.fechar();
+      // Desistir NÃO passa pelo motor: ele fica com o duelo de pé, segurando o
+      // `cards.cdb` e barrando a atualização (`DueloEmAndamento`). Só o
+      // anfitrião tem motor rodando — no convidado isto não teria o que soltar.
+      if (ponte?.souAnfitriao) encerrarDueloNoServidor();
     } else {
       encerrarDueloNoServidor();             // solta o motor; sem prêmio, é derrota
     }
     ended = true;
     log('=== você desistiu do duelo ===', true);
     render();
-    mostrarFimDuelo(false, false, null);
+    mostrarFimDuelo(false, false, null,
+      { soHome: ehMultiplayer(), motivo: ehMultiplayer() ? 'você desistiu' : null });
   } catch (e) {
     warn(`não consegui desistir: ${e.message}`);
     $('btn-desistir').disabled = false;
   }
 };
+
+/**
+ * **A partida acabou do OUTRO lado.**
+ *
+ * O relato que criou isto: *"se um player desistir o outro tbm deve ser
+ * redirecionado pra Home... hoje a sala fica aberta e o duelo n encerra"*. E era
+ * exatamente isso — quem desistia fechava a partida no banco e ia embora; o
+ * adversário continuava com o tabuleiro na tela, pesquisando lances de uma
+ * partida encerrada, para sempre. A única saída era o "estou preso" do
+ * Multiplayer, e ele não conta a ninguém quem ganhou.
+ *
+ * Agora o servidor manda a notícia (`lances.tipo = 'fim'`, migration 0056) e ela
+ * chega aqui. Duas travas importam:
+ *
+ *  1. **espera a fila esvaziar.** A notícia vem logo atrás da visão do golpe
+ *     final — que ainda está sendo ANIMADA. Mostrar o quadro na frente dela
+ *     cortaria o último ataque no meio, e o perdedor leria "você perdeu" sem ter
+ *     visto por quê;
+ *  2. **`ended` manda.** Se a visão final já mostrou o fim (o caso normal de
+ *     vitória, em que os dois lados veem o `end` do motor), aqui não há nada a
+ *     fazer — este caminho é para quando o fim NÃO veio pelo tabuleiro.
+ */
+async function fimPelaSala(info) {
+  if (ended) return;
+  await filaVisoes.drenar();
+  if (ended) return;
+
+  ended = true;
+  const { venci, empate, desistencia } = desfechoDoFim(sala, info);
+  log(`=== ${empate ? 'duelo encerrado' : venci ? 'você venceu!' : 'oponente venceu'}`
+      + `${desistencia ? ' (por desistência)' : ''} ===`, true);
+  render();
+  // O duelo acabou FORA do motor (o outro desistiu), então ele continua de pé
+  // deste lado — segurando o `cards.cdb` e barrando a atualização. Só o
+  // anfitrião tem motor: no convidado não haveria o que soltar.
+  if (ponte?.souAnfitriao) encerrarDueloNoServidor();
+  // O lance de 'fim' é endereçado ao OUTRO: quem desiste nunca recebe o próprio
+  // aviso (e já mostrou a tela dele, no botão). Então "desistência" aqui é
+  // sempre a do adversário.
+  mostrarFimDuelo(venci, empate, null, {
+    soHome: true,
+    motivo: desistencia ? 'seu adversário desistiu' : 'a partida foi encerrada',
+  });
+}
 /**
  * Avisa o servidor que esta tela está saindo, para ele soltar o duelo.
  *
@@ -4408,7 +5186,7 @@ if (partidaId) {
       // janela para o jogador clicar no meio de uma aplicação — que é a mesma
       // família de bug que a fila veio resolver.
       aplicarEmOrdem(visao);
-    });
+    }, fimPelaSala);
     window.addEventListener('beforeunload', () => ponte?.fechar());
   }
 }

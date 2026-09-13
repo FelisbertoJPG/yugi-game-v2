@@ -751,14 +751,114 @@ if ($perm -notin @('WRITE', 'ADMIN', 'MAINTAIN')) {
 if ($Tag -eq '') { $Tag = "release-$(Get-Date -Format 'yyyyMMdd-HHmm')" }
 
 $assets = Get-ChildItem $saida -File | ForEach-Object { $_.FullName }
-# Sem --draft e sem --prerelease, de proposito: o cliente busca /releases/latest,
-# e esse endpoint IGNORA os dois. Um Release marcado como rascunho publica "com
-# sucesso" e nenhum jogador ve' a atualizacao - e nada acusa.
-& $gh release create $Tag @assets --repo "$owner/$repo" --title $Tag `
-    --notes "Atualizacao automatica - $($manifesto.gameVersion)"
-if ($LASTEXITCODE -ne 0) { Falhar 'o gh release create falhou' }
 
-Ok "Release $Tag publicado em $owner/$repo"
+# PUBLICAR EM ETAPAS, e cada etapa aguenta o GitHub falhar.
+#
+# Era um `gh release create $Tag @assets` so', e em 13/09/2026 ele caiu tres vezes
+# seguidas por instabilidade do GitHub (a pagina de status dizia "tudo
+# operacional"): um HTTP 500 no create; depois um 422 "ReleaseAsset.name already
+# exists" - o `gh` repetiu um upload que tinha entrado - seguido de um 500 ao
+# apagar o rascunho, que ficou pendurado no repositorio. Uma operacao unica de
+# ~115 MB nao tem por onde retomar: qualquer soluco joga fora o envio inteiro.
+#
+# Hoje e': rascunho SEM assets -> cada asset com `--clobber` e novas tentativas
+# (o repetido sobrescreve em vez de recusar) -> confere nome e tamanho no GitHub
+# -> tira do rascunho -> confirma que `/releases/latest` e' esta tag.
+#
+# O rascunho e' o estado SEGURO de uma falha no meio: o cliente busca
+# /releases/latest, que ignora rascunhos, entao ninguem baixa um Release pela
+# metade. E pelo mesmo motivo a ultima etapa e' OBRIGATORIA e conferida: um
+# Release esquecido em rascunho "publica com sucesso" e nenhum jogador ve' nada.
+
+# A partir daqui toda falha e' decidida pelo $LASTEXITCODE do `gh`, e nao por
+# excecao. No Windows PowerShell 5.1, com `$ErrorActionPreference = 'Stop'`, uma
+# saida de erro de programa externo redirecionada (`2>$null`) vira EXCECAO
+# FATAL: foi assim que a limpeza de um rascunho - que so' devia AVISAR - derrubou
+# a publicacao inteira no primeiro 500 do GitHub.
+$ErrorActionPreference = 'Continue'
+
+function ComTentativas([string]$oQue, [scriptblock]$acao, [int]$vezes = 5) {
+  for ($i = 1; $i -le $vezes; $i++) {
+    try { & $acao } catch { $global:LASTEXITCODE = 1 }
+    if ($LASTEXITCODE -eq 0) { return $true }
+    if ($i -lt $vezes) {
+      $espera = [int][Math]::Min(60, 5 * [Math]::Pow(2, $i - 1))
+      Aviso "$oQue falhou (tentativa $i de $vezes) - tentando de novo em ${espera}s"
+      Start-Sleep -Seconds $espera
+    }
+  }
+  return $false
+}
+
+# Rascunhos de publicacoes que falharam: so' AVISA, nunca apaga.
+#
+# Houve uma versao que apagava, e em 13/09/2026 ela APAGOU 17 RELEASES PUBLICADOS,
+# inclusive o que estava no ar. No Windows PowerShell 5.1 o `ConvertFrom-Json`
+# de um array devolve o array INTEIRO como UM objeto no pipeline; o
+# `Where-Object { $_.isDraft }` enumerava a propriedade ("ha' algum true?") e
+# deixava a lista toda passar. Script de publicacao nao apaga nada sozinho: a
+# poda continua opt-in (`-PodarReleases`), e rascunho velho se apaga na mao.
+# `@(...)` + `-eq $true` e' o jeito certo de filtrar - e mesmo assim so' se lista.
+$listaDeReleases = (& $gh release list --repo "$owner/$repo" --limit 50 --json tagName,isDraft 2>$null) | Out-String
+$rascunhos = @()
+if ($LASTEXITCODE -eq 0 -and $listaDeReleases.Trim()) {
+  $rascunhos = @(@($listaDeReleases | ConvertFrom-Json) | ForEach-Object { $_ } | Where-Object { $_.isDraft -eq $true })
+}
+foreach ($d in $rascunhos) {
+  Aviso "rascunho de uma publicacao que falhou: $($d.tagName) (invisivel para os jogadores). Para apagar: gh release delete $($d.tagName) --repo $owner/$repo --yes"
+}
+
+$notas = "Atualizacao automatica - $($manifesto.gameVersion)"
+$criou = ComTentativas "criar o rascunho $Tag" {
+  # Um 500 do GitHub pode ter CRIADO o Release mesmo assim: confere antes de
+  # tentar de novo, senao a segunda tentativa recusa por tag repetida.
+  & $gh release view $Tag --repo "$owner/$repo" --json tagName *> $null
+  if ($LASTEXITCODE -ne 0) {
+    & $gh release create $Tag --repo "$owner/$repo" --draft --title $Tag --notes $notas
+  }
+}
+if (-not $criou) { Falhar "o GitHub recusou criar o Release $Tag - nada foi publicado; rode de novo mais tarde" }
+Ok "rascunho $Tag criado"
+
+foreach ($a in $assets) {
+  $nome = Split-Path $a -Leaf
+  $subiu = ComTentativas "subir $nome" { & $gh release upload $Tag $a --repo "$owner/$repo" --clobber }
+  if (-not $subiu) {
+    Falhar "nao consegui subir $nome - o Release $Tag ficou em RASCUNHO (nenhum jogador ve'); rode de novo"
+  }
+  Ok ("subiu: {0} ({1:N1} MB)" -f $nome, ((Get-Item $a).Length / 1MB))
+}
+
+# Nome E tamanho: um upload interrompido que o GitHub aceitou pela metade teria
+# o nome certo, e o cliente so' descobriria no sha256, arquivo por arquivo.
+$remoto = & $gh release view $Tag --repo "$owner/$repo" --json assets | ConvertFrom-Json
+foreach ($a in $assets) {
+  $local = Get-Item $a
+  $la = $remoto.assets | Where-Object { $_.name -eq $local.Name } | Select-Object -First 1
+  if (-not $la -or [long]$la.size -ne $local.Length) {
+    Falhar ("{0} nao conferiu no GitHub (local {1} B, la' {2}) - o Release {3} ficou em RASCUNHO; rode de novo" -f `
+            $local.Name, $local.Length, $(if ($la) { $la.size } else { 'ausente' }), $Tag)
+  }
+}
+Ok "os $($assets.Count) arquivos conferem no GitHub (nome e tamanho)"
+
+$publicou = ComTentativas "tirar $Tag do rascunho" {
+  & $gh release edit $Tag --repo "$owner/$repo" --draft=false --latest
+}
+if (-not $publicou) {
+  Falhar "os arquivos subiram, mas $Tag nao saiu do rascunho. Para terminar na mao: gh release edit $Tag --repo $owner/$repo --draft=false --latest"
+}
+
+$script:latest = ''
+$confere = ComTentativas 'confirmar o /releases/latest' {
+  $script:latest = (& $gh api "repos/$owner/$repo/releases/latest" --jq .tag_name 2>$null)
+  if ($LASTEXITCODE -eq 0 -and $script:latest -ne $Tag) { $global:LASTEXITCODE = 1 }
+} 4
+if (-not $confere) {
+  Falhar "$Tag foi publicado, mas /releases/latest ainda devolve '$($script:latest)' - os jogadores nao vao ver"
+}
+
+Ok "Release $Tag publicado em $owner/$repo e ja' e' o /releases/latest"
 
 # --------------------------------------------------------- 6. podar os antigos
 $todos = & $gh release list --repo "$owner/$repo" --limit 200 --json tagName,createdAt |

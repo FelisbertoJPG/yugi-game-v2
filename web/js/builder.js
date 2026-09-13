@@ -47,6 +47,7 @@ import { requireLogin, requireAdmin } from '/web/js/auth.js';
 import { perfilAtual } from '/web/js/supabase.js';
 import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
+import { carregarCartasDoBuilder } from '/web/js/cartasdobuilder.js';
 
 const $ = (id) => document.getElementById(id);
 const MAX_RENDER = 240;
@@ -1945,6 +1946,11 @@ await hydrateBanlist();
 banlist = getBanlist();
 
 for (const c of listCustom()) injectCustom(c);
+// As cartas do CARD BUILDER (Área de Teste → Card Builder, tabela `cartas_custom`).
+// Vêm DEPOIS das importadas no navegador: ids diferentes (950000000+ contra
+// 900000000+), então nenhuma cobre a outra. Sem rede, a lista vem vazia e o
+// resto do builder segue igual.
+for (const { entrada } of await carregarCartasDoBuilder()) injectCustom(entrada);
 // Marca as cartas com a raridade/booster salvos (tags + selo).
 annotateDb(db);
 rarIdx = rarityIndex();

@@ -333,6 +333,11 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-kaiba") >= 0)
                 return TestKaiba.Run(streamingAssets);
 
+            // As cartas do Card Builder chegam no /start (dados + Lua) e o motor
+            // as joga sem cards.cdb nem arquivo em disco.
+            if (Array.IndexOf(args, "--test-card-builder") >= 0)
+                return TestCardBuilder.Run(streamingAssets);
+
             if (Array.IndexOf(args, "--test-dust") >= 0)
                 return TestDust.Run(streamingAssets);
 

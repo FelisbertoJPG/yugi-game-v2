@@ -538,7 +538,10 @@ namespace DuelServer
             {
                 Bateu();
                 var body = ReadBody(req);
-                WriteJson(res, StartDuel(body));
+                // `IsLocal` decide se as cartas do Card Builder (Lua vindo no
+                // corpo) são aceitas: com `--lan` esta porta é alcançável pela
+                // rede, e script de outro aparelho não pode rodar no motor.
+                WriteJson(res, StartDuel(body, req.IsLocal));
                 return;
             }
             if (path == "/respond" && req.HttpMethod == "POST")
@@ -561,7 +564,7 @@ namespace DuelServer
         /// </summary>
         internal static void ConfigurarParaTeste(string streamingAssets) => _sa = streamingAssets;
 
-        internal static object StartDuel(JsonElement body)
+        internal static object StartDuel(JsonElement body, bool local = true)
         {
             uint[] deck = ReadDeck(body);
             if (deck.Length == 0) return new { error = "deck vazio" };
@@ -627,6 +630,11 @@ namespace DuelServer
                      $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")} " +
                      $"campoDe={(fieldSpell.HasValue ? (fieldSpellController == 1 ? "npc" : "jogador") : "-")} " +
                      $"nivel={(leitura ? "avancado" : "iniciante")} multiplayer={multi}");
+            if (body.TryGetProperty("customCards", out var cartasDoCorpo) && cartasDoCorpo.ValueKind == JsonValueKind.Array)
+            {
+                if (local) Log.Info($"[rpc] /start com {cartasDoCorpo.GetArrayLength()} carta(s) do Card Builder");
+                else Log.Warn("[rpc] /start de fora da maquina trouxe cartas do Card Builder — ignoradas (Lua so' de chamada local)");
+            }
             Faxina();
             var sala = SalaDe(body);
             lock (sala.Trava)
@@ -634,7 +642,8 @@ namespace DuelServer
                 sala.Duel?.Dispose();
                 sala.Duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
                                                 npcLeitura: leitura, doisHumanos: multi,
-                                                fieldSpellController: fieldSpellController);
+                                                fieldSpellController: fieldSpellController,
+                                                cartasCustom: local ? CartaCustom.Ler(body) : null);
                 sala.Multiplayer = multi;
                 sala.Ultimo = DateTime.UtcNow;
                 var r = sala.Duel.Advance();

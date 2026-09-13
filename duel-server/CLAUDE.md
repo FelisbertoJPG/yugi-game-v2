@@ -105,6 +105,24 @@ npm run release:build        # DRY-RUN: gera dist/release/ (game.zip, cards.zip,
 npm run release:test         # instala esses artefatos numa raiz descartável e confere
 npm run release:publish      # sobe o Release para o repo privado de distribuição
                              # -- -PodarReleases 5 apaga as tags antigas (opt-in)
+                             # PUBLICA EM ETAPAS (13/09/2026), cada uma com novas
+                             # tentativas: AVISA (nunca apaga) dos rascunhos de publicacoes que
+                             # falharam -> cria o Release em RASCUNHO sem assets
+                             # (conferindo antes se um 500 ja' o criou) -> sobe
+                             # asset por asset com --clobber -> confere nome e
+                             # tamanho no GitHub -> tira do rascunho -> confirma
+                             # que /releases/latest e' a tag nova. Era um
+                             # `release create` unico de ~115 MB, e o GitHub
+                             # derrubou tres seguidos (500, 422 de upload
+                             # repetido, 502) com a pagina de status verde.
+                             # Rascunho e' o estado SEGURO de uma falha no meio:
+                             # /releases/latest os ignora, ninguem baixa pela
+                             # metade — e por isso o "tirar do rascunho" e' conferido.
+                             # A etapa roda com $ErrorActionPreference='Continue':
+                             # o script liga 'Stop' no topo, e no Windows
+                             # PowerShell 5.1 um `gh … 2>$null` que falha vira
+                             # EXCECAO FATAL — a primeira versao morreu assim ao
+                             # nao conseguir apagar um rascunho, que so' devia avisar
                              # --test-remote (na mão) baixa o Release publicado e instala
 npm run publicar:build       # gera publicar.exe na raiz (o publicador)
 .\publicar.exe               # DOIS CLIQUES = publicar. Faz, nesta ordem: confere
@@ -180,6 +198,36 @@ pergunta não traz; agora `Entregar` varre uma vez por entrega. Cobre as duas
 formas: equipamento e efeito contínuo de monstro, o Star Boy subindo o ATK de
 quem já estava em campo),
 `--test-kaiba` e `--test-joey` (decks completos dos NPCs jogando sozinhos),
+`--test-card-builder` (as cartas do **Card Builder** — `web/cardbuilder.html`,
+tabela `cartas_custom` — não moram no `cards.cdb` nem na pasta de scripts:
+chegam no `/start` como `customCards`, dados + Lua, e `CartaCustom` as registra
+no `DatabaseManager` — leitor do motor, `Stats`, `Nome` e o Lua do `Perfil` — e
+no `ScriptManager`. O teste prova a leitura do corpo (id OFICIAL recusado, senão
+dava para trocar o script do Pote da Ganância; Lua vazio; duplicata), o que o
+NPC lê, e um duelo em que a Magia do builder é ATIVADA, compra 2 e vai ao
+Cemitério e o Monstro aparece invocável. O par CONTROLE é o mesmo deck sem
+`customCards`, onde nada disso é oferecido — os `[ERRO] [lua]` desse trecho são
+esperados. A trava de rede (`req.IsLocal`) mora na rota, fora do teste.
+A última parte joga a CATEGORIA COMPOSTA com o Lua que o gerador escreve para a
+Multistrike Dragon Dragias — custo "descarte 2 Normais de Tipos diferentes",
+Invocação-Especial da mão, "então destrua 1 carta", "então ataca 2 vezes" — e
+conta os ataques pela ZONA da carta (`sequence`), senão duas Dragias em campo
+passariam por uma que atacou duas vezes. O par controle é o mesmo script com
+`SetValue(0)`. `LUA_DRAGIAS` é a saída do gerador, e `node
+web/js/cardbuilder.test.mjs` cobra que continue sendo: mudou o gerador, atualize
+a constante e rode os dois. Joga também a FUSÃO do builder (no Extra Deck, por
+Polymerization com Gaia The Fierce Knight + Curse of Dragon) e o RITUAL do builder
+pela Magia de Ritual do builder, com Battle Ox de tributo — `LUA_FUSAO`,
+`LUA_RITUAL` e `LUA_MAGIA_RITUAL` são saída do gerador, cobradas pelo mesmo teste
+JS; o controle das duas é o deck sem `customCards`, em que a magia nunca é
+oferecida. Joga ainda a Dragon's Inferno (`LUA_INFERNO`, Armadilha Contínua): o
+Curse of Dragon Invocado sem tributo com o campo vazio; o destruir que só aparece
+com o Normal Dragão em campo (um efeito a mais depois da Invocação); a busca no
+Deck/Cemitério; o baixar de 2 cartas de nomes diferentes; e a conta de cada efeito
+(`{id,n}`). Cada efeito é reconhecido pelo que a resolução FEZ, porque os três
+chegam com o mesmo código e sem descrição. Os controles trocam uma coisa só no
+mesmo script: sem o alcance da mão, o Curse que a própria busca trouxe nunca fica
+invocável; com a conta dividida (`id`), usar um efeito apaga os outros),
 `--test-dust` (Dust Tornado/remoção de magia-armadilha), `--test-synchro`
 (Invocação-Sincro pelo Extra Deck + negação do Stardust Dragon via corrente),
 `--test-xyz` (Invocação-Xyz + desanexação de material do Number 39: Utopia),

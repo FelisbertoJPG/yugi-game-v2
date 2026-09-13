@@ -83,6 +83,33 @@ public class DatabaseManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// As cartas do **Card Builder** deste duelo, por código (ver
+    /// <see cref="CartaCustom"/>). Elas não moram no `cards.cdb`: chegam no
+    /// `/start` e são registradas ANTES de o duelo existir, porque o motor pede os
+    /// dados de cada carta já na injeção do deck.
+    ///
+    /// Todo leitor por código desta classe consulta aqui primeiro — o
+    /// `CardReaderCallback` (o motor), o `Stats` (o NPC), o `Nome` e o Lua do
+    /// `Perfil`. Um leitor que esquecesse faria o NPC decidir por uma carta de
+    /// 0/0 sem tipo enquanto o motor a joga com os números certos.
+    /// </summary>
+    private readonly System.Collections.Generic.Dictionary<uint, CartaCustom> _custom = new();
+
+    public void RegistrarCustom(System.Collections.Generic.IEnumerable<CartaCustom> cartas)
+    {
+        if (cartas == null) return;
+        foreach (var c in cartas)
+        {
+            if (c == null || !CartaCustom.EhDoBuilder(c.Code)) continue;
+            _custom[c.Code] = c;
+            _statsCache.Remove(c.Code);
+            _nomeCache.Remove(c.Code);
+            _luaCache.Remove(c.Code);
+            _perfilCache.Remove(c.Code);
+        }
+    }
+
     /// <summary>Stats de uma carta, para a IA do NPC decidir a jogada.</summary>
     public readonly struct CardStats
     {
@@ -129,6 +156,12 @@ public class DatabaseManager : IDisposable
     public CardStats Stats(uint code)
     {
         if (_statsCache.TryGetValue(code, out var hit)) return hit;
+
+        // Carta do Card Builder: os números vêm do /start, não do cards.cdb.
+        // Categoria 0 — ela não existe fora do banco; o `Perfil` lê o Lua.
+        if (_custom.TryGetValue(code, out var cc))
+            return _statsCache[code] = new CardStats(code, cc.Type, cc.Level, cc.Atk, cc.Def,
+                                                     (uint)cc.Race, cc.Attribute);
 
         var s = new CardStats(code, 0, 0, 0, 0);
         if (db != IntPtr.Zero)
@@ -199,6 +232,8 @@ public class DatabaseManager : IDisposable
     public string Nome(uint code)
     {
         if (_nomeCache.TryGetValue(code, out string hit)) return hit;
+        if (_custom.TryGetValue(code, out var cc))
+            return _nomeCache[code] = string.IsNullOrWhiteSpace(cc.Nome) ? code.ToString() : cc.Nome.Trim();
 
         string nome = null;
         if (db != IntPtr.Zero)
@@ -1095,6 +1130,9 @@ public class DatabaseManager : IDisposable
     private string LuaDaCarta(uint code)
     {
         if (_luaCache.TryGetValue(code, out string hit)) return hit;
+        // Carta do Card Builder: o script veio no /start. Sem isto o `Perfil`
+        // concluiria "sem Lua, sem efeito", e o NPC nunca jogaria a carta.
+        if (_custom.TryGetValue(code, out var cc)) return _luaCache[code] = cc.Lua;
         string texto = "";
         foreach (string rel in new[] { "YGODemo/script/official", "YGODemo/script" })
         {
@@ -1146,6 +1184,21 @@ public class DatabaseManager : IDisposable
         OCG_CardData cardData = new OCG_CardData();
         cardData.code = code;
         cardData.setcodes = IntPtr.Zero;
+
+        // Carta do CARD BUILDER: não existe no `cards.cdb`, e perguntar a ele
+        // devolveria tipo 0 — uma carta que entra no deck e o motor nunca deixa
+        // jogar, sem erro nenhum. Sem arquétipo (`setcodes` fica nulo).
+        if (_custom.TryGetValue(code, out var custom))
+        {
+            cardData.type = custom.Type;
+            cardData.level = custom.Level;
+            cardData.attribute = custom.Attribute;
+            cardData.race = custom.Race;
+            cardData.attack = custom.Atk;
+            cardData.defense = custom.Def;
+            Marshal.StructureToPtr(cardData, dataPtr, false);
+            return;
+        }
 
         if (db != IntPtr.Zero)
         {

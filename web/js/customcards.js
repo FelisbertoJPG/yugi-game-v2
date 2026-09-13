@@ -224,6 +224,123 @@ export function isExtraKind(kind) {
   return EXTRA_KINDS.has(kind);
 }
 
+// ----------------------------------------------------- moldura importada
+
+/** Subtipo de magia/armadilha no rótulo em português (a linha de tipo da carta). */
+const SUBTIPO_PT = {
+  'Quick-Play': 'Rápida', Continuous: 'Contínua', Equip: 'Equipamento',
+  Field: 'Campo', Ritual: 'Ritual', Counter: 'Contra',
+};
+
+/** A cor do círculo de atributo, como na carta oficial. */
+const COR_DO_ATRIBUTO = {
+  DARK: '#5b2a7a', LIGHT: '#c9a22a', EARTH: '#6b4a2a', WATER: '#2a6fb0',
+  FIRE: '#c0392b', WIND: '#2e8b57', DIVINE: '#b8860b',
+};
+
+/**
+ * Desenha a carta sobre uma MOLDURA importada pelo admin (Card Builder, visual
+ * `moldura`): a moldura ocupa a carta inteira, e a arte, o nome, as estrelas, a
+ * linha de tipo, o texto e o ATK/DEF entram por cima nas proporções da carta
+ * OFICIAL (59 × 86 mm) — é isso que faz uma moldura escaneada encaixar sem
+ * ajuste nenhum.
+ *
+ * A moldura vai POR BAIXO e a arte por cima da janela: assim tanto uma moldura
+ * com a janela transparente quanto uma com a janela pintada funcionam — e a
+ * redução para JPEG (que perde a transparência) não estraga nada.
+ *
+ * @returns {Promise<string>} data URL (image/jpeg)
+ */
+export function renderCardOnFrame(fields, artDataUrl, frameDataUrl, { w = 480, quality = 0.88 } = {}) {
+  const carregar = (src) => new Promise((ok) => {
+    if (!src) return ok(null);
+    const im = new Image();
+    im.onload = () => ok(im);
+    im.onerror = () => ok(null);
+    im.src = src;
+  });
+
+  return Promise.all([carregar(frameDataUrl), carregar(artDataUrl)]).then(([moldura, arte]) => {
+    const h = Math.round((w * 86) / 59);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const X = (p) => Math.round(w * p);
+    const Y = (p) => Math.round(h * p);
+    const isMonster = fields.cat === 'Monster';
+
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, w, h);
+    if (moldura) ctx.drawImage(moldura, 0, 0, w, h);
+
+    // a janela da arte (12,3%–87,7% × 18,4%–70,1% da carta oficial)
+    const ax = X(0.123);
+    const ay = Y(0.184);
+    if (arte) coverDraw(ctx, arte, ax, ay, X(0.877) - ax, Y(0.701) - ay);
+
+    // o nome: preto nos monstros, branco em magia/armadilha — como na oficial
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = isMonster ? '#111' : '#fff';
+    drawFit(ctx, fields.name || '—', X(0.08), Y(0.074), X(0.79), h * 0.05);
+
+    // o círculo do atributo (ou MAGIA/ARMADILHA)
+    const rotulo = isMonster ? (fields.attribute || '?') : (fields.cat === 'Spell' ? 'MAGIA' : 'ARMADILHA');
+    const cor = isMonster ? (COR_DO_ATRIBUTO[fields.attribute] ?? '#444')
+      : (fields.cat === 'Spell' ? '#1f9a86' : '#bd5a86');
+    ctx.beginPath();
+    ctx.arc(X(0.912), Y(0.074), X(0.043), 0, Math.PI * 2);
+    ctx.fillStyle = cor;
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${Math.round(h * 0.011)}px Georgia, serif`;
+    ctx.fillText(rotulo.slice(0, 9), X(0.912), Y(0.075));
+
+    ctx.textAlign = 'right';
+    if (isMonster) {
+      const nivel = Math.max(0, Math.min(12, Number(fields.level) || 0));
+      ctx.fillStyle = '#e0a800';
+      ctx.font = `${Math.round(h * 0.034)}px Georgia, serif`;
+      ctx.fillText('★'.repeat(nivel), X(0.88), Y(0.145));
+    } else {
+      const sub = SUBTIPO_PT[fields.subtype];
+      ctx.fillStyle = '#111';
+      ctx.font = `bold ${Math.round(h * 0.03)}px Georgia, serif`;
+      ctx.fillText(`[${fields.cat === 'Spell' ? 'Magia' : 'Armadilha'}${sub ? ` ${sub}` : ''}]`, X(0.88), Y(0.145));
+    }
+
+    // a linha de tipo e o texto
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#111';
+    let topo = Y(0.765);
+    if (isMonster) {
+      ctx.font = `bold ${Math.round(h * 0.024)}px Georgia, serif`;
+      const especie = { Normal: 'Normal', Effect: 'Efeito', Fusion: 'Fusão', Ritual: 'Ritual' }[fields.kind] ?? 'Efeito';
+      ctx.fillText(`[ ${fields.race || '?'} / ${especie} ]`, X(0.08), topo);
+      topo = Y(0.793);
+    }
+    const fundo = isMonster ? Y(0.905) : Y(0.935);
+    const fs = Math.round(h * 0.021);
+    const linha = fs + 2;
+    ctx.font = `${fs}px Georgia, serif`;
+    wrapText(ctx, fields.desc || '', X(0.08), topo, X(0.84), linha, Math.max(1, Math.floor((fundo - topo) / linha)));
+
+    if (isMonster) {
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold ${Math.round(h * 0.026)}px Georgia, serif`;
+      const atk = fields.atk === -2 ? '?' : (fields.atk ?? 0);
+      const def = fields.kind === 'Link' ? '—' : (fields.def === -2 ? '?' : (fields.def ?? 0));
+      ctx.fillText(`ATK/${atk}   DEF/${def}`, X(0.915), Y(0.93));
+    }
+
+    return canvas.toDataURL('image/jpeg', quality);
+  });
+}
+
 // ----------------------------------------------------- moldura automática
 
 // Cores aproximadas das molduras do Yu-Gi-Oh, por tipo.

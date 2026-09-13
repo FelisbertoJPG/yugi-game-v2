@@ -15,6 +15,24 @@ public class ScriptManager
     private string scriptBasePath;
     private Dictionary<string, string> scriptCache = new Dictionary<string, string>();
 
+    /// <summary>
+    /// Os scripts das cartas do **Card Builder** deste duelo, por nome de arquivo
+    /// (`c950000001.lua`). Não existem em disco: chegam no `/start` (ver
+    /// <see cref="CartaCustom"/>). Só a faixa do builder entra, então nenhum
+    /// script oficial pode ser trocado por este caminho.
+    /// </summary>
+    private readonly Dictionary<string, byte[]> _custom = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+
+    public void RegistrarCustom(IEnumerable<CartaCustom> cartas)
+    {
+        if (cartas == null) return;
+        foreach (var c in cartas)
+        {
+            if (c == null || !CartaCustom.EhDoBuilder(c.Code) || string.IsNullOrEmpty(c.Lua)) continue;
+            _custom[$"c{c.Code}.lua"] = System.Text.Encoding.UTF8.GetBytes(c.Lua);
+        }
+    }
+
     public ScriptManager(string streamingAssetsPath)
     {
         scriptBasePath = Path.Combine(streamingAssetsPath, "YGODemo/script");
@@ -75,6 +93,14 @@ public class ScriptManager
     {
         // Se a DLL pediu um caminho relativo completo como "script/c123.lua", pegamos so o nome
         string fileName = Path.GetFileName(name);
+
+        // Carta do CARD BUILDER: o script veio no /start, não mora em disco.
+        if (_custom.TryGetValue(fileName, out byte[] gerado))
+        {
+            int r = YgoCoreAPI.OCG_LoadScript(duel, gerado, (uint)gerado.Length, name);
+            Log.Info($"[ScriptManager] script do Card Builder carregado: {fileName} (r={r})");
+            return r != 0 ? 1 : 0;
+        }
 
         if (scriptCache.TryGetValue(fileName, out string fullPath))
         {

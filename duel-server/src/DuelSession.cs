@@ -38,10 +38,17 @@ namespace DuelServer
 
         public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0,
                            uint[] extra0 = null, uint[] extra1 = null, uint? fieldSpell = null,
-                           int fieldSpellController = 0)
+                           int fieldSpellController = 0, CartaCustom[] cartasCustom = null)
         {
             _db = new DatabaseManager(streamingAssets);
             _sm = new ScriptManager(streamingAssets);
+            // As cartas do Card Builder entram ANTES do `OCG_CreateDuel`: o motor
+            // pede dados e script de cada carta já na injeção do deck, logo abaixo.
+            if (cartasCustom != null && cartasCustom.Length > 0)
+            {
+                _db.RegistrarCustom(cartasCustom);
+                _sm.RegistrarCustom(cartasCustom);
+            }
             _cardReader = _db.CardReaderCallback;
             _scriptReader = _sm.ScriptReaderCallback;
             // **A ÚNICA voz do motor sobre um efeito quebrado.** Ficava nula, e

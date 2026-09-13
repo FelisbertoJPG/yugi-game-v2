@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classic Duels — Card Builder</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  .wrap { width: min(1320px, 96vw); margin: 0 auto; padding: 18px 0 60px; }
+
+  .topo { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+          border-bottom: 2px solid var(--line); padding-bottom: 14px; margin-bottom: 18px; }
+  .topo h1 { margin: 0; font-size: 22px; letter-spacing: 4px; color: var(--gold); }
+  .topo .sub { font-size: 10px; color: var(--dim); line-height: 1.6; flex: 1; min-width: 240px; }
+
+  .grade { display: grid; grid-template-columns: minmax(280px, 340px) 1fr minmax(300px, 380px);
+           gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .grade { grid-template-columns: 1fr; } }
+
+  .painel { background: var(--panel); border: 2px solid var(--line); padding: 16px; }
+  .painel h2 { margin: 14px 0 8px; font-size: 12px; letter-spacing: 2px; color: var(--gold); }
+  .painel h2:first-child { margin-top: 0; }
+  .painel .ajuda { font-size: 10px; color: var(--dim); margin: 0 0 10px; line-height: 1.6; }
+
+  .campo { display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
+           font-size: 11px; color: var(--dim); }
+  .campo label { width: 86px; flex: none; }
+  .campo input, .campo select { flex: 1; min-width: 0; }
+  .campo .entre { flex: none; }
+  .campo .tem { flex: none; font-size: 10px; color: var(--gold); }
+  .campo.check label { width: auto; }
+  .campo.check input { flex: none; width: auto; }
+
+  textarea { width: 100%; box-sizing: border-box; background: var(--bg2); color: var(--ink);
+             border: 1px solid var(--line); font: 11px/1.5 inherit; padding: 6px; resize: vertical; }
+
+  .efeito { background: var(--panel2); border: 1px solid var(--line); padding: 10px 12px; margin-bottom: 10px; }
+  .efeito-topo { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .efeito-topo b { font-size: 11px; letter-spacing: 2px; color: var(--ink); flex: 1; }
+  .efeito button, .grupo button { font-size: 10px; padding: 2px 8px; }
+
+  /* Cada OPÇÃO do filtro é um grupo: dentro dele as condições valem JUNTAS
+     (E); entre grupos vale QUALQUER UM (OU). A borda é o desenho do "ou". */
+  .grupo { border-left: 2px solid var(--gold); padding: 6px 0 2px 10px; margin: 8px 0; }
+  .grupo-topo { display: flex; align-items: center; gap: 8px; font-size: 10px;
+                color: var(--gold); letter-spacing: 1px; margin-bottom: 6px; }
+  .grupo-topo span { flex: 1; }
+  .ou { font-size: 10px; color: var(--dim); margin: 2px 0 2px 2px; }
+
+  .problemas { font-size: 10px; color: var(--red); line-height: 1.6; margin-top: 6px; }
+  .acoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .aviso { font-size: 10px; color: var(--dim); margin-top: 10px; line-height: 1.6; }
+
+  .previa { display: flex; align-items: center; justify-content: center; min-height: 240px;
+            background: var(--panel2); border: 1px dashed var(--line); }
+  .previa img { width: 100%; max-width: 300px; display: block; }
+
+  pre.lua { background: var(--bg2); border: 1px solid var(--line); color: var(--ink);
+            font: 11px/1.45 Consolas, 'Courier New', monospace; tab-size: 3;
+            max-height: 460px; overflow: auto; padding: 10px; margin: 0; white-space: pre; }
+  .nome-arquivo { color: var(--dim); letter-spacing: 0; font-weight: normal; }
+
+  .lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .item { background: var(--panel2); border: 1px solid var(--line); padding: 8px;
+          display: flex; flex-direction: column; gap: 6px; }
+  .item .arte { min-height: 120px; display: flex; align-items: center; justify-content: center; }
+  .item .arte img { width: 100%; display: block; }
+  .item .nome { font-size: 11px; color: var(--ink); }
+  .item .meta { font-size: 9px; color: var(--dim); letter-spacing: 1px; }
+  .item .linha { display: flex; gap: 6px; }
+  .item button { font-size: 10px; padding: 2px 7px; }
+  .vazia { font-size: 11px; color: var(--dim); padding: 20px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topo">
+    <h1>CARD BUILDER</h1>
+    <div class="sub">
+      Três passos: a <b>arte</b>, o <b>tipo</b> (que já traz o esqueleto Lua dele) e os
+      <b>efeitos</b>. O código ao lado é o <code>c&lt;id&gt;.lua</code> que o motor roda —
+      ele sai dos dados da carta a cada mudança, então é aqui que se edita, nunca no arquivo.
+      A carta vai para o banco e já pode ser usada no Deck Builder e no duelo.
+    </div>
+    <button id="btn-voltar">← Área de Teste</button>
+  </div>
+
+  <div class="grade">
+    <!-- 1 e 2 -->
+    <div class="painel">
+      <h2>1 · ARTE</h2>
+      <!-- Montado pelo script: os campos de arquivo dependem do VISUAL escolhido
+           (arte, moldura ou carta completa). Nada aqui é escondido por atributo —
+           ver web/js/esconder.test.mjs. -->
+      <div id="campos-visual"></div>
+      <div class="campo">
+        <label for="nome">nome</label>
+        <input type="text" id="nome" maxlength="80" placeholder="Mago Guardião do Portão" autocomplete="off">
+      </div>
+      <div class="campo">
+        <label for="cardmaker">card maker</label>
+        <input type="file" id="cardmaker" accept=".json,application/json">
+      </div>
+      <p class="ajuda">Importar o <b>.json do card maker</b> abre uma carta NOVA com o nome, o tipo, os números, o texto e a arte dele. Os efeitos o card maker não sabe: monte-os no passo 3.</p>
+
+      <h2>2 · TIPO</h2>
+      <div class="campo">
+        <label for="tipo">tipo</label>
+        <select id="tipo"></select>
+      </div>
+      <div id="campos-tipo"></div>
+      <p class="ajuda" id="esqueleto"></p>
+
+      <h2>TEXTO DA CARTA</h2>
+      <textarea id="texto" rows="6" placeholder="vazio = o texto sai dos efeitos"></textarea>
+      <div class="acoes">
+        <button id="btn-texto">↻ escrever a partir dos efeitos</button>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="painel">
+      <h2>3 · EFEITOS</h2>
+      <p class="ajuda" id="ajuda-efeitos"></p>
+      <div id="efeitos"></div>
+      <div class="acoes">
+        <button id="btn-efeito">+ efeito</button>
+      </div>
+      <div class="problemas" id="problemas"></div>
+      <div class="acoes">
+        <button id="btn-salvar" class="btn-primary">salvar</button>
+        <button id="btn-nova">nova carta</button>
+      </div>
+      <p class="aviso" id="aviso"></p>
+    </div>
+
+    <!-- saída -->
+    <div class="painel">
+      <h2>PRÉVIA</h2>
+      <div class="previa" id="previa"></div>
+      <h2>CÓDIGO <span class="nome-arquivo" id="nome-arquivo"></span></h2>
+      <pre class="lua" id="lua"></pre>
+      <div class="acoes">
+        <button id="btn-copiar">copiar</button>
+        <button id="btn-baixar">baixar .lua</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="painel" style="margin-top:16px">
+    <h2>CARTAS CRIADAS</h2>
+    <p class="ajuda">Clique em <b>editar</b> para carregar a carta nos três passos acima.</p>
+    <div id="lista" class="lista"></div>
+  </div>
+</div>
+
+<script type="module" src="/web/js/bootguard.js"></script>
+<script type="module">
+import { requireAdmin } from '/web/js/auth.js';
+import { downscaleDataUrl } from '/web/js/customcards.js';
+import * as CB from '/web/js/cardbuilder.js';
+import {
+  listarCartas, salvarCarta, apagarCarta, cartaDaLinha, problemasDeImagem,
+} from '/web/js/cardbuilderbanco.js';
+import { desenharCarta } from '/web/js/cartasdobuilder.js';
+
+// Ferramenta de conteúdo: só admin. A fechadura de verdade é a RLS de
+// `cartas_custom` (migration 0058); isto é a porta.
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Card Builder: só admin');
+
+const $ = (id) => document.getElementById(id);
+
+let carta = CB.novaCarta();
+// Só o que foi escolhido AGORA sobe no salvar; o que já está no banco serve só
+// para a prévia. Mandar a imagem salva de volta a cada edição de efeito seria
+// reenviar centenas de KB à toa.
+let arteNova = null;
+let arteSalva = null;
+let imagemNova = null;     // a moldura ou a carta completa
+let imagemSalva = null;
+let caixasDeProblema = [];
+
+const avisar = (t) => { $('aviso').textContent = t ?? ''; };
+
+// ------------------------------------------------------------- construtores
+
+function el(tag, props = {}, ...filhos) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (v !== undefined) n[k] = v;
+  }
+  n.append(...filhos.filter((f) => f != null && f !== false));
+  return n;
+}
+
+function seletor(pares, valor, aoMudar) {
+  const s = el('select');
+  for (const [v, t] of pares) s.append(el('option', { value: v, textContent: t }));
+  s.value = valor ?? '';
+  s.onchange = () => aoMudar(s.value);
+  return s;
+}
+
+function numero(valor, aoMudar, { min, max, step = 1, placeholder = '' } = {}) {
+  const i = el('input', { type: 'number', step, placeholder });
+  if (min != null) i.min = min;
+  if (max != null) i.max = max;
+  i.value = valor ?? '';
+  i.oninput = () => aoMudar(i.value === '' ? null : Number(i.value));
+  return i;
+}
+
+const campo = (rotulo, ...controles) => el('div', { class: 'campo' }, el('label', { textContent: rotulo }), ...controles);
+const pares = (obj, chaves) => chaves.map((k) => [k, obj[k]]);
+
+function lerArquivo(f) {
+  return new Promise((r) => {
+    const fr = new FileReader();
+    fr.onload = () => r(String(fr.result || ''));
+    fr.onerror = () => r('');
+    fr.readAsDataURL(f);
+  });
+}
+
+// ---------------------------------------------------------------- o visual
+
+/** O que cada visual faz com as imagens — dito na tela, ao lado da escolha. */
+const AJUDA_DO_VISUAL = {
+  desenhada: 'O Card Builder desenha a carta: moldura colorida pelo tipo, a arte na janela, o nome e o texto dos efeitos.',
+  moldura: 'Importe só a MOLDURA (a carta oficial sem arte e sem texto). A arte, o nome, as estrelas, o texto e o ATK/DEF são escritos por cima, nas proporções da carta oficial.',
+  completa: 'Importe a CARTA INTEIRA, pronta. Ela é usada como está — o que você escreveu nos passos 2 e 3 vira só o Lua e o texto do detalhe.',
+};
+
+/**
+ * Um campo de arquivo. A imagem é REDUZIDA antes de subir: a arte para 400px
+ * (a janela da carta é menor que isso), a moldura e a carta completa para 480px
+ * (a carta inteira em pé) — sem isso uma foto de 3 MB estouraria o teto da
+ * coluna e, pior, viajaria para todo mundo que abrisse o Deck Builder.
+ */
+function entradaDeArquivo(qual) {
+  const i = el('input', { type: 'file', accept: 'image/*' });
+  i.onchange = async () => {
+    const f = i.files?.[0];
+    if (!f) return;
+    const lido = await lerArquivo(f);
+    if (!lido.startsWith('data:image/')) return void avisar('isso não é uma imagem');
+    if (qual === 'arte') {
+      arteNova = await downscaleDataUrl(lido, { maxW: 400 });
+      avisar('arte carregada — ela sobe no próximo salvar');
+    } else {
+      imagemNova = await downscaleDataUrl(lido, { maxW: 480, quality: 0.86 });
+      avisar(`${carta.visual === 'completa' ? 'carta completa' : 'moldura'} carregada — sobe no próximo salvar`);
+    }
+    pintarVisual();
+    atualizar();
+  };
+  return i;
+}
+
+function pintarVisual() {
+  const filhos = [
+    campo('visual', seletor(CB.VISUAIS, carta.visual ?? 'desenhada', (v) => {
+      carta.visual = v;
+      pintarVisual();
+      atualizar();
+    })),
+  ];
+  const visual = carta.visual ?? 'desenhada';
+  const temImagem = !!(imagemNova || imagemSalva);
+  const temArte = !!(arteNova || arteSalva);
+  if (visual !== 'desenhada') {
+    filhos.push(campo(visual === 'completa' ? 'carta completa' : 'moldura',
+      entradaDeArquivo('imagem'),
+      el('span', { class: 'tem', textContent: temImagem ? '✓' : '' })));
+  }
+  if (visual !== 'completa') {
+    filhos.push(campo('arte', entradaDeArquivo('arte'),
+      el('span', { class: 'tem', textContent: temArte ? '✓' : '' })));
+  }
+  filhos.push(el('p', { class: 'ajuda', textContent: AJUDA_DO_VISUAL[visual] }));
+  $('campos-visual').replaceChildren(...filhos);
+}
+
+// ------------------------------------------------------------------ o tipo
+
+$('tipo').replaceChildren(...CB.TIPOS.map(([v, t]) => el('option', { value: v, textContent: t })));
+
+/** O que cada tipo escreve ANTES dos efeitos — "a linha de código do tipo". */
+const ESQUELETO = {
+  'monstro-normal': 'Monstro Normal: sem efeito — o script é só o initial_effect vazio.',
+  'monstro-efeito': 'Monstro de Efeito: cada efeito abaixo vira um Effect registrado no initial_effect (Ignição, Gatilho ou Contínuo).',
+  'monstro-fusao': 'Monstro de Fusão: c:EnableReviveLimit() + Fusion.AddProcMixN com os materiais abaixo. Mora no Extra Deck e sai por Polymerization; os efeitos são opcionais.',
+  'monstro-ritual': 'Monstro de Ritual: c:EnableReviveLimit() — só sai por Invocação-Ritual. A Magia de Ritual dele é outra carta (Magia → Ritual) com o id desta, que aparece ao salvar.',
+  'magia:normal': 'Magia Normal: EFFECT_TYPE_ACTIVATE + EVENT_FREE_CHAIN. O efeito É a ativação; depois ela vai para o Cemitério.',
+  'magia:rapida': 'Magia Rápida: a mesma ativação da Normal; o tipo Quick-Play deixa o motor oferecê-la fora da sua Main Phase.',
+  'magia:continua': 'Magia Contínua: uma ativação que deixa a carta na zona, e os efeitos valem enquanto ela estiver lá.',
+  'magia:equipamento': 'Magia de Equipamento: aux.AddEquipProcedure — ativa escolhendo um monstro com a face para cima.',
+  'magia:campo': 'Magia de Campo: a ativação a põe na zona de Campo (LOCATION_FZONE).',
+  'magia:ritual': 'Magia de Ritual: Ritual.AddProcGreater para o monstro de Ritual informado.',
+  'armadilha:normal': 'Armadilha Normal: precisa ser baixada antes; ativa num momento (livre, ataque ou Invocação do oponente).',
+  'armadilha:continua': 'Armadilha Contínua: a ativação a deixa na zona, e os efeitos são rápidos enquanto ela estiver lá.',
+  'armadilha:contra': 'Contra-Armadilha: EVENT_CHAINING — responde à ativação do oponente.',
+};
+
+function trocarTipo(tipo) {
+  carta.tipo = tipo;
+  const subs = CB.SUBTIPOS[tipo];
+  if (subs && !subs.some(([v]) => v === carta.subtipo)) carta.subtipo = subs[0][0];
+  ajustarEfeitos();
+}
+
+function ajustarEfeitos() {
+  const { min, max } = CB.limiteDeEfeitos(carta);
+  carta.efeitos = carta.efeitos.slice(0, max).map((ef) => CB.ajustarEfeito(carta, ef));
+  while (carta.efeitos.length < min) carta.efeitos.push(CB.novoEfeito(carta));
+}
+
+function pintarTipo() {
+  $('tipo').value = carta.tipo;
+  const filhos = [];
+  const subs = CB.SUBTIPOS[carta.tipo];
+  if (subs) {
+    filhos.push(campo('subtipo', seletor(subs, carta.subtipo, (v) => { carta.subtipo = v; ajustarEfeitos(); pintarTudo(); })));
+  }
+  if (CB.ehMonstro(carta)) {
+    filhos.push(
+      campo('atributo', seletor(CB.ATRIBUTOS.map((a) => [a[0], a[1]]), carta.atributo, (v) => { carta.atributo = v; atualizar(); })),
+      campo('tipo de monstro', seletor(CB.RACAS.map((r) => [r[0], r[1]]), carta.raca, (v) => { carta.raca = v; atualizar(); })),
+      campo('nível', numero(carta.nivel, (v) => { carta.nivel = v; atualizar(); }, { min: 1, max: 12 })),
+      campo('ATK', numero(carta.atk, (v) => { carta.atk = v; atualizar(); }, { min: 0, max: 9999, step: 50 })),
+      campo('DEF', numero(carta.def, (v) => { carta.def = v; atualizar(); }, { min: 0, max: 9999, step: 50 })),
+    );
+  }
+  if (carta.tipo === 'monstro-fusao') {
+    // Os materiais valem JUNTOS ("A + B + 2 C"): cada um é "N monstros que
+    // atendem ao filtro", e um id no filtro vira "aquela carta".
+    carta.fusao ??= { materiais: [] };
+    const mats = carta.fusao.materiais;
+    const box = el('div');
+    box.append(el('div', { class: 'ou', textContent: 'materiais de Fusão (todos juntos):' }));
+    mats.forEach((m, i) => {
+      const tirar = el('button', { textContent: '×', title: 'tirar este material', disabled: mats.length <= 1 });
+      tirar.onclick = () => { mats.splice(i, 1); pintarTudo(); };
+      box.append(el('div', { class: 'grupo' },
+        el('div', { class: 'grupo-topo' }, el('span', { textContent: `MATERIAL ${i + 1}` }), tirar),
+        campo('quantos', numero(m.qtd, (v) => { m.qtd = v; atualizar(); }, { min: 1, max: 5 })),
+        editorDeFiltros(m.filtros, 'sem condição: qualquer monstro')));
+    });
+    const mais = el('button', { textContent: '+ material' });
+    mais.onclick = () => { mats.push({ qtd: 1, filtros: [CB.novoFiltro()] }); pintarTudo(); };
+    box.append(el('div', { class: 'acoes' }, mais));
+    filhos.push(box);
+  }
+  if (carta.tipo === 'monstro-ritual') {
+    filhos.push(el('p', {
+      class: 'ajuda',
+      textContent: 'Para Invocar esta carta, crie a Magia de Ritual dela: nova carta → Magia → Ritual, com o id desta (c9500… no código, depois de salvar).',
+    }));
+  }
+  if (carta.tipo === 'magia' && carta.subtipo === 'ritual') {
+    filhos.push(campo('monstro ritual (id)', numero(carta.ritual.codigo, (v) => { carta.ritual.codigo = v; atualizar(); }, { min: 1, placeholder: 'ex.: 5405694' })));
+  }
+  if (carta.tipo === 'magia' && carta.subtipo === 'equipamento') {
+    filhos.push(campo('equipa em', seletor(CB.LADOS.bonus, carta.equipa.lado, (v) => { carta.equipa.lado = v; atualizar(); })));
+    filhos.push(editorDeFiltros(carta.equipa.filtros, 'sem condição: equipa em qualquer monstro'));
+  }
+  $('campos-tipo').replaceChildren(...filhos);
+  const chave = CB.SUBTIPOS[carta.tipo] ? `${carta.tipo}:${carta.subtipo}` : carta.tipo;
+  $('esqueleto').textContent = ESQUELETO[chave] ?? '';
+}
+
+$('tipo').onchange = () => { trocarTipo($('tipo').value); pintarTudo(); };
+
+// ------------------------------------------------------------ os filtros
+
+/**
+ * O filtro "raça X OU Nível 3–4 com ATK 1000–1800": cada grupo é uma OPÇÃO, e
+ * dentro dela as condições valem juntas. Mexer num número só atualiza a saída;
+ * acrescentar ou tirar um grupo redesenha.
+ */
+function editorDeFiltros(filtros, textoVazio, categoria = null) {
+  const box = el('div');
+  if (!filtros.length) box.append(el('div', { class: 'ou', textContent: textoVazio }));
+  filtros.forEach((f, i) => {
+    if (i > 0) box.append(el('div', { class: 'ou', textContent: '— ou —' }));
+    const tirar = el('button', { textContent: '×', title: 'tirar esta opção' });
+    tirar.onclick = () => { filtros.splice(i, 1); pintarTudo(); };
+    const muda = (k) => (v) => { f[k] = v; atualizar(); };
+    box.append(el('div', { class: 'grupo' },
+      el('div', { class: 'grupo-topo' }, el('span', { textContent: `OPÇÃO ${i + 1}` }), tirar),
+      campo('é', seletor(CB.CATEGORIAS, f.categoria, muda('categoria'))),
+      campo('tipo', seletor([['', 'qualquer'], ...CB.RACAS.map((r) => [r[0], r[1]])], f.raca, muda('raca'))),
+      campo('atributo', seletor([['', 'qualquer'], ...CB.ATRIBUTOS.map((a) => [a[0], a[1]])], f.atributo, muda('atributo'))),
+      campo('nível', numero(f.nivelMin, muda('nivelMin'), { min: 0, max: 13, placeholder: 'mín' }),
+        el('span', { class: 'entre', textContent: 'a' }), numero(f.nivelMax, muda('nivelMax'), { min: 0, max: 13, placeholder: 'máx' })),
+      campo('ATK', numero(f.atkMin, muda('atkMin'), { min: 0, step: 50, placeholder: 'mín' }),
+        el('span', { class: 'entre', textContent: 'a' }), numero(f.atkMax, muda('atkMax'), { min: 0, step: 50, placeholder: 'máx' })),
+      campo('DEF', numero(f.defMin, muda('defMin'), { min: 0, step: 50, placeholder: 'mín' }),
+        el('span', { class: 'entre', textContent: 'a' }), numero(f.defMax, muda('defMax'), { min: 0, step: 50, placeholder: 'máx' })),
+      campo('carta (id)', numero(f.codigo, muda('codigo'), { min: 1, placeholder: 'uma carta específica' })),
+    ));
+  });
+  const mais = el('button', { textContent: filtros.length ? '+ ou outra opção' : '+ condição' });
+  // "Baixar" começa em "qualquer carta": com o padrão "monstro" a opção nasceria recusada.
+  mais.onclick = () => { filtros.push(categoria ? { ...CB.novoFiltro(), categoria } : CB.novoFiltro()); pintarTudo(); };
+  box.append(el('div', { class: 'acoes' }, mais));
+  return box;
+}
+
+// ------------------------------------------------------------ os efeitos
+
+function editorDeEfeito(ef, i) {
+  const { min } = CB.limiteDeEfeitos(carta);
+  // Trocar um seletor que decide QUAIS campos existem redesenha o efeito, já
+  // passando pelo `ajustarEfeito` — escolha que deixou de valer não sobra.
+  const estrutura = (k) => (v) => { carta.efeitos[i] = CB.ajustarEfeito(carta, { ...ef, [k]: v }); pintarTudo(); };
+  const muda = (k) => (v) => { ef[k] = v; atualizar(); };
+
+  const tirar = el('button', { textContent: 'tirar', className: 'btn-danger', disabled: carta.efeitos.length <= min });
+  tirar.onclick = () => { carta.efeitos.splice(i, 1); pintarTudo(); };
+
+  const box = el('div', { class: 'efeito' },
+    el('div', { class: 'efeito-topo' }, el('b', { textContent: `EFEITO ${i + 1}` }), tirar));
+
+  box.append(campo('quando', seletor(pares(CB.QUANDO, CB.quandoPermitidos(carta)), ef.quando, estrutura('quando'))));
+  box.append(campo('custo', seletor(pares(CB.CUSTOS, CB.custosPermitidos(carta, ef.quando)), ef.custo, estrutura('custo'))));
+  if (ef.custo === 'pagar-lp') box.append(campo('LP', numero(ef.custoLp, muda('custoLp'), { min: 1, max: 8000, step: 100 })));
+  if (ef.custo === 'descartar-filtro') {
+    box.append(campo('descartar', numero(ef.custoQtd, muda('custoQtd'), { min: 1, max: 5 })));
+    const tipos = el('input', { type: 'checkbox', checked: !!ef.custoTiposDiferentes });
+    tipos.onchange = () => { ef.custoTiposDiferentes = tipos.checked; atualizar(); };
+    box.append(el('div', { class: 'campo check' }, tipos,
+      el('label', { textContent: 'de Tipos diferentes (uma carta de cada Tipo de monstro)' })));
+    box.append(el('div', { class: 'ou', textContent: 'descartar quais:' }));
+    box.append(editorDeFiltros(ef.custoFiltros, 'sem condição: qualquer carta da mão'));
+  }
+  box.append(campo('limite', seletor(pares(CB.LIMITES, CB.limitesPermitidos(carta, ef.quando)), ef.limite, muda('limite'))));
+  // "Se você controlar…": soma-se ao momento (ver `condicaoDeControlar`).
+  if (CB.permiteCondicao(ef)) {
+    box.append(campo('condição', seletor(pares(CB.CONDICOES, Object.keys(CB.CONDICOES)), ef.condicao, (v) => {
+      ef.condicao = v;
+      if (v === 'controla' && !ef.condicaoFiltros.length) ef.condicaoFiltros.push(CB.novoFiltro());
+      pintarTudo();
+    })));
+    if (ef.condicao === 'controla') {
+      box.append(el('div', { class: 'ou', textContent: 'só se você controlar, com a face para cima:' }));
+      box.append(editorDeFiltros(ef.condicaoFiltros, 'sem condição: qualquer monstro'));
+    }
+  }
+  // Com "e depois" à vista, a ação é o 1º PASSO: sem o número ela parecia um
+  // campo à parte e ficava esquecida no valor padrão (ver `editorDePasso`).
+  box.append(campo(CB.permiteSequencia(ef) ? '1º passo' : 'ação',
+    seletor(pares(CB.ACOES, CB.acoesPermitidas(carta, ef.quando)), ef.acao, estrutura('acao'))));
+
+  const alvos = CB.alvosPermitidos(carta, ef.quando, ef.acao);
+  if (alvos.length > 1) box.append(campo('para', seletor(pares(CB.ALVOS, alvos), ef.alvo, estrutura('alvo'))));
+
+  camposDaAcao(box, ef, muda);
+
+  // "E DEPOIS, SE ISSO RESOLVER": cada passo só roda se o anterior deu certo —
+  // o "então" das cartas oficiais ("Invoque esta carta, então destrua 1 carta").
+  if (CB.permiteSequencia(ef)) {
+    ef.depois.forEach((_, k) => box.append(editorDePasso(ef, k)));
+    if (ef.depois.length < CB.MAX_PASSOS) {
+      const mais = el('button', { textContent: '+ e depois (se isso resolver)…' });
+      mais.onclick = () => { ef.depois.push(CB.novoPasso(carta)); pintarTudo(); };
+      box.append(el('div', { class: 'acoes' }, mais));
+    }
+  }
+
+  const probs = el('div', { class: 'problemas' });
+  caixasDeProblema[i] = probs;
+  box.append(probs);
+  return box;
+}
+
+/**
+ * Os campos de UMA ação — a do efeito e a de cada passo do "e depois". Uma
+ * função só para as duas: um campo novo (a duração dos ataques extras, por
+ * exemplo) aparece nos dois lugares ou em nenhum.
+ */
+function camposDaAcao(box, obj, muda) {
+  const outra = obj.alvo === 'outra';
+  switch (obj.acao) {
+    case 'adicionar':
+      if (outra) {
+        box.append(campo('de onde', seletor(CB.ORIGENS.adicionar, obj.origem, muda('origem'))));
+        box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
+        // Marcar os dois = uma carta de cada Tipo E de cada Atributo.
+        for (const [chave, rotulo] of [['tiposDiferentes', 'de Tipos diferentes'], ['atributosDiferentes', 'de Atributos diferentes']]) {
+          const c = el('input', { type: 'checkbox', checked: !!obj[chave] });
+          c.onchange = () => { obj[chave] = c.checked; atualizar(); };
+          box.append(el('div', { class: 'campo check' }, c, el('label', { textContent: `${rotulo} (uma de cada)` })));
+        }
+      }
+      break;
+    case 'comprar':
+      box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
+      break;
+    case 'baixar': {
+      box.append(campo('de onde', seletor(CB.ORIGENS.baixar, obj.origem, muda('origem'))));
+      box.append(campo('até', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
+      const c = el('input', { type: 'checkbox', checked: !!obj.nomesDiferentes });
+      c.onchange = () => { obj.nomesDiferentes = c.checked; atualizar(); };
+      box.append(el('div', { class: 'campo check' }, c, el('label', { textContent: 'de nomes diferentes (só 1 de cada)' })));
+      break;
+    }
+    case 'reviver':
+      if (outra) box.append(campo('de onde', seletor(CB.ORIGENS.reviver, obj.origem, muda('origem'))));
+      break;
+    case 'destruir':
+      if (outra) {
+        box.append(campo('de quem', seletor(CB.LADOS.destruir, obj.lado, muda('lado'))));
+        box.append(campo('zona', seletor(CB.ZONAS, obj.zona, muda('zona'))));
+        box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
+      }
+      break;
+    case 'bonus':
+      box.append(campo('ATK', numero(obj.atk, muda('atk'), { min: -9999, max: 9999, step: 100 })));
+      box.append(campo('DEF', numero(obj.def, muda('def'), { min: -9999, max: 9999, step: 100 })));
+      if (obj.quando !== 'continuo' && obj.quando !== 'equipado') {
+        box.append(campo('duração', seletor(CB.DURACOES, obj.duracao, muda('duracao'))));
+      }
+      if (outra) box.append(campo('em quem', seletor(CB.LADOS.bonus, obj.lado, muda('lado'))));
+      break;
+    case 'ataques':
+      box.append(campo('ataques', numero(obj.ataques, muda('ataques'), { min: 2, max: 5 }),
+        el('span', { class: 'entre', textContent: 'por Battle Phase' })));
+      box.append(campo('duração', seletor(CB.DURACOES, obj.duracao, muda('duracao'))));
+      break;
+    case 'negar':
+      for (const [v, t] of CB.RESPONDE_A) {
+        const c = el('input', { type: 'checkbox', checked: obj.respondeA.includes(v) });
+        c.onchange = () => {
+          obj.respondeA = c.checked ? [...new Set([...obj.respondeA, v])] : obj.respondeA.filter((x) => x !== v);
+          atualizar();
+        };
+        box.append(el('div', { class: 'campo check' }, c, el('label', { textContent: `responde a ${t}` })));
+      }
+      {
+        const d = el('input', { type: 'checkbox', checked: obj.destruirNegada });
+        d.onchange = () => { obj.destruirNegada = d.checked; atualizar(); };
+        box.append(el('div', { class: 'campo check' }, d, el('label', { textContent: 'e destrói a carta negada' })));
+      }
+      break;
+    default:
+      break;
+  }
+
+  if (obj.acao === 'sem-tributo') {
+    box.append(el('div', { class: 'ou', textContent: 'quais monstros da sua mão:' }));
+    box.append(editorDeFiltros(obj.filtros, 'sem condição: todo monstro de Nível 5 ou mais'));
+  } else if ((outra || obj.alvo === 'gatilho') && obj.acao !== 'comprar') {
+    const baixar = obj.acao === 'baixar';
+    box.append(el('div', {
+      class: 'ou',
+      textContent: obj.alvo === 'gatilho' ? 'só se o monstro for:' : baixar ? 'quais cartas (um id por opção = "uma destas"):' : 'qual carta:',
+    }));
+    box.append(editorDeFiltros(obj.filtros,
+      obj.alvo === 'gatilho' ? 'sem condição: qualquer monstro' : baixar ? 'sem condição: qualquer Magia/Armadilha' : 'sem condição: qualquer carta',
+      baixar ? 'qualquer' : null));
+  }
+}
+
+/** Um passo do "e depois, se isso resolver". */
+function editorDePasso(ef, k) {
+  const passo = ef.depois[k];
+  const estrutura = (campoDoPasso) => (v) => {
+    // O MOMENTO do efeito vai junto: é ele que diz se a carta ainda está na mão
+    // ou no Cemitério, e portanto se "Invocar esta carta" é uma escolha.
+    ef.depois[k] = CB.ajustarPasso(carta, { ...passo, [campoDoPasso]: v }, ef.quando);
+    pintarTudo();
+  };
+  const muda = (campoDoPasso) => (v) => { passo[campoDoPasso] = v; atualizar(); };
+
+  const tirar = el('button', { textContent: '×', title: 'tirar este passo' });
+  tirar.onclick = () => { ef.depois.splice(k, 1); pintarTudo(); };
+
+  // Numerado a partir do 2º: o 1º passo é a AÇÃO do efeito, lá em cima. Sem o
+  // número, a ação principal parecia um campo à parte e ficava no valor padrão
+  // ("adicionar outra carta") — foi assim que a Dragias saiu buscando no Deck.
+  const box = el('div', { class: 'grupo' },
+    el('div', { class: 'grupo-topo' }, el('span', { textContent: `${k + 2}º PASSO — E DEPOIS, SE O ANTERIOR RESOLVER` }), tirar));
+  box.append(campo('ação', seletor(pares(CB.ACOES, CB.acoesDoPasso()), passo.acao, estrutura('acao'))));
+  const alvos = CB.alvosDoPasso(carta, passo.acao, ef.quando);
+  if (alvos.length > 1) box.append(campo('para', seletor(pares(CB.ALVOS, alvos), passo.alvo, estrutura('alvo'))));
+  camposDaAcao(box, passo, muda);
+  return box;
+}
+
+function pintarEfeitos() {
+  caixasDeProblema = [];
+  $('efeitos').replaceChildren(...carta.efeitos.map((ef, i) => editorDeEfeito(ef, i)));
+}
+
+$('btn-efeito').onclick = () => { carta.efeitos.push(CB.novoEfeito(carta)); pintarTudo(); };
+
+// ---------------------------------------------------------------- saídas
+
+let timerPrevia = null;
+
+function atualizar() {
+  $('lua').textContent = CB.gerarLua(carta);
+  $('nome-arquivo').textContent = `c${carta.id ?? '<id ao salvar>'}.lua`;
+
+  const probs = CB.problemasDaCarta(carta);
+  const deImagem = problemasDeImagem(carta, !!(imagemNova || imagemSalva));
+  const linhas = (lista) => lista.map((texto) => el('div', { textContent: `⚠ ${texto}` }));
+  $('problemas').replaceChildren(...linhas([
+    ...deImagem,
+    ...probs.filter((p) => p.efeito === null).map((p) => p.texto),
+  ]));
+  caixasDeProblema.forEach((cx, i) => cx.replaceChildren(...linhas(probs.filter((p) => p.efeito === i).map((p) => p.texto))));
+  $('btn-salvar').disabled = probs.length > 0 || deImagem.length > 0;
+
+  const { min, max } = CB.limiteDeEfeitos(carta);
+  $('btn-efeito').disabled = carta.efeitos.length >= max;
+  $('ajuda-efeitos').textContent = max === 0
+    ? 'Este tipo não tem efeitos.'
+    : `Este tipo aceita ${min === max ? `exatamente ${max}` : `de ${min} a ${max}`} efeito(s). "Pelo nome" em dois efeitos DIVIDE a conta (só um deles por turno); "pelo nome, só este efeito" dá a cada um a sua.`;
+
+  clearTimeout(timerPrevia);
+  timerPrevia = setTimeout(pintarPrevia, 150);
+}
+
+async function pintarPrevia() {
+  const src = await desenharCarta(carta, { arte: arteNova || arteSalva, imagem: imagemNova || imagemSalva });
+  $('previa').replaceChildren(el('img', { src, alt: '' }));
+}
+
+function pintarTudo() {
+  pintarVisual();
+  pintarTipo();
+  pintarEfeitos();
+  atualizar();
+}
+
+// ------------------------------------------------------------ nome, texto
+
+$('nome').oninput = () => { carta.nome = $('nome').value; atualizar(); };
+$('texto').oninput = () => { carta.texto = $('texto').value; atualizar(); };
+$('btn-texto').onclick = () => {
+  carta.texto = CB.textoDosEfeitos({ ...carta, texto: '' });
+  $('texto').value = carta.texto;
+  atualizar();
+};
+
+// ------------------------------------------------------ import do card maker
+
+// O .json do card maker traz o nome, o tipo, os números, o texto e a arte — os
+// efeitos não, porque ele desenha a carta sem saber regra nenhuma. A carta
+// importada é NOVA (sem id): salvar cria outra linha, nunca sobrescreve a aberta.
+$('cardmaker').onchange = async () => {
+  const f = $('cardmaker').files?.[0];
+  $('cardmaker').value = '';
+  if (!f) return;
+  let json;
+  try { json = JSON.parse(await f.text()); } catch { return void avisar('esse arquivo não é um JSON do card maker'); }
+  carta = CB.cartaDoCardmaker(json);
+  arteSalva = null; imagemNova = null; imagemSalva = null;
+  arteNova = typeof json?.ad === 'string' && json.ad.startsWith('data:image/')
+    ? await downscaleDataUrl(json.ad, { maxW: 400 })
+    : null;
+  $('nome').value = carta.nome; $('texto').value = carta.texto;
+  avisar(`"${carta.nome || 'sem nome'}" importada do card maker — monte os efeitos e salve`);
+  pintarTudo();
+};
+
+// ------------------------------------------------------------- gravar
+
+$('btn-salvar').onclick = async () => {
+  $('btn-salvar').disabled = true;
+  avisar('salvando…');
+  const r = await salvarCarta(carta, {
+    arte: arteNova,
+    imagem: imagemNova,
+    temImagem: !!(imagemNova || imagemSalva),
+  });
+  if (!r.ok) { avisar(`não salvou: ${r.erro}`); atualizar(); return; }
+  carta.id = r.id;
+  if (arteNova) { arteSalva = arteNova; arteNova = null; }
+  if (imagemNova) { imagemSalva = imagemNova; imagemNova = null; }
+  pintarVisual();
+  atualizar();
+  await pintarLista();
+  avisar(`carta salva — c${r.id}.lua`);
+};
+
+$('btn-nova').onclick = () => {
+  carta = CB.novaCarta();
+  arteNova = null; arteSalva = null; imagemNova = null; imagemSalva = null;
+  $('nome').value = ''; $('texto').value = '';
+  avisar('');
+  pintarTudo();
+};
+
+$('btn-copiar').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('lua').textContent);
+    avisar('código copiado');
+  } catch {
+    avisar('o navegador não deixou copiar — selecione o código e use Ctrl+C');
+  }
+};
+
+$('btn-baixar').onclick = () => {
+  const blob = new Blob([$('lua').textContent], { type: 'text/plain' });
+  const a = el('a', { href: URL.createObjectURL(blob), download: `c${carta.id ?? 'nova'}.lua` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+
+// ---------------------------------------------------------------- a lista
+
+async function pintarLista() {
+  const box = $('lista');
+  const r = await listarCartas();
+  if (!r.ok) {
+    box.replaceChildren(el('div', { class: 'vazia', textContent: `não consegui ler as cartas: ${r.erro}` }));
+    return;
+  }
+  if (!r.cartas.length) {
+    box.replaceChildren(el('div', { class: 'vazia', textContent: 'nenhuma carta criada ainda.' }));
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const linha of r.cartas) {
+    const c = cartaDaLinha(linha);
+    const arte = el('div', { class: 'arte' });
+    desenharCarta(c, { arte: linha.arte || null, imagem: linha.imagem || null })
+      .then((src) => arte.replaceChildren(el('img', { src, alt: '' })));
+
+    const editar = el('button', { textContent: 'editar' });
+    editar.onclick = () => {
+      carta = c;
+      arteSalva = linha.arte || null; arteNova = null;
+      imagemSalva = linha.imagem || null; imagemNova = null;
+      $('nome').value = c.nome; $('texto').value = c.texto;
+      avisar(`editando c${c.id}.lua`);
+      pintarTudo();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const apagar = el('button', { textContent: 'apagar', className: 'btn-danger' });
+    apagar.onclick = async () => {
+      if (!confirm(`Apagar "${c.nome}" (c${c.id})? Isto não tem volta.`)) return;
+      const x = await apagarCarta(c.id);
+      // A carta aberta no editor deixa de ter linha no banco: o próximo salvar
+      // tem de CRIAR, não atualizar uma linha que não existe.
+      if (x.ok && carta.id === c.id) carta.id = null;
+      await pintarLista();
+      atualizar();
+      avisar(x.ok ? `"${c.nome}" apagada` : `não apagou: ${x.erro}`);
+    };
+
+    frag.append(el('div', { class: 'item' },
+      arte,
+      el('div', { class: 'nome', textContent: c.nome }),
+      el('div', { class: 'meta', textContent: `${CB.rotuloDoTipo(c)} · c${c.id}` }),
+      el('div', { class: 'linha' }, editar, apagar)));
+  }
+  box.replaceChildren(frag);
+}
+
+pintarTudo();
+await pintarLista();
+</script>
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
+</body>
+</html>

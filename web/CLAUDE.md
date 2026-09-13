@@ -562,6 +562,19 @@ node web/js/itens.test.mjs   # 13 testes do cadastro de ITENS (sleeve, playmat,
                              # `imagem: null` ao editar so' o preco APAGARIA a
                              # arte de um item que ja' esta' na Loja — por isso
                              # a chave nem vai quando nao ha' arte nova
+node web/js/cardbuilder.test.mjs # o CARD BUILDER escreve Lua, e Lua errado
+                             # não dá erro em lugar nenhum daqui: a tela mostra,
+                             # o banco grava, e só um duelo descobriria que a
+                             # carta nunca é oferecida. Varre TODA combinação de
+                             # tipo × momento × ação × alvo × custo × limite e
+                             # cobra: constante escrita existe no `constant.lua`
+                             # do MOTOR (inexistente vira `nil`, e `SetCode(nil)`
+                             # registra um efeito que nunca dispara), `Cost.*` e
+                             # os `proc_*` existem, `function`+`if` = `end`, os
+                             # números de tipo/raça/atributo lidos do arquivo, o
+                             # nome que não vira linha de código, a Contínua que
+                             # ganha a ativação para entrar na zona, e a faixa de
+                             # id igual à CHECK da migration 0058
 node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # escolha são decididas no SERVIDOR, então o que
                              # se prova aqui é o que erra CALADO no cliente: a
@@ -1505,6 +1518,104 @@ o `ocgcore` roda Lua e o card maker não gera Lua, então toda carta importada
 nasce com a tag `sem-efeito` e não pode ser usada num duelo de verdade. IDs
 começam em `900000000` (acima de qualquer carta real) para nunca colidir com
 o banco do `ygo-data`.
+
+**`web/cardbuilder.html`** (Área de Teste → "Card Builder", 13/09/2026) é o
+estágio seguinte: em vez de importar um esqueleto, **cria a carta com efeito**.
+Três passos — a ARTE; o TIPO (Monstro Normal/Efeito, Magia e Armadilha com os
+subtipos), que já escreve o esqueleto Lua dele (`aux.AddEquipProcedure`,
+`Ritual.AddProcGreater`, a ativação que deixa a Contínua na zona,
+`EVENT_CHAINING` da Contra-Armadilha); e os EFEITOS — adicionar, comprar,
+reviver, destruir, bônus —, cada um com momento, custo, limite por turno, e
+"para esta carta ou para outra", com um filtro em OPÇÕES ("raça X **ou** Nível
+3–4 com ATK 1000–1800"). O gerador (`web/js/cardbuilder.js`, sem DOM) escreve no
+idioma dos scripts oficiais que o motor já roda; a gravação vai para a tabela
+`cartas_custom` (migration 0058, `web/js/cardbuilderbanco.js`), com `dados`
+como fonte e `lua` como derivado regenerado a cada salvar. Ids em
+`950000000–999999999`, separados do import local. O **visual** tem três modos
+(`dados.visual`): o layout desenhado pelo builder (`renderFramedCard`), uma
+**moldura importada** com a arte e o texto por cima nas proporções da carta
+oficial (`renderCardOnFrame`), ou a **carta completa importada**, usada como
+está. A imagem importada mora na coluna `imagem` (migration 0059), separada da
+`arte`, e quem escolhe entre os três é UMA função (`desenharCarta`, em
+`cartasdobuilder.js`) — editor, Deck Builder e duelo passam por ela. O visual
+nunca muda o Lua.
+
+Três peças entraram para montar efeitos compostos (o da Multistrike Dragon
+Dragias: *descarte Normais Nv5+ com ATK ≤1900 de Tipos diferentes; Invoque esta
+carta por Invocação-Especial, então destrua 1 carta no campo; se fizer, ela pode
+atacar 2 vezes*): o custo **descartar cartas com filtro** (com "de Tipos
+diferentes"), a ação **ataques extras** (`EFFECT_EXTRA_ATTACK`) e o **"e depois,
+se isso resolver"** (`ef.depois`, até 3 passos). Com sequência, a escolha de
+cartas dos passos é feita NA RESOLUÇÃO, sem alvo — é o "então" do texto
+oficial —, e cada passo só roda se o anterior fez alguma coisa, com
+`Duel.BreakEffect()` entre eles. O custo "Tipos diferentes" é escrito à mão
+(escolhe uma carta, tira as do mesmo Tipo, repete) e não por
+`aux.SelectUnselectGroup`: esse usa `Group.Iter`, que a `ocgcore.dll` daqui não
+tem.
+
+Na tela, a **ação do efeito é o 1º passo** e os do "e depois" são numerados a
+partir do 2º. Não é enfeite: a Dragias foi salva com a Invocação num passo e a
+ação principal esquecida no valor padrão ("adicionar outra carta"), então a carta
+buscava no Deck antes de tudo. E "Invocar **esta** carta" vale também num passo,
+quando o efeito é da carta na mão ou no Cemitério — por isso `alvosDoPasso` e
+`ajustarPasso` recebem o MOMENTO do efeito; sem ele, o ajuste trocava "esta" por
+"outra" em silêncio ao salvar. O custo **revelar esta carta** (`Cost.SelfReveal`)
+entrou pelo mesmo pedido. A Invocação-Especial de OUTRA carta sai do Cemitério
+(seu ou de qualquer lado), da mão, do Deck ou das banidas (face para cima):
+Cemitério e banidas são ALVO, mão e Deck se escolhem na resolução
+(`LUGAR_DA_INVOCACAO`); `origem` desconhecido cai no Cemitério, que era o único
+antes. E "adicionar à mão" ganhou **de Tipos diferentes** e **de Atributos
+diferentes**, combináveis — a mesma seleção à mão do custo (escolhe, tira as do
+mesmo Tipo/Atributo, repete).
+
+**Monstro de Fusão e Monstro de Ritual** entraram como tipos (os efeitos são
+opcionais nos dois). Os dois ganham `c:EnableReviveLimit()`; a Fusão, também
+`Fusion.AddProcMixN(c,true,true,s.material1,n1,…)` com uma função por material
+(`fusao.materiais = [{ qtd, filtros }]`, o mesmo filtro dos efeitos — um id no
+filtro é "aquela carta"), e mora no Extra Deck porque o `tl` sai `Fusion/…`. Não
+tem efeito "da mão". O Ritual sai pela Magia de Ritual do builder com o id dele.
+O `type` do motor é MONSTER|FUSION (ou RITUAL), com EFFECT só se houver efeito —
+antes deste ramo a Fusão caía no `else` de magia/armadilha e saía com `type` 4, que
+o motor leria como Armadilha.
+
+A **Dragon's Inferno** (Armadilha Contínua, 13/09/2026) trouxe cinco peças, todas
+genéricas. A ação **Invocação-Normal sem tributo** existe só no contínuo: é o
+`EFFECT_SUMMON_PROC` de campo do Metaphys Factor (`aux.FieldSummonProcTg`), com
+`IsLevelAbove(5)` sempre no alvo — sem ele um Nv4 ganharia uma segunda oferta de
+Invocação idêntica. A **condição** "se você controlar um monstro … com a face para
+cima" (`ef.condicao` + `condicaoFiltros`) SE SOMA à condição que o momento já traz:
+a antiga vira `s.condicaobaseN`, porque trocar uma pela outra faria a Armadilha de
+ataque ativar sem ataque nenhum. A origem **Deck ou Cemitério**
+(`LOCATION_DECK|LOCATION_GRAVE`, `LUGAR_DA_BUSCA`) vale para adicionar e para
+baixar. A ação **baixar Magia/Armadilha** é `IsSSetable` + `Duel.SSet`, com "até
+N" limitado às zonas livres, e o "de nomes diferentes" é escrito à mão com
+`SelectUnselect` — `aux.dncheck` passa por `aux.SelectUnselectGroup` e pelo
+`Group.Iter` que a dll não tem. O filtro de "uma destas cartas" é uma OPÇÃO por id.
+E o limite **"pelo nome, só este efeito"** é `{id,n}`: o `por-nome` continua sendo
+a conta DIVIDIDA entre os efeitos (a Dragias salva no banco depende disso), e o
+"Você só pode usar cada efeito de X uma vez por turno" precisa de uma conta por
+efeito.
+
+A tela também importa o **`.json` do card maker** (`cartaDoCardmaker`): nome,
+tipo/subtipo, os números, o texto COM as quebras (o `strip` do import do Deck
+Builder junta os "●" numa linha só) e a arte. Os efeitos não vêm, porque o card
+maker não conhece regra nenhuma. A carta importada nasce sem id: salvar cria outra
+linha, e nunca sobrescreve a que estava aberta.
+
+**Como a carta chega ao jogo** (`web/js/cartasdobuilder.js`): o Deck Builder e
+o `duel.html` leem `cartas_custom` no boot e injetam cada carta no índice
+(`addCustom`), com a carta desenhada como arte e o texto no detalhe. O motor
+**não lê o Supabase**: o `start()` do duelo manda `customCards` (a linha
+`datas` de `dadosDoMotor` + a coluna `lua`) no `/start`, e o `WebServer` só
+aceita isso de chamada LOCAL — com `--lan` a 8770 é alcançável pela rede, e Lua
+de outro aparelho não pode rodar no motor. Carta do builder que o banco não
+devolveu recusa o duelo NA PORTA, com aviso: sem os dados o motor a trataria
+como inexistente e ela ficaria muda. O Deck Builder (admin, caminho livre) e a
+porta do duelo já aceitam cartas fora da lista para admin, e `iniciar_duelo`
+dispensa o admin — por isso a carta é testável sem mexer em lista nenhuma.
+**Ainda não cobre** o multiplayer (`startMultiplayer` não manda `customCards`),
+a Loja, boosters nem a Coleção de jogador comum. `--test-card-builder` prova o
+lado do motor.
 
 **`web/campo.html`** é o editor de campo (estilo *scene* do Unity): desenha
 layouts de tabuleiro arrastando/redimensionando as zonas que o `ocgcore`
@@ -2846,7 +2957,7 @@ pra `web/login.html` sem sessão.
 **A Área de Teste inteira é de ADMIN** (23/08/2026), por `requireAdmin()`
 (`web/js/auth.js`): sem sessão vai pro login, com sessão de jogador comum volta
 pra home. Vale para o `teste.html` e para CADA ferramenta dele —
-`banlist`, `listas`, `npcs`, `campo`, `ordenar`, `icones`, `estrutural`,
+`banlist`, `listas`, `npcs`, `campo`, `ordenar`, `icones`, `estrutural`, `cardbuilder`,
 `booster` (Booster Builder), `adversario`, `mundo`/`cidade`, e o
 `deck.html?npc=<id>` (que edita o deck e o pool de drop de um ADVERSÁRIO). O
 botão "⚙ Área de Teste" da home nasce `hidden` e só aparece com

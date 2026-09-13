@@ -1138,6 +1138,7 @@ import { wireLongPress, injectHoldStyles, HOLD_MS } from '/web/js/interact.js';
 // A revelação carta a carta — a mesma que a Loja usa na abertura de pacote.
 import { montarRevelacao } from '/web/js/revelacao.js';
 import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
+import { carregarCartasDoBuilder, cartasCustomDoDuelo } from '/web/js/cartasdobuilder.js';
 import { getActiveBoard, allZoneIds, CARD_ASPECT, defaultLayout } from '/web/js/boards.js';
 import { listProjectBoards } from '/web/js/projectboards.js';
 import { requireLogin, contaAtual } from '/web/js/auth.js';
@@ -1220,7 +1221,12 @@ const ehMultiplayer = () => !!ponte;
 // porta pode ter andado se a 8770 estivesse ocupada por outro programa.
 const SRV = await acharServidor();
 const $ = (id) => document.getElementById(id);
-const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+// As cartas do CARD BUILDER não têm arte no ygoprodeck: a carta desenhada e o
+// texto vêm de `cartas_custom`, carregados logo depois do índice.
+const artCustom = new Map();
+const textoCustom = new Map();
+const ART = (id) => artCustom.get(Number(id))
+  ?? `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 // Nome por bit de fase. Cobre mais casos que os 6 "oficiais" porque o motor
 // também reporta Battle Step / Damage Step dentro da Battle Phase.
 const PHASE_NOME = {
@@ -1232,6 +1238,14 @@ const PHASE_NOME = {
 
 let db = null;
 try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch {}
+// As cartas do Card Builder entram no índice (nome, tipo, ATK/DEF) e nos mapas
+// de arte e texto. Sem rede a lista vem vazia: o duelo com carta do builder é
+// recusado lá no `start`, com o aviso, em vez de rodar com uma carta muda.
+for (const { entrada } of await carregarCartasDoBuilder()) {
+  db?.addCustom(entrada);
+  if (entrada.art) artCustom.set(entrada.id, entrada.art);
+  textoCustom.set(entrada.id, entrada.desc || '');
+}
 const nameOf = (id) => db?.brief(id)?.name ?? String(id);
 /**
  * O texto IMPRESSO da carta — o que ela faz, escrito nela.
@@ -1241,13 +1255,20 @@ const nameOf = (id) => db?.brief(id)?.name ?? String(id);
  * em vez de mostrar "carregando" numa janela que exige uma decisao agora.
  */
 function textoDaCarta(id) {
-  const t = dbFull?.get(id)?.desc;
+  const t = textoCustom.get(Number(id)) ?? dbFull?.get(id)?.desc;
   return typeof t === 'string' ? t.trim() : '';
 }
 
 // Mesma janela de detalhes do navegador de cartas e do Deck Builder.
 injectHoldStyles(HOLD_MS);
-configureCardDetail({ db });
+// `artOf`/`descOf` para as cartas do Card Builder — a configuração é SOMADA a
+// cada chamada (`{ ...cfg, ...o }`), então a de baixo, com o banco completo, as
+// mantém.
+configureCardDetail({
+  db,
+  artOf: (id) => artCustom.get(Number(id)),
+  descOf: (id) => textoCustom.get(Number(id)),
+});
 
 // ---------- o banco COMPLETO, em segundo plano ----------
 // O índice enxuto já traz nome, tipo, ATK/DEF, nível, atributo e raça — tudo o
@@ -1769,6 +1790,20 @@ async function start() {
   const barrado = podeDuelar(deck);
   if (barrado) { warn(barrado); return; }
 
+  // As cartas do CARD BUILDER não moram no banco de cartas do motor: vão no
+  // corpo do `/start` (dados + Lua). Carta do builder que o Supabase não
+  // devolveu (apagada, ou sem rede) recusa o duelo AQUI — sem os dados, o motor
+  // a trataria como carta inexistente, e ela ficaria muda a partida inteira.
+  const idsDoDuelo = [...ids, ...extraIds,
+                      ...(advNpc ? [...(advDeck ?? []), ...(advExtra ?? [])] : [])];
+  const cartasBuilder = await cartasCustomDoDuelo(idsDoDuelo);
+  if (cartasBuilder.faltam.length) {
+    warn(`Não consegui carregar ${cartasBuilder.faltam.length} carta(s) do Card Builder `
+       + `(${cartasBuilder.faltam.map((id) => nameOf(id)).join(', ')}). `
+       + 'Confira a conexão, ou se a carta ainda existe, e tente de novo.');
+    return;
+  }
+
   // A FECHADURA. `iniciar_duelo` (migration 0047) recebe as CARTAS e recusa o
   // deck fora da banlist — é ele, e não a tela, que barra de verdade: a
   // conferência de cima lê a cópia local, que qualquer um edita.
@@ -1833,6 +1868,8 @@ async function start() {
       body.fieldSpell = activeBoard.fieldSpell;
       body.fieldSpellOwner = boardDoNpc ? 'npc' : 'player';
     }
+    // Cartas do Card Builder (dados + Lua), lidas lá em cima, na porta.
+    if (cartasBuilder.cartas.length) body.customCards = cartasBuilder.cartas;
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
 

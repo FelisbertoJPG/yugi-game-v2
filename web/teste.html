@@ -129,6 +129,11 @@
       <span>Criar item</span>
       <span class="why">sleeve, playmat, deck box e o genérico · o ícone tem editor próprio</span>
     </button>
+    <button id="btn-cardbuilder">
+      <span class="k">B</span>
+      <span>Card Builder</span>
+      <span class="why">criar carta: arte, tipo e efeitos · gera o Lua que o motor roda</span>
+    </button>
     <button id="btn-mundo">
       <span class="k">9</span>
       <span>Mundo andável (mapa mundi)</span>
@@ -263,6 +268,7 @@ $('btn-banlist').onclick = () => (location.href = '/web/banlist.html');
 $('btn-listas').onclick = () => (location.href = '/web/listas.html');
 $('btn-icones').onclick = () => (location.href = '/web/icones.html');
 $('btn-itens').onclick = () => (location.href = '/web/itens.html');
+$('btn-cardbuilder').onclick = () => (location.href = '/web/cardbuilder.html');
 $('btn-mundo').onclick = () => (location.href = '/web/mundo.html');
 $('btn-mundo3d').onclick = () => (location.href = '/web/mundo3d.html');
 $('btn-cena').onclick = () => (location.href = '/web/cena.html');
@@ -281,6 +287,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '9') $('btn-mundo').click();
   if (e.key === 'f' || e.key === 'F') $('btn-mundo3d').click();
   if (e.key === 'c' || e.key === 'C') $('btn-cena').click();
+  if (e.key === 'b' || e.key === 'B') $('btn-cardbuilder').click();
   if (e.key === 'Escape') $('btn-home').click();
 });
 </script>

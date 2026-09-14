@@ -497,6 +497,12 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-flip") >= 0)
                 return TestFlip.Run(streamingAssets);
 
+            // A CARD ADVANCE: "declare um numero" (143) e "ordene o topo do deck"
+            // (25) no meio da resolucao — as duas sem traducao, e o duelo morria
+            // num laco de RETRY.
+            if (Array.IndexOf(args, "--test-card-advance") >= 0)
+                return TestCardAdvance.Run(streamingAssets);
+
             // A ETAPA DE DANO: declaracao -> janela de resposta -> o alvo virado
             // abre -> colisao -> calculo. As tres fronteiras que o motor manda e
             // ninguem traduzia (MSG_ATTACK_DISABLED, DAMAGE_STEP_START/END).

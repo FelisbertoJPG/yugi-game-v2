@@ -239,6 +239,24 @@ node web/js/posicao.test.mjs # 11 testes do rótulo de "mudar posição" no menu
                              # o resultado, então o menu promete — virada vira pra cima em
                              # ATAQUE, ataque deita em DEFESA, defesa levanta em ATAQUE.
                              # Um rótulo errado não quebra duelo nenhum, só mente pro jogador
+node web/js/ordenarcartas.test.mjs # 19 testes da ORDEM das cartas devolvidas
+                             # ao Deck (a Card Advance: "olhe as N de cima e
+                             # devolva na ordem que quiser"). O jogador clica as
+                             # cartas de cima para baixo; o motor quer, para
+                             # CADA carta na ordem em que ELE a listou, o lugar
+                             # que ela vai ocupar. As duas são permutações, então
+                             # a fila crua é ACEITA pelo motor e deixa o deck numa
+                             # ordem que ninguém pediu. Inverter a ordem inteira é
+                             # a própria inversa e não prova nada — o caso que
+                             # separa as duas leituras é [1,2,0] → [2,0,1], com o
+                             # par CONTROLE de que a fila crua é outra coisa.
+                             # Cobre também a fila incompleta ou torta (o motor
+                             # recusaria com RETRY) e confere que o `duel.html`
+                             # importa ESTA regra e tem o guarda `[hidden]` do
+                             # quadro. Qual ponta da lista é o topo quem MEDE é o
+                             # `--test-card-advance`, que compra a carta no turno
+                             # seguinte. Não confundir com `ordenar.js`, a tela
+                             # "Ordenar Trilha"
 node web/js/ofertas.test.mjs  # 16 testes de QUAL EFEITO esta' sendo oferecido: o
                              # motor nao oferece cartas, oferece EFEITOS — uma
                              # carta com dois aparece DUAS vezes, mesmo codigo e

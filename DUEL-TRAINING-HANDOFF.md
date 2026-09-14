@@ -807,6 +807,25 @@ de "Cara" + "Coroa". Medido pelo `len` da mensagem: **11** bytes para uma opçã
 
 **MSG_TOSS_COIN (115):** `player(1) count(1) res(count bytes)` (1 = Cara / Heads, 0 = Coroa / Tails). Emitido em efeitos como o Mago do Tempo.
 **MSG_TOSS_DICE (116):** `player(1) count(1) res(count bytes)` (resultados de 1 a 6).
+**MSG_ANNOUNCE_NUMBER (143):** `player(1) count(1)` + por valor **8 bytes** (uint64).
+Resposta = `int32` com o ÍNDICE do valor (o core o troca pelo número). Medido com a
+Card Advance: len **43** para os valores 1..5. `AnnounceNumberRange` e `AnnounceLevel`
+passam por aqui.
+**MSG_SORT_CARD (25):** `player(1) count(4)` + por carta **13 bytes**:
+`code(4) ctrl(1) loc(4) seq(4)` — ⚠️ NÃO é o `loc_info` de 10 das outras perguntas
+(loc em 4 bytes, sem posição). Medido: len **45** para 3 cartas. No topo do deck a
+PRIMEIRA da lista é a de cima (seq 34/33/32 num deck de 35). Resposta = **1 byte por
+carta**, na ordem da lista, com o LUGAR que ela vai ocupar (0 = em cima) — o
+`tc[returns[i]] = select_cards[i]` do core. É a INVERSA da fila de cliques da tela:
+mandar a fila crua é aceito e deixa o deck fora da ordem pedida, em silêncio. Lugar
+repetido → RETRY. Coberto por `--test-card-advance`.
+**MSG_CHAIN_SOLVING (72):** `ct(1)` — o elo que começou a resolver (1 = o primeiro
+ativado). Com os códigos guardados no MSG_CHAINING (70), diz QUAL carta faz a
+pergunta que chega no meio da resolução (o `askCode` de 143 e 25).
+**Declarações 140–142 (raça, atributo, carta):** ainda sem tradução. Até 13/09/2026
+caíam FORA da faixa do "não suportada" (10..30) e o duelo morria em RETRY no
+`[guard]`, sem aviso; hoje aparecem na faixa da tela. O 30 (CONFIRM_DECKTOP) é aviso
+e saiu da faixa.
 NEW_TURN=40, NEW_PHASE=41 (int16), SUMMONING=60, SUMMONED=61.
 
 **Constantes (`.../YGODemo/script/constant.lua`):** LOCATION_MZONE=0x4, SZONE=0x8,

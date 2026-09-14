@@ -872,7 +872,46 @@ verdade e DEITAVA o monstro em defesa face-up. Sem erro no console nem no log.
 O teste prova o evento que sai para `web/duel.html` (com `flip: true`, pos 0x1 e
 o código real, sem o qual a arte não aparece) e traz o par CONTROLE: o mesmo
 comando num monstro já aberto emite `pos` SEM `flip`, deitando em 0x4 — que era
-exatamente o evento errado que chegava antes).
+exatamente o evento errado que chegava antes),
+`--test-card-advance` (a **Card Advance**, e com ela toda carta que pede para
+**declarar um número** ou **ordenar cartas**. O relato: *"a Card Advance não é
+tratada no jogo"*, e o log de uma sessão real mostra como: o jogador ativa,
+escolhe a zona, e `[retry] o motor recusou a resposta anterior (pergunta
+pendente: chain)` se repete até o `[guard] laco fechado`. A carta faz duas
+perguntas no meio da resolução — `Duel.AnnounceNumberRange` (**MSG_ANNOUNCE_NUMBER,
+143**) e `Duel.SortDecktop` (**MSG_SORT_CARD, 25**) — e nenhuma tinha `case`. A 143
+ficava FORA da faixa que o `Parse` marcava como não suportada (10..30), então a
+pergunta pendente continuava sendo a janela de corrente anterior: o host
+respondia `-1` a uma pergunta de número, o motor recusava, e o laço seguia. Nem a
+faixa de "ação não suportada" aparecia.
+> Os layouts são MEDIDOS, não copiados: o 143 manda **8 bytes por valor** (len 43
+> para 1..5); o 25 manda **13 bytes por carta** — `code(4) ctrl(1) loc(4) seq(4)`,
+> sem posição, diferente do `loc_info` de 10 das outras perguntas (len 45 para 3
+> cartas). A primeira da lista é a de CIMA (sequências 34/33/32 num deck de 35), e a
+> resposta é, para cada carta nessa ordem, o LUGAR que ela ocupa (0 = em cima) — a
+> INVERSA da fila de cliques da tela. Mandar a fila crua é aceito pelo motor e deixa
+> o deck numa ordem que ninguém pediu; a conversão mora em
+> `web/js/ordenarcartas.js`, com teste. Quem pergunta vem do **MSG_CHAIN_SOLVING
+> (72)**: os elos são guardados no MSG_CHAINING e a carta do elo que resolve vai no
+> `askCode` — o gatilho não serve, ele é a ÚLTIMA carta ativada.
+>
+> O teste prova, pelo caminho do jogador: os valores 1..5 e quem pergunta; declarar
+> 3 traz 3 cartas do deck; ordem torta é recusada e a MESMA pergunta volta (o motor
+> a recusaria com RETRY e a tela ficaria parada); a ordem invertida muda a compra do
+> turno seguinte; e o segundo efeito da carta vale (o Summoned Skull oferecido
+> depois de um Nv4). Os pares CONTROLE, na mesma seed: manter a ordem compra a carta
+> que já estava em cima — é ele que fixa qual ponta da lista é o topo —, e sem a
+> Card Advance o Skull não é oferecido.
+>
+> A faixa do "não suportada" virou 10..29 e 140..143. O **30** (MSG_CONFIRM_DECKTOP,
+> que o Monster Gate manda) é só aviso e virava não suportada à toa; as
+> **declarações de raça, atributo e carta (140–142)** continuam sem tradução, mas
+> agora aparecem na faixa da tela em vez de morrer caladas no `[guard]`.
+>
+> **O NPC não usa a Card Advance** (`--cobertura`: *nenhuma regra escolheu*). As
+> respostas dele existem — declara o MAIOR número (`NpcBrain.DecideNumber`) e mantém
+> a ordem — e são os mesmos bytes que o teste prova pelo jogador, mas nenhum duelo
+> de NPC chega lá até a carta ganhar regra.)
 As sondas do protocolo binário são `--probe-idle`, `--probe-pos`, `--probe-battle`,
 `--probe-chain`, `--probe-tribute`, `--brute-tribute`, e `--selfplay` despeja as
 mensagens cruas do motor. `npm run duel:test` só roda `--test-npc` +

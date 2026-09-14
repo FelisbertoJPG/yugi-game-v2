@@ -147,6 +147,19 @@ namespace DuelServer
         uint _gatilhoCode;
         int _gatilhoPlayer = -1;
 
+        // Os ELOS da corrente em montagem (o codigo de cada carta ativada, na
+        // ordem) e a carta cujo elo esta' RESOLVENDO agora. Alimentados pelo
+        // MSG_CHAINING (70) e pelo MSG_CHAIN_SOLVING (72), zerados no
+        // MSG_CHAIN_END (74).
+        //
+        // Existem para dizer QUEM esta' perguntando: "declare um numero" e
+        // "ordene estas cartas" chegam no meio de uma resolucao sem codigo de
+        // carta nenhum, e sem isto a tela pede um numero sem dizer para que. O
+        // gatilho acima nao serve: ele e' a ULTIMA carta ativada, e numa corrente
+        // de dois elos quem resolve primeiro e' justamente a outra.
+        readonly List<uint> _elos = new();
+        uint _resolvendo;
+
         void MarcaGatilho(string kind, byte[] d, int o)
         {
             _gatilhoKind = kind;
@@ -228,7 +241,7 @@ namespace DuelServer
             public string chainTriggerKind = "";  // "summon" | "activation" | "attack" | ""
             public uint chainTriggerCode;         // a carta invocada/ativada
             public int chainTriggerPlayer = -1;   // de quem é (−1 = não sei)
-            public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão
+            public uint askCode;                 // yesno (EFFECTYN) / position: carta em questão; announcenumber / sortcard: a carta RESOLVENDO (0 = não sei)
             // yesno (EFFECTYN): QUAL efeito da carta esta' sendo oferecido.
             public ulong askDesc; public string askText;
             public byte posMask;                 // position: posições que o motor aceita
@@ -768,6 +781,11 @@ namespace DuelServer
                     return Entregar(r, q);
                 }
 
+                // Ordenar UMA carta ou declarar entre UM numero nao e' decisao:
+                // perguntar seria so' uma etapa a mais na tela.
+                if (q.kind == "sortcard" && q.choices.Count == 1) { _s.Respond(EncodeSort(new[] { 0 })); continue; }
+                if (q.kind == "announcenumber" && q.options.Count == 1) { _s.Respond(I32(0)); continue; }
+
                 // Sem gente do outro lado, o motor joga por ele (NPC ou auto-passe).
                 // Com gente, a pergunta sobe e o duelo ESPERA — inclusive quando é a
                 // vez do jogador 1, que antes nunca chegava até aqui.
@@ -996,6 +1014,8 @@ namespace DuelServer
             ["chain"] = new[] { "chain" },
             ["yesno"] = new[] { "yesno" },
             ["option"] = new[] { "option" },
+            ["announcenumber"] = new[] { "number" },
+            ["sortcard"] = new[] { "sort" },
         };
 
         /// <summary>Aplica a jogada do player e avança de novo.</summary>
@@ -1030,9 +1050,22 @@ namespace DuelServer
                 return recusa;
             }
 
+            // A ordem chega da TELA, e uma permutacao torta (lugar repetido, carta
+            // faltando) o motor recusa com RETRY. Recusar aqui devolve a MESMA
+            // pergunta, e o jogador pode mandar de novo.
+            if (action == "sort" && !OrdemValida(args, _pending?.choices.Count ?? 0))
+            {
+                Log.Err($"[respond] ordem invalida para {_pending?.choices.Count ?? 0} carta(s): " +
+                        $"[{(args == null ? "" : string.Join(",", args))}] — recusada");
+                var torta = new Result { question = _pending };
+                torta.events.Add(new { type = "refused", action, reason = "ordem invalida" });
+                return torta;
+            }
+
             _s.Respond(action switch
             {
                 "select" => EncodeSelect(args ?? new[] { arg }),  // lista de uma vez
+                "sort" => EncodeSort(args),                        // o lugar de cada carta
                 "pick" => PickOne(arg),                            // seletor incremental
                 "finishselect" => I32(-1),                         // encerra a seleção
                 _ => Encode(action, arg),
@@ -1070,6 +1103,7 @@ namespace DuelServer
             "chain" => I32(arg),                      // corrente: índice a ativar, ou -1 recusa
             "yesno" => I32(arg),                      // sim/não: 1 = sim, 0 = não
             "option" => I32(arg),                      // SELECT_OPTION: índice da opção escolhida
+            "number" => I32(arg),                      // ANNOUNCE_NUMBER: índice do número declarado
             // Posição escolhida: 0x1 ataque, 0x4 defesa com a FACE PARA CIMA.
             // Faltava aqui: "position" já constava em AcoesValidas, mas caía no
             // `_ => I32(-1)` e o motor recusava tudo. Passou despercebido porque
@@ -1124,6 +1158,21 @@ namespace DuelServer
                     _s.Respond(q.choices.Count > 0 ? PickOne(q.choices[0].index) : I32(-1));
                     break;
                 case "selectsum": _s.Respond(NpcSum(q)); break;   // ritual: prefere nível alto
+                case "announcenumber":
+                {
+                    int i = _npcEnabled ? _npc.DecideNumber(q, q.player) : 0;
+                    if (i < 0 || i >= q.options.Count) i = 0;
+                    _events?.Add(new { type = "npc", action = "number", why = $"declara {q.options[i]}" });
+                    _s.Respond(I32(i));
+                    break;
+                }
+                case "sortcard":
+                    // Sem regra de ordem: devolve como o motor listou. Nunca o -1
+                    // de "desistir" — esse e' o formato que so' vale para quem nao
+                    // pode escolher, e uma ordem explicita e' o que o core le sempre.
+                    _events?.Add(new { type = "npc", action = "sort", why = "mantem a ordem das cartas" });
+                    _s.Respond(EncodeSort(Enumerable.Range(0, q.choices.Count).ToList()));
+                    break;
                 default: _s.Respond(I32(-1)); break;
             }
         }
@@ -1208,7 +1257,17 @@ namespace DuelServer
                 // resolveu. Nenhuma das duas gera evento para a tela: existem só
                 // para o NPC saber a QUE está respondendo (ver Question.chainTrigger*).
                 case 61: case 63: LimpaGatilho(); break;
-                case 74: LimpaGatilho(); break;
+                case 74: LimpaGatilho(); _elos.Clear(); _resolvendo = 0; break;
+                // MSG_CHAIN_SOLVING (72): o elo `ct` (1 = o primeiro ativado)
+                // comecou a resolver. Um byte so'; tamanho diferente e' layout que
+                // nao conheco, e ai' "nao sei quem pergunta" (0) e' a resposta
+                // honesta — nunca o codigo de outra carta.
+                case 72:
+                {
+                    int ct = mlen == 2 ? d[o + 1] : 0;
+                    _resolvendo = ct >= 1 && ct <= _elos.Count ? _elos[ct - 1] : 0u;
+                    break;
+                }
                 // MSG_FLIPSUMMONING (64) — a Invocacao-Virar. Ela NAO emite
                 // MSG_POS_CHANGE: o core vira a carta (`current.position =
                 // POS_FACEUP_ATTACK`) e so' depois escreve esta mensagem, entao
@@ -1263,6 +1322,7 @@ namespace DuelServer
                 // `Projetar` deixa passar inteiro para os dois espectadores.
                 case 70:
                     MarcaGatilho("activation", d, o);
+                    _elos.Add(_gatilhoCode);
                     // A carta que ACABOU de ser ativada traz um corpo CONDENADO
                     // (Instant Fusion, Ready Fusion: nao ataca e morre na End
                     // Phase)? Entao o proximo monstro que chegar do Extra e' ele.
@@ -1486,10 +1546,28 @@ namespace DuelServer
                 case 20: _pending = ParseSelectCards(d, o, mlen, "selecttribute"); break;
                 case 26: _pending = ParseSelectUnselect(d, o, mlen); break;
                 case 23: _pending = ParseSelectSum(d, o, mlen); break;
+                // MSG_SORT_CARD (25): ORDENAR um grupo de cartas. E' o
+                // `Duel.SortDecktop`/`SortDeckbottom` da Card Advance e de outras
+                // ~80 cartas ("olhe as N de cima e devolva na ordem que quiser").
+                case 25: _pending = ParseSortCard(d, o, mlen); break;
+                // MSG_ANNOUNCE_NUMBER (143): DECLARAR um numero entre os que o
+                // script oferece (`AnnounceNumber`, `AnnounceNumberRange`, `AnnounceLevel`).
+                // A Card Advance pede "quantas cartas do topo olhar".
+                case 143: _pending = ParseAnnounceNumber(d, o, mlen); break;
                 default:
-                    // qualquer PERGUNTA (10..30) que ainda não trato: marca como não suportada
+                    // qualquer PERGUNTA que ainda não trato: marca como não suportada
                     // em vez de deixar o _pending velho travar tudo em silêncio.
-                    if (type >= 10 && type <= 30)
+                    //
+                    // As perguntas sao 10..29 e as DECLARACOES 140..143 (raca,
+                    // atributo, carta, numero). A faixa era 10..30, e as duas bordas
+                    // estavam erradas: o 30 (MSG_CONFIRM_DECKTOP) e' so' aviso — o
+                    // Monster Gate o manda ao revelar o topo — e virava "nao
+                    // suportada" a' toa; e as declaracoes ficavam FORA, entao o
+                    // `_pending` velho respondia por elas. O motor recusava, o host
+                    // respondia igual, e o duelo morria em 5000 RETRY no `[guard]`.
+                    // Foi exatamente a Card Advance (a 143 respondida com o -1 de
+                    // uma janela de corrente).
+                    if ((type >= 10 && type <= 29) || (type >= 140 && type <= 143))
                     {
                         _pending = new Question { kind = "unsupported", player = d[o + 1], rawType = type };
                         Log.Info($"[unsupported select type={type} len={mlen}]");
@@ -1529,6 +1607,129 @@ namespace DuelServer
             }
             Log.Info($"[select option] p={q.player} n={count} len={mlen} opcoes=[{string.Join(",", q.options)}]");
             return q;
+        }
+
+        /// <summary>
+        /// MSG_ANNOUNCE_NUMBER (143) — "declare um numero".
+        ///
+        ///   type(1) player(1) quantidade(1) + um valor por opcao
+        ///
+        /// O tamanho do valor e' DEDUZIDO do `len` (8 neste core, 4 no antigo),
+        /// pela mesma licao do SELECT_OPTION: com UMA opcao os dois tamanhos leem
+        /// o mesmo numero, e so' com duas ou mais o errado aparece — como uma
+        /// lista plausivel de valores trocados.
+        ///
+        /// A resposta e' um int32 com o INDICE do valor escolhido, nao o valor: o
+        /// core troca o indice pelo numero antes de devolve-lo ao script.
+        /// </summary>
+        Question ParseAnnounceNumber(byte[] d, int o, int mlen)
+        {
+            int count = d[o + 2];
+            int corpo = mlen - 3;
+            int entrada = count > 0 && corpo % count == 0 ? corpo / count : 0;
+            if (entrada != 8 && entrada != 4)
+                return LayoutDesconhecido(d, o, mlen, "announce number");
+
+            var q = new Question { kind = "announcenumber", player = d[o + 1], askCode = _resolvendo };
+            for (int i = 0, p = o + 3; i < count; i++, p += entrada)
+                q.options.Add(entrada == 8 ? BitConverter.ToUInt64(d, p) : BitConverter.ToUInt32(d, p));
+            Log.Info($"[announce number] p={q.player} de={q.askCode} len={mlen} valores=[{string.Join(",", q.options)}]");
+            return q;
+        }
+
+        /// <summary>
+        /// MSG_SORT_CARD (25) — "ordene estas cartas".
+        ///
+        ///   type(1) player(1) quantidade(4) + por carta: code(4) ctrl(1) loc(4) seq(4)
+        ///
+        /// A entrada NAO e' o `loc_info` de 10 bytes das outras perguntas: sao 13 (loc em 4
+        /// bytes, sem posicao). Medido: len=45 para 3 cartas, sequencias 34/33/32 — o topo de um deck de 35. O core antigo mandava quantidade(1) e `ctrl loc seq` de 1 byte cada. Os dois layouts sao
+        /// conferidos pelo tamanho EXATO, e o que nao fechar vira "nao suportada"
+        /// na hora — ler 14 bytes onde vieram 7 devolve cartas que existem, nos
+        /// lugares errados, e ninguem acusa.
+        ///
+        /// Para o topo do deck a PRIMEIRA carta da lista e' a de cima (o core
+        /// percorre a pilha de tras para frente). A resposta e', para cada carta
+        /// na ordem desta lista, o lugar que ela vai ocupar (0 = em cima) — ver
+        /// `EncodeSort`.
+        /// </summary>
+        Question ParseSortCard(byte[] d, int o, int mlen)
+        {
+            int count = 0, header = 0, entrada = 0;
+            if (mlen >= 6)
+            {
+                int c = BitConverter.ToInt32(d, o + 2);
+                if (c > 0 && mlen - 6 == c * 13) { count = c; header = 6; entrada = 13; }
+            }
+            if (entrada == 0 && mlen >= 3)
+            {
+                int c = d[o + 2];
+                if (c > 0 && mlen - 3 == c * 7) { count = c; header = 3; entrada = 7; }
+            }
+            if (entrada == 0) return LayoutDesconhecido(d, o, mlen, "sort card");
+
+            var q = new Question
+            {
+                kind = "sortcard", player = d[o + 1], askCode = _resolvendo,
+                selMin = count, selMax = count, selCount = count,
+            };
+            for (int i = 0; i < count; i++)
+            {
+                int p = o + header + i * entrada;
+                q.choices.Add(new Sel
+                {
+                    code = BitConverter.ToUInt32(d, p) & 0x7FFFFFFF,
+                    index = i,
+                    controller = d[p + 4],
+                    location = d[p + 5],
+                    sequence = entrada == 13 ? BitConverter.ToInt32(d, p + 9) : d[p + 6],
+                });
+            }
+            Log.Info($"[sort card] p={q.player} de={q.askCode} len={mlen} cartas=[" +
+                     string.Join(",", q.choices.Select(c => $"{c.code}@{c.location:x}/{c.sequence}")) + "]");
+            return q;
+        }
+
+        /// <summary>
+        /// Uma pergunta cujo LAYOUT nao bateu com o medido. Vira "nao suportada"
+        /// na hora, com os bytes no log: deixa-la passar manteria o `_pending`
+        /// anterior, e o host responderia por ela a pergunta ERRADA — que e' o
+        /// laco de RETRY que derrubava a Card Advance.
+        /// </summary>
+        Question LayoutDesconhecido(byte[] d, int o, int mlen, string oque)
+        {
+            Log.Err($"[{oque}] layout desconhecido len={mlen}: " +
+                    BitConverter.ToString(d, o, Math.Min(mlen, 48)).Replace("-", " "));
+            return new Question { kind = "unsupported", player = d[o + 1], rawType = d[o] };
+        }
+
+        /// <summary>
+        /// Resposta do MSG_SORT_CARD: um byte por carta, na ordem em que o motor
+        /// as listou, com o LUGAR que ela vai ocupar (0 = em cima). E' o
+        /// `tc[returns[i]] = select_cards[i]` do core — a inversa da lista de
+        /// cliques da tela, e nao a lista em si (ver `web/js/ordenar.js`).
+        /// </summary>
+        static byte[] EncodeSort(IReadOnlyList<int> lugares)
+        {
+            var b = new byte[lugares.Count];
+            for (int i = 0; i < lugares.Count; i++) b[i] = (byte)lugares[i];
+            return b;
+        }
+
+        /// <summary>
+        /// A ordem e' uma PERMUTACAO de 0..n-1? Lugar repetido ou faltando o motor
+        /// recusa com RETRY — e a tela ficaria esperando uma resposta que nunca vem.
+        /// </summary>
+        static bool OrdemValida(IReadOnlyList<int> lugares, int total)
+        {
+            if (lugares == null || total < 1 || lugares.Count != total) return false;
+            var visto = new bool[total];
+            foreach (int l in lugares)
+            {
+                if (l < 0 || l >= total || visto[l]) return false;
+                visto[l] = true;
+            }
+            return true;
         }
 
         /// <summary>

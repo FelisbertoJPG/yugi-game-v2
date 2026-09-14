@@ -636,6 +636,24 @@
     display: flex; align-items: center; justify-content: center;
   }
   #sel-overlay[hidden] { display: none; }
+  /* ORDENAR (a Card Advance devolvendo o topo do Deck): o mesmo quadro da
+     seleção, com o lugar de cada carta na fila escrito em cima dela. O
+     `[hidden]` é o guarda de sempre — sem ele o `display: flex` ganha do
+     atributo e o quadro fica na tela para sempre. */
+  #sort-overlay {
+    position: fixed; inset: 0; background: #000b; z-index: 60;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #sort-overlay[hidden] { display: none; }
+  .sort-cards {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+    gap: 8px; max-height: 46vh; overflow-y: auto; margin-bottom: 12px;
+  }
+  .sel-card .ordem {
+    position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+    background: #000d; color: var(--gold); text-align: center;
+    font: 700 12px/1.6 ui-monospace, monospace; pointer-events: none;
+  }
   .sel-box {
     background: var(--panel); border: 2px solid var(--gold);
     padding: 16px; max-width: 620px; width: 92%;
@@ -1011,6 +1029,22 @@
   </div>
 </div>
 
+<!-- ORDENAR (MSG_SORT_CARD): a Card Advance devolvendo o topo do Deck. É modal
+     de propósito — o efeito já está resolvendo, e sem resposta o duelo para;
+     por isso "manter como está" é uma resposta, e não um cancelar. -->
+<div id="sort-overlay" hidden>
+  <div class="sel-box">
+    <h3 id="sort-title">Ordene as cartas</h3>
+    <div class="sel-info" id="sort-info"></div>
+    <div class="sort-cards" id="sort-cards"></div>
+    <div class="sel-acts">
+      <button id="sort-limpar">recomeçar</button>
+      <button id="sort-manter">manter como está</button>
+      <button id="sort-ok" class="btn-primary">confirmar</button>
+    </div>
+  </div>
+</div>
+
 <div id="pos-overlay" hidden>
   <div class="pos-box">
     <img id="pos-art" alt="">
@@ -1156,6 +1190,9 @@ import { acharServidor } from '/web/js/servidor.js';
 // `node web/js/posicao.test.mjs`. Um rótulo errado não quebra nada — só
 // promete ao jogador uma jogada diferente da que vai acontecer.
 import { rotuloReposicao, estaVirada } from '/web/js/posicao.js';
+// A ORDEM das cartas devolvidas ao Deck (Card Advance): a fila de cliques vira o
+// lugar de cada carta — ver o módulo.
+import { alternarNaOrdem, lugarNaOrdem, respostaDaOrdem, ordemDoMotor } from '/web/js/ordenarcartas.js';
 // A pilha de cartas BANIDAS. Também é regra (a carta virada que entra sem
 // código e volta com ele), então mora fora do HTML e se prova em Node:
 // `node web/js/banimento.test.mjs`.
@@ -1954,7 +1991,7 @@ async function act(action, arg, label, args) {
   if (action === 'chain') ataqueDeclarado = false;
   busy = true;
   question = null;
-  render(); renderSelection(); renderChain(); renderYesno();
+  render(); renderSelection(); renderChain(); renderYesno(); renderSort();
   try {
     if (ehMultiplayer()) {
       // A ponte NÃO devolve a visão: os dois lados recebem pelo callback que o
@@ -1971,7 +2008,7 @@ async function act(action, arg, label, args) {
   catch (e) {
     question = perguntaRespondida;
     busy = false;
-    render(); renderSelection(); renderChain(); renderYesno();
+    render(); renderSelection(); renderChain(); renderYesno(); renderSort();
     conn(false); warn('perdi a conexão com o servidor.');
   }
 }
@@ -2444,7 +2481,7 @@ function renderChain() {
 
 // ---------- sim/não e escolha de opção (efeitos como Time Wizard) ----------
 function renderYesno() {
-  const q = (question && ['yesno', 'option'].includes(question.kind) && question.player === 0) ? question : null;
+  const q = (question && ['yesno', 'option', 'announcenumber'].includes(question.kind) && question.player === 0) ? question : null;
   const box = $('yn-overlay');
   if (!q) { box.hidden = true; return; }
   box.hidden = false;
@@ -2480,6 +2517,27 @@ function renderYesno() {
       b.onclick = () => { box.hidden = true; act('yesno', value, label); };
       frag.append(b);
     }
+  } else if (q.kind === 'announcenumber') {
+    // "Declare um número" (MSG_ANNOUNCE_NUMBER) — a Card Advance pergunta quantas
+    // cartas do topo olhar. Os valores são os que o script ofereceu, e a
+    // resposta é o ÍNDICE: o motor o troca pelo número. Quem pede vem do motor
+    // (`askCode`, a carta cujo elo está resolvendo); sem ele, a frase não
+    // inventa um nome.
+    $('yn-title').textContent = 'Declare um número';
+    $('yn-sub').textContent = q.askCode ? `${nameOf(q.askCode)} pede um número.` : 'O efeito pede um número.';
+    const impresso = q.askCode ? textoDaCarta(q.askCode) : '';
+    if (impresso) {
+      const tc = document.createElement('div');
+      tc.className = 'carta-frase';
+      tc.textContent = impresso;   // textContent: o texto da carta é dado, não marcação
+      $('yn-sub').append(tc);
+    }
+    for (const [index, value] of (q.options || []).entries()) {
+      const b = document.createElement('button');
+      b.textContent = String(value);
+      b.onclick = () => { box.hidden = true; act('number', index, `declarar ${value}`); };
+      frag.append(b);
+    }
   } else {
     $('yn-title').textContent = 'Escolha uma opção';
     const coin = (q.options || []).some((value) => value === 60 || value === 61);
@@ -2500,6 +2558,82 @@ function renderYesno() {
     }
   }
   acts.replaceChildren(frag);
+}
+
+// ---------- ordenar cartas (Card Advance: devolver o topo do Deck) ----------
+//
+// A pergunta `sortcard` (MSG_SORT_CARD). O jogador monta uma FILA de cliques — a
+// 1ª clicada fica por cima — e quem converte a fila no que o motor lê é
+// `/web/js/ordenarcartas.js`, sem DOM e com teste: o motor quer o LUGAR de cada
+// carta, e a fila crua é uma permutação que ele aceita e que deixa o Deck numa
+// ordem que ninguém pediu.
+//
+// Zera a cada pergunta nova, em `apply`, junto do `picked`.
+let ordemMarcada = [];
+
+function renderSort() {
+  const q = (question && question.kind === 'sortcard' && question.player === 0
+             && question.choices && question.choices.length) ? question : null;
+  const box = $('sort-overlay');
+  if (!q) { box.hidden = true; return; }
+  box.hidden = false;
+  const n = q.choices.length;
+  const doDeck = q.choices.every((c) => c.location === 1);   // LOCATION_DECK
+  $('sort-title').textContent = doDeck ? 'Devolva as cartas ao Deck' : 'Ordene as cartas';
+  // Quem pede vem do motor (a carta cujo elo está resolvendo); sem ele, a frase
+  // não inventa um nome.
+  const quem = q.askCode ? `${nameOf(q.askCode)} — ` : '';
+  const faltam = n - ordemMarcada.length;
+  $('sort-info').textContent = faltam > 0
+    ? `${quem}clique nas cartas na ordem em que devem ficar: a 1ª clicada fica por cima. Faltam ${faltam}.`
+    : `${quem}ordem pronta. Clique numa carta para tirá-la da fila.`;
+
+  const frag = document.createDocumentFragment();
+  for (const c of q.choices) {
+    const lugar = lugarNaOrdem(ordemMarcada, c.index);
+    const el = document.createElement('div');
+    el.className = 'sel-card' + (lugar ? ' on' : '');
+    const img = document.createElement('img');
+    img.src = ART(c.code); img.alt = nameOf(c.code); img.draggable = false;
+    el.append(img);
+    if (lugar) {
+      const tag = document.createElement('div');
+      tag.className = 'ordem';
+      tag.textContent = `${lugar}º`;
+      el.append(tag);
+    }
+    el.title = `${nameOf(c.code)}\nsegurar: ver detalhes`;
+    espiar(el, c.code);
+    // Ler a carta antes de decidir: o mesmo gesto da mão, do campo e da corrente.
+    const segurou = wireLongPress(el, HOLD_MS, () => showCardDetail(c.code));
+    el.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(c.code); };
+    el.onclick = () => {
+      if (segurou()) return;
+      ordemMarcada = alternarNaOrdem(ordemMarcada, c.index);
+      renderSort();
+    };
+    frag.append(el);
+  }
+  $('sort-cards').replaceChildren(frag);
+
+  const nomes = (fila) => fila.map((i) => nameOf(q.choices[i].code)).join(' › ');
+  const lugares = respostaDaOrdem(ordemMarcada, n);
+  $('sort-ok').disabled = !lugares;
+  $('sort-ok').onclick = () => {
+    if (!lugares) return;
+    const rotulo = `ordem: ${nomes(ordemMarcada)}`;
+    ordemMarcada = [];
+    act('sort', 0, rotulo, lugares);
+  };
+  $('sort-limpar').disabled = ordemMarcada.length === 0;
+  $('sort-limpar').onclick = () => { ordemMarcada = []; renderSort(); };
+  // "Manter como está" é a ordem do motor (a 1ª dele é a de cima) — uma resposta
+  // de verdade, e não um cancelar: o efeito já está resolvendo.
+  $('sort-manter').onclick = () => {
+    const rotulo = `manter a ordem: ${nomes(ordemDoMotor(n))}`;
+    ordemMarcada = [];
+    act('sort', 0, rotulo, respostaDaOrdem(ordemDoMotor(n), n));
+  };
 }
 
 // ---------- aplicar a resposta do servidor ----------
@@ -3282,6 +3416,7 @@ async function apply(j) {
     // mostrar nenhuma, porque parece atual.
     if (raioXLigado) await lerMaoDoNpc();
     picked.clear();
+    ordemMarcada = [];      // a fila de ordenar vale por PERGUNTA, como o picked
     listaForcada = false;   // o [ver a lista] vale por ESCOLHA, não é preferência
     fecharMenuCarta();      // a pergunta mudou: o menu aberto é de outro momento
     extraPicker = null;     // idem para a escolha pendente no Extra Deck
@@ -3289,6 +3424,7 @@ async function apply(j) {
     renderSelection();
     renderChain();
     renderYesno();
+    renderSort();
 
     // Corrente em auto/desligado: o modo responde por mim. Mesma mecânica das
     // auto-respostas abaixo — solta a trava antes de reenviar.
@@ -4558,6 +4694,8 @@ segurar: ver detalhes" alt="" draggable="false">`;
       // é o jogo pedindo uma resposta e afirmando que está esperando outra
       // coisa. Foi a segunda metade de um duelo que travou.
       : suaSelecao ? 'Sua vez: escolha a(s) carta(s) destacada(s).'
+      : question && question.player === 0 && question.kind === 'sortcard' ? 'Sua vez: ordene as cartas.'
+      : question && question.player === 0 && question.kind === 'announcenumber' ? 'Sua vez: declare um número.'
       : 'aguarde…'
   }));
 }

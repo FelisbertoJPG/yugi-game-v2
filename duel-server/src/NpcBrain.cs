@@ -3694,6 +3694,27 @@ namespace DuelServer
         }
 
         /// <summary>
+        /// "Declare um numero" (MSG_ANNOUNCE_NUMBER). A Card Advance pergunta
+        /// quantas cartas do topo olhar, de 1 a 5.
+        ///
+        /// Sem regra por carta, o NPC declara o MAIOR valor oferecido. Para a
+        /// Card Advance e' o certo (ver mais nunca e' pior: a ordem ele mantem);
+        /// para uma carta em que o numero e' um custo, nao seria — e essa carta,
+        /// quando entrar num deck de NPC, ganha regra propria, como o Mausoleu
+        /// ganhou em `DecideOption`. Devolve o INDICE, nao o valor.
+        /// </summary>
+        public int DecideNumber(InteractiveDuel.Question q, int me)
+        {
+            if (q.options.Count == 0) return 0;
+            int melhor = 0;
+            for (int i = 1; i < q.options.Count; i++)
+                if (q.options[i] > q.options[melhor]) melhor = i;
+            _log($"declara {q.options[melhor]} (o maior oferecido" +
+                 (q.askCode != 0 ? $", pedido por {q.askCode})" : ")"));
+            return melhor;
+        }
+
+        /// <summary>
         /// Regra de batalha (SELECT_BATTLECMD). O motor pergunta uma vez por
         /// atacante disponível — quem já atacou sai da lista —, então basta
         /// decidir um ataque de cada vez:

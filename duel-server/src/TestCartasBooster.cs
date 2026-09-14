@@ -64,6 +64,7 @@ namespace DuelServer
         {
             "idle", "battle", "place", "position", "chain", "yesno", "option",
             "selectcard", "selecttribute", "selectunselect", "selectsum",
+            "announcenumber", "sortcard",
         };
 
         static readonly HashSet<string> _vistos = new();

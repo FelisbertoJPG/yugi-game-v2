@@ -65,6 +65,7 @@ const RAIZES = [
 const PUBLICAVEIS = [
   /^lista[a-z0-9-]{0,31}$/,
   /^cena-[a-z0-9][a-z0-9-]{0,30}$/,   // Editor de Cena — `chaveDaCena`, migration 0057
+  /^cardmaker-presets$/,              // presets do Card Maker — `cardmakerpresets.js`, migration 0061
 ];
 
 let problemas = 0;

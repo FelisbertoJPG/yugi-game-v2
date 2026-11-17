@@ -35,7 +35,7 @@
  */
 import {
   inLista1, aplicarLista1, fonteDaLista1, restaurarLista1,
-  aplicarObteniveis, ehObtenivel,
+  aplicarObteniveis, ehObtenivel, aplicarDoBuilder,
   LISTA1_TIPOS, LISTA1_SPELLTRAP,
 } from './lista1.js';
 import { pullFileEx, pushFileGuardado } from './projectstore.js';
@@ -158,11 +158,22 @@ async function puxarObteniveis() {
  * Chame no boot de toda página que filtra pelo pool — sem isto a página usa o
  * padrão de fábrica e discorda do servidor.
  */
+/**
+ * **As cartas do Card Builder** que entram na Lista 1 sozinhas, na resposta do
+ * SERVIDOR (`cartas_do_builder()`, migration 0060) — a mesma que `lista_ativa()`
+ * soma. `null` sem rede, ou num servidor sem a 0060: fica o que havia.
+ */
+async function puxarDoBuilder() {
+  const r = await req('rpc/cartas_do_builder', { method: 'POST', body: {} });
+  return r.ok && Array.isArray(r.dados) ? r.dados : null;
+}
+
 export async function hydrateCardLists() {
-  // ANTES de qualquer saída: as obteníveis valem mesmo quando não há lista
-  // publicada nenhuma, e todas as saídas abaixo são `return false`.
-  const obt = await puxarObteniveis();
+  // ANTES de qualquer saída: as obteníveis e as do builder valem mesmo quando
+  // não há lista publicada nenhuma, e todas as saídas abaixo são `return false`.
+  const [obt, doBuilder] = await Promise.all([puxarObteniveis(), puxarDoBuilder()]);
   if (obt) aplicarObteniveis(obt);
+  if (doBuilder) aplicarDoBuilder(doBuilder);
 
   const { alcancou, data } = await pullFileEx(CHAVE);
   leuODisco = alcancou;

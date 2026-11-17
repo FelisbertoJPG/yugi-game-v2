@@ -593,6 +593,20 @@ node web/js/cardbuilder.test.mjs # o CARD BUILDER escreve Lua, e Lua errado
                              # nome que não vira linha de código, a Contínua que
                              # ganha a ativação para entrar na zona, e a faixa de
                              # id igual à CHECK da migration 0058
+node web/js/cardmakerpresets.test.mjs # 29 testes dos PRESETS do Card Maker
+                             # (a carta-modelo que abre pronta no ygocarder, pela
+                             # URL). Tudo aqui erra CALADO: um campo de imagem
+                             # embutida que sobrasse levaria megabytes para a URL
+                             # e o preset não abriria; a arte com fonte `offline`
+                             # faria o ygocarder completar com a arte da ÚLTIMA
+                             # carta do navegador; montar a URL com
+                             # `URLSearchParams` trocaria `+` por espaço do lado
+                             # de lá; tratar o "já existe" do Storage (409, ou
+                             # 400 "Duplicate") como erro faria o segundo preset
+                             # com o mesmo degradê nunca salvar. Lê a migration e
+                             # cobra que `cardmaker-presets` está na
+                             # `conteudo_chave_check` — fora dela, a edição fica
+                             # presa na fila de pendências, como foi com `cena-*`
 node web/js/icones.test.mjs  # 15 testes dos ÍCONES de perfil. A posse e a
                              # escolha são decididas no SERVIDOR, então o que
                              # se prova aqui é o que erra CALADO no cliente: a
@@ -1237,6 +1251,16 @@ Só admin publica (RLS `eh_admin()`); a chave da lista tem que casar
 > `salvar_deck` usa, e o sintoma seria o pior tipo: o Deck Builder deixando
 > montar e o banco recusando salvar, cada tela certa pela sua conta.
 >
+> **Toda carta do CARD BUILDER também entra na Lista 1 sozinha** (migration
+> 0060, 27/09/2026). `lista_ativa()` soma `cartas_do_builder()` — os ids de
+> `cartas_custom` — quando a lista resolvida é a Lista 1, e o cliente lê a MESMA
+> função (`hydrateCardLists` → `aplicarDoBuilder`, um conjunto à parte em
+> `lista1.js`, como o das obteníveis). É o que deixa uma carta recém-criada ganhar
+> regra na Banlist e entrar no deck sem passar pelo editor de listas. Só a Lista
+> 1: uma lista restrita criada à parte continua restrita. A tela da Banlist passou
+> a carregar as cartas do builder no pool (`carregarCartasDoBuilder`), com a arte
+> desenhada delas no lugar do ygoprodeck.
+>
 > Antes de pôr uma carta nova numa das três portas, confira que o efeito roda
 > — é para isso que serve `--test-cartas-booster`. Foi assim que De-Spell,
 > Ritual Cage, Birthright e Swing of Memories apareceram vendidas e injogáveis
@@ -1558,6 +1582,83 @@ está. A imagem importada mora na coluna `imagem` (migration 0059), separada da
 `cartasdobuilder.js`) — editor, Deck Builder e duelo passam por ela. O visual
 nunca muda o Lua.
 
+**O layout vem do card maker; o efeito nasce aqui** (19/09/2026). O campo "card
+maker" do passo 1 aceita os DOIS arquivos que o ygocarder baixa, de uma vez: o
+`.json` (nome, tipo, números, texto e a arte em `ad`) abre uma carta NOVA, e o
+`.png` da carta pronta entra como `visual: completa` — a carta como o jogador a
+vê. O `.json` é lido SEMPRE primeiro: ele troca a carta inteira e zera a imagem,
+então lido depois jogaria fora a carta completa que tivesse acabado de entrar. E
+a imagem que chega por esse campo marca `visual = completa` sozinha — subir a
+carta desenhada com o visual em `desenhada` a ignoraria em silêncio e mostraria o
+layout do builder no lugar dela.
+
+**`web/cardmaker.html`** é onde se desenha, sem sair do painel: uma tela de
+admin da Área de Teste (tecla `L`) que EMBUTE o ygocarder num iframe, com os três
+passos escritos em cima e o botão para o Card Builder ao lado. O botão
+"🎨 desenhar o layout" do passo 1 abre esta tela, em outra aba — a carta pela
+metade continua esperando na primeira.
+
+> **O ygocarder não mora aqui dentro, de propósito.** É um app React com trinta
+> dependências e build step (Vite); este front é zero-dep e sem build. Embuti-lo
+> de verdade pediria vendorizar o `dist/` mais ~24 MB de moldura e fonte já
+> cortados para TCG/inglês — num `game.zip` que hoje tem **1,2 MB** e que o
+> jogador baixa quase todo dia, para uma tela que só o admin abre. Como o Card
+> Builder já exige rede (login e Supabase), o iframe não tira nada de quem o usa.
+> O preço do arranjo é o único que sobrou: a volta é por dois arquivos, e não por
+> um clique. O endereço do site mora em UM lugar (`cardmaker.html`), e o
+> `ygocarder-main/` da raiz está no `.gitignore` — são 110 MB de código de outra
+> pessoa, e este repositório é público.
+
+> **O iframe abre porque o site não manda `X-Frame-Options` nem
+> `frame-ancestors`** (conferido em 19/09/2026). No dia em que passar a mandar,
+> o quadro fica **BRANCO e sem erro nenhum** — cross-origin não deixa a página de
+> fora saber o que houve lá dentro. É por isso que o link "abra em outra aba"
+> fica SEMPRE visível na tela, e não escondido atrás de uma detecção que não
+> existe.
+
+**PRESETS do Card Maker** (`web/js/cardmakerpresets.js`, 17/11/2026). A faixa
+PRESETS da tela guarda uma **carta-modelo** — moldura, opacidades da full art,
+fundo, degradê na borda, estilo do nome — e **abrir** recarrega o iframe já com
+ela. Pedido do usuário depois de desenhar a primeira full art: *"ele abre sem a
+edição, mesmo o json"*.
+
+> **Por que o ygocarder sozinho não resolvia.** Ele guarda as imagens subidas
+> do computador DENTRO da carta, como data URL, e uma full art passa de 2 MB.
+> A "última carta" que ele guarda tem uma reserva no `localStorage`; quando ela
+> estoura a cota, ele grava a carta **sem** as imagens (`saveCardLocally`, em
+> `use-card.ts` do ygocarder) — e é essa que volta quando o service worker dele
+> não está controlando a página, o que dentro de um iframe é comum. O "Save
+> preset" dele (Blending) guarda só moldura, foil e Dye.
+>
+> **A saída é a mesma que ele usa para compartilhar: a URL.** O ygocarder lê
+> `?data=<carta>` no boot (`retrieveSavedCard`) e prefere isso ao que estiver
+> guardado. Salvar um preset é escolher o `.json` exportado em **Export → Yugioh
+> Carder** (o outro formato não leva a moldura, e é recusado dizendo isso): a
+> tela sobe cada imagem embutida para o bucket público **`cardmaker`** (migration
+> **0061**) com o SHA-256 do conteúdo como nome, troca a imagem pelo link, e
+> guarda a lista em `conteudo/cardmaker-presets` (espelho `store/`). Abrir é só
+> `urlDoPreset` no `src` do quadro — e no link de escape, que abre com o preset
+> também.
+>
+> **A arte fica de fora por padrão** (caixa "com a arte" para incluí-la), e sai
+> vazia com fonte `online`: com fonte `offline` o ygocarder a completaria com a
+> arte da última carta do navegador. **Salvar com o nome de um preset que já
+> existe o substitui** — é o jeito de atualizar um modelo. Apagar um preset não
+> apaga as imagens do bucket (a mesma imagem pode estar em outro).
+>
+> O teto é o do próprio ygocarder (8.192 caracteres de carta na URL); a full art
+> real do usuário dá 2.782. Bucket público porque quem busca as imagens é o
+> ygocarder, de outro domínio e sem sessão — e o Storage responde com CORS
+> aberto, então o canvas dele não fica "contaminado" e o Download do PNG segue
+> funcionando. Escrever é só admin, pela RLS (`eh_admin()`).
+
+> **O NÍVEL do card maker vem em `st`** — "star", como o `codec.ts` dele abrevia,
+> e é o MESMO campo do Rank num Xyz. `parseCardmaker` lia `level`/`lv`, que não
+> existem no arquivo dele: o campo chegava `null`, `normalizarCarta` caía no
+> padrão, e **todo monstro importado nascia Nível 4** sem erro nenhum — só
+> conferindo a carta dentro de um duelo para perceber. Coberto por
+> `cardbuilder.test.mjs`.
+
 Três peças entraram para montar efeitos compostos (o da Multistrike Dragon
 Dragias: *descarte Normais Nv5+ com ATK ≤1900 de Tipos diferentes; Invoque esta
 carta por Invocação-Especial, então destrua 1 carta no campo; se fizer, ela pode
@@ -1613,6 +1714,305 @@ E o limite **"pelo nome, só este efeito"** é `{id,n}`: o `por-nome` continua s
 a conta DIVIDIDA entre os efeitos (a Dragias salva no banco depende disso), e o
 "Você só pode usar cada efeito de X uma vez por turno" precisa de uma conta por
 efeito.
+
+**Seis peças entraram em 19/09/2026**, todas genéricas, pedidas por uma carta que
+é tratada como Normal, dá desconto de tributo por efeito rápido da mão e volta do
+Cemitério quando o oponente tira um monstro Normal seu do campo:
+
+- **"sempre tratada como um monstro Normal"** (`carta.tratadoComoNormal`) é o BIT
+  `TYPE_NORMAL` em `dadosDoMotor`, e **nenhuma linha de Lua**. Um efeito
+  registrado só valeria onde tivesse alcance, e "sempre" quer dizer sempre: com o
+  bit, `IsType(TYPE_NORMAL)` é verdade na mão, no Deck, no campo, no Cemitério e
+  entre as banidas — inclusive para os filtros que a própria carta escreve. O
+  `TYPE_EFFECT` continua junto: sem ele o motor não roda o script dela, e o
+  sintoma seria "a carta nunca faz nada".
+- **`mao-rapido`** é `EFFECT_TYPE_QUICK_O` + `EVENT_FREE_CHAIN`. O `mao` de antes
+  é `EFFECT_TYPE_IGNITION`, que só roda na SUA Main Phase com a corrente vazia —
+  a diferença não aparece em teste de geração nenhum, e sim num duelo, no turno do
+  oponente, quando a carta simplesmente não é oferecida.
+- **`saiu-do-campo`** é o gatilho de quem está no CEMITÉRIO:
+  `EFFECT_TYPE_FIELD+EFFECT_TYPE_TRIGGER_O` com `SetRange(LOCATION_GRAVE)`. A
+  condição faz três perguntas, e cada uma tapa um buraco:
+  `IsPreviousLocation(LOCATION_MZONE)` (saiu do CAMPO, não do Deck),
+  `IsPreviousControler(tp)` (era SEU) e `GetReasonPlayer()~=tp` (foi o OPONENTE
+  que o tirou — sem isso o seu próprio tributo dispara o gatilho).
+- **`menos-tributo`** (`EFFECT_DECREASE_TRIBUTE`) é o Amarylease oficial: o efeito
+  **não fica na carta**, é registrado no JOGADOR (`Duel.RegisterEffect(e1,tp)`) e
+  morre em `RESET_PHASE|PHASE_END`. É o que permite descontar tributo com uma
+  carta que já foi descartada como custo — ela não existe mais para segurar nada.
+  O valor é **bitmask, não contagem**: `0x1` é "1 a menos", `0x2` é "2 a menos".
+  Escrever o número faria "3 a menos" virar `0x3`, que o motor lê como "1 ou 2".
+- **`gatilhoFiltros`** é a lista de QUEM disparou, separada da lista de QUEM a ação
+  afeta. Em "se um monstro Normal seu deixar o campo, busque 1 Magia" as duas
+  falam de cartas diferentes; um campo só faria a busca herdar o filtro do gatilho
+  em silêncio.
+- **`ef.ativaNoTurno`** é o "(Este card pode ser ativado neste turno)" do baixar,
+  copiado do Trap Trick oficial (`c15943341`): `EFFECT_TRAP_ACT_IN_SET_TURN` na
+  carta BAIXADA, com `EFFECT_FLAG_SET_AVAILABLE` — sem ele o efeito não vale para
+  carta virada para baixo, que é exatamente onde ele precisa valer. O clone com
+  `EFFECT_QP_ACT_IN_SET_TURN` existe porque a trava tem **uma constante por
+  família** (Armadilha e Magia Rápida) e o builder não sabe qual é a carta que vai
+  ser baixada — ela sai de um filtro, e só se conhece na resolução.
+
+> **Uma carta pode apontar para outra que ainda NÃO existe.** A referência é
+> sempre o **id** (`IsCode`) — o motor não conhece nome nenhum —, e um id sem
+> carta simplesmente não casa com nada: o filtro fica inerte até ela ser criada,
+> sem erro e sem quebrar duelo. O `codigoNome` do filtro é rótulo de **texto** e
+> só dele: é o que faz a carta dizer `baixe 1 "Legado dos Guerreiros"` em vez de
+> `baixe 1 carta com o código 950000003`. Nome nenhum entra no `.lua`.
+
+> **Quem mostra a caixa de OPÇÕES é `usaFiltros`, no módulo — nunca a tela.** A
+> tela mostrava o filtro só quando a ação tinha ALVO (`outra`/`gatilho`), e as
+> duas Invocações com desconto não têm alvo nenhum: nelas o filtro É a escolha.
+> `menos-tributo` nasceu assim e o relato foi *"não consigo selecionar — tá
+> genérico"*: a carta era salva com a lista vazia e o Lua saía valendo para
+> QUALQUER monstro da mão, sem erro e sem aviso, porque o gerador lia um filtro
+> que a tela nunca deixou preencher. A regra virou `CB.usaFiltros(ef)` e
+> `cardbuilder.test.mjs` a cobra de toda combinação, pelo EFEITO no Lua e não por
+> uma lista escrita à mão: **se trocar o filtro muda o script, a tela tem de
+> oferecer o filtro.** Uma ação nova já nasce dentro dessa conta.
+
+**Mais quatro peças em 20/09/2026**, para uma Armadilha Contínua que protege os
+monstros do jogador e reage ao que o oponente tira do campo:
+
+- **`nao-alvo`** (`EFFECT_CANNOT_BE_EFFECT_TARGET`, ação do contínuo) é o script
+  oficial `c1061200`, e duas peças pequenas seguram a regra inteira:
+  **`aux.tgoval`** no `SetValue` é o que limita a proteção aos efeitos do
+  OPONENTE — sem ele os seus próprios efeitos também deixam de poder mirar os
+  seus monstros, o que o texto da carta não diz —, e `EFFECT_FLAG_IGNORE_IMMUNE`
+  faz a proteção ser vista por quem ignora imunidade.
+- **`saiu-do-campo` também na Magia/Armadilha Contínua e de Campo.** O **range
+  muda com o tipo**, e é a armadilha silenciosa desta peça: o monstro fala do
+  **Cemitério** (é de lá que ele volta) e a Contínua fala do **campo**, onde ela
+  já está. Com o range errado o efeito nunca é oferecido, e não há erro nenhum —
+  ele só não aparece.
+- **Origem `mao-deck-cemiterio`** na Invocação-Especial ("da sua mão, Deck ou
+  Cemitério"). Com a mão e o Deck no meio, ela **nunca é alvo**: carta que
+  ninguém vê não se escolhe como alvo, e a escolha vai para a resolução.
+- **Condição `invocado-neste-turno`** ("se um monstro seu foi Invocado por
+  Invocação-Especial neste turno"). Não precisa de contador nosso: o motor já
+  marca o próprio monstro com **`STATUS_SPSUMMON_TURN`**, e a marca morre no fim
+  do turno sozinha. Por isso `condicaoDeControlar` virou **`condicaoDoEfeito`** —
+  as duas condições perguntam ao campo a mesma coisa, mudando uma cláusula do
+  filtro.
+
+> **A mesma armadilha do `usaFiltros`, de novo.** A caixa de filtro da CONDIÇÃO
+> também estava presa a um valor (`ef.condicao === 'controla'`), então a condição
+> nova nasceria sem lista e valendo para qualquer monstro. Hoje ela aparece para
+> **qualquer** condição diferente de `nenhuma`. Toda vez que a tela decidir
+> sozinha o que mostrar por igualdade a um valor, a próxima opção nasce inválida.
+
+> **O NOME de uma carta apontada, sem o ID, não aponta para nada** — e isso
+> derrubou DUAS cartas salvas no banco em 20/09/2026. A caixa "nome dela" ficou
+> preenchida e a "carta (id)" vazia; como o motor compara `IsCode`, o filtro
+> passou a casar com QUALQUER carta: *"adicione 1 'The Warrior Returning Alive'"*
+> virou *"adicione 1 Magia qualquer"*, e o texto nem mostrava o nome (ele só sai
+> acompanhado do id). A carta salvava, o duelo rodava, e nada acusava.
+> `problemasDoFiltro` agora recusa nome sem id — e ele roda em TODO filtro (ação,
+> condição, custo e passo), que é o que fecha o buraco nos quatro lugares.
+
+**O MOTOR achou dois erros que nenhuma leitura acharia** (21/09/2026). O relato
+foi *"ativei o efeito e não trouxe o card"*; o `--test-card-builder` reproduziu o
+combo num duelo de verdade e mostrou as duas causas, ambas no gatilho
+`saiu-do-campo` e ambas **mudas** — o efeito simplesmente não era oferecido:
+
+- **`EFFECT_FLAG_DAMAGE_STEP` faltava.** Sem ela um gatilho **não pode ser
+  ativado durante a Etapa de Dano** — e é exatamente ali que um monstro destruído
+  em BATALHA deixa o campo. O caso mais comum da carta era o único que nunca
+  funcionava.
+- **`REASON_BATTLE` faltava na condição.** O motor não marca o oponente como
+  "razão" de uma destruição em batalha (`GetReasonPlayer()` ali devolve o dono da
+  carta), então `~=tp` sozinho dava falso. O idioma oficial pergunta as duas
+  coisas: `c:IsReason(REASON_BATTLE) or (c:IsReason(REASON_EFFECT) and
+  c:GetReasonPlayer()~=tp)`.
+
+> **Aqui ficava escrito "uma regra do jogo": na Etapa de Dano não se baixaria
+> Magia/Armadilha. Era um BUG do gerador, achado em 26/09/2026.**
+> `Duel.GetLocationCount` devolve **dois valores** nesta dll, e o baixar escrevia
+> `math.min(N,Duel.GetLocationCount(tp,LOCATION_SZONE))` — como último argumento,
+> os dois valores entram no `min`, e o segundo vale **0 com a zona de
+> Magia/Armadilha vazia**. O `ft` saía 0 e o passo não fazia nada, calado — em
+> batalha ou fora dela. O "ft=1 forçado fazia baixar" que sustentava a tese era
+> exatamente o sintoma. O gerador escreve `(Duel.GetLocationCount(...))` (os
+> parênteses cortam para um valor), e o Lua da Dragon's Inferno e da Max Rider foi
+> corrigido no banco. **Toda chamada do motor usada como ÚLTIMO argumento de outra
+> função é suspeita de levar valores a mais junto.**
+
+**Cinco peças para o boss de Dark Magician** (21/09/2026) — todas genéricas:
+
+- **`carta.tratadoComo`** (`{codigo, nome}`): *"esta carta é sempre tratada como
+  X"*. É o `EFFECT_ADD_CODE` do oficial `c11082056`, registrado no
+  `initial_effect` e portanto PERMANENTE — com `CANNOT_DISABLE+UNCOPYABLE`,
+  porque o NOME de uma carta não é efeito que se negue ou se copie. Irmão do
+  `tratadoComoNormal`: um muda o TIPO, o outro muda o NOME.
+- **`filtro.lista`** (`{lista, listaNome}`): *"1 Magia que LISTE 'Dark
+  Magician'"* → `c:ListsCode(id)`. **Não é busca em texto**: o motor responde
+  pelo `listed_names` que o script da carta declara, então vale para as oficiais
+  que citam o nome, e uma carta sem script não lista nada.
+- **`nao-alvo` com alvo "esta carta"**: a auto-proteção do oficial `c10000000` —
+  `EFFECT_TYPE_SINGLE` + `EFFECT_FLAG_SINGLE_RANGE` + o alcance da zona. Sem
+  filtro, porque ela já sabe de quem fala (e `usaFiltros` devolve `false` aí).
+- **Momento `esta-saiu-do-campo`**: *"se ESTA carta deixar o campo por uma carta
+  do oponente"*. É `EFFECT_TYPE_SINGLE` e segue a carta — sem `SetRange`, que é o
+  que o `EFFECT_TYPE_FIELD` do irmão `saiu-do-campo` precisa —, e a condição
+  pergunta ao PRÓPRIO handler em vez de a `eg`. Leva as mesmas duas correções que
+  o motor achou: `EFFECT_FLAG_DAMAGE_STEP` e o `REASON_BATTLE`.
+- **`carta.invocacaoEspecial`**: PROCEDIMENTO PRÓPRIO (`EFFECT_SPSUMMON_PROC`,
+  alcance da MÃO), na forma do Dark Eradicator Warlock oficial (`c29436665`). A
+  carta sai da mão enviando 1 carta (com filtro) da mão/Deck ao Cemitério, e a
+  condição exige TAMBÉM que exista cada grupo de `destruir` em campo — sem eles a
+  Invocação nem é oferecida. Duas coisas da forma: `spcon` recebe `(e,c)` e
+  **não tem `tp`** (sai de `c:GetControler()`), e o `if c==nil then return true`
+  do topo não é enfeite — o motor chama a condição sem carta só para saber se o
+  procedimento existe. O procedimento **só PAGA o preço**; o *"então destrua"* é
+  um gatilho OBRIGATÓRIO (`TRIGGER_F` em `EVENT_SPSUMMON_SUCCESS`) que confere
+  `SUMMON_TYPE_SPECIAL+1` — a marca do `ei:SetValue(1)` (oficial `c13224603`).
+  A primeira versão destruía DENTRO do procedimento, e isso é regra errada, não
+  estilo: a destruição acontecia antes de a carta pisar no campo, sem o oponente
+  poder responder, e valia até com a Invocação NEGADA. `fora` exclui a própria
+  carta (ela é um Mago de TREVAS em campo quando o gatilho resolve). "Uma vez
+  por turno desta forma" é `SetCountLimit(1,{id,9},EFFECT_COUNT_CODE_OATH)` —
+  o `{id,9}` longe dos `{id,n}` dos efeitos, senão dividiriam a conta.
+- **Ação `ganhar-nome`** (`ganhaCodigo`/`ganhaNome`): *"revele: NESTE TURNO
+  esta carta é tratada como X"* — o nome GANHO, irmão do de nascença. É o
+  `EFFECT_ADD_CODE` registrado NA OPERAÇÃO com `RESETS_STANDARD_PHASE_END`
+  (oficial `c24521325`), e só existe em monstro. A diferença para o permanente é
+  a carta inteira: com o nome de nascença, toda cópia no DECK já é um "Dark
+  Magician" e paga o custo sozinha; com o ganho, só a cópia REVELADA — uma por
+  turno — paga. É o "2 card combo" que o usuário desenhou.
+
+> **Provado no motor** (`--test-card-builder`, seção do Dark Eradicator
+> Sorcerer): o deck não tem Dark Magician nenhum, e mesmo assim a segunda cópia
+> entra pagando com a revelada — o nome ganho vale NA MÃO. Buscou a Thousand
+> Knives pelo `ListsCode`, destruiu o Mago de TREVAS e a Yami sem se oferecer à
+> própria destruição, e buscou o Warlock quando o Battle Ox a destruiu. O
+> controle é o mesmo deck sem a Yami: revelar não basta, ela não entra. **Só o
+> "não pode ser alvo" ficou sem duelo** — o NPC de teste não tem efeito que mire.
+>
+> **Editar não corrompe:** `cardbuilder.test.mjs` prova que abrir a carta do
+> banco (`cartaDaLinha` → JSON do Supabase) e salvar sem mexer dá o mesmo Lua,
+> byte a byte — para o Sorcerer e para a Max Rider.
+
+**Quatro peças para a Shiny Medicine** (Armadilha Normal, id 950000006,
+24/09/2026) — todas genéricas:
+
+- **Efeitos de Cemitério na Magia Normal/Rápida e na Armadilha Normal.** Antes
+  elas tinham exatamente UM efeito, a ativação. Agora aceitam até 4, com os
+  momentos `cemiterio` e `ativou-cartas` — e `problemasDaCarta` exige que exista
+  um efeito de ativação (`resolveEVai`): só com efeitos de Cemitério a carta
+  nunca sairia da mão. "Adicionar ESTA carta à mão" do Cemitério passou a valer
+  para qualquer tipo, não só monstro.
+- **"1 X e 1 Y"** — o custo `enviar-cada` ("envie 1 X e 1 Y da mão ou Deck ao
+  Cemitério") e o `umDeCada` do adicionar. Cada OPÇÃO do filtro é uma carta
+  obrigatória: é o "e" do texto, e não o "ou" que as opções querem dizer em todo
+  o resto. `funcoesDeCada` escreve uma **busca com volta atrás**, e não uma
+  contagem por opção, porque uma carta pode casar com duas opções e seria gasta
+  duas vezes; a escolha só oferece carta que deixa as seguintes possíveis, então
+  o grupo volta inteiro ou vazio. Na tela a caixa diz "— e —".
+- **`sem-dano`** — "todo dano que você sofreria neste turno se torna 0". São DUAS
+  peças registradas no JOGADOR (`EFFECT_CHANGE_DAMAGE` valor 0 +
+  `EFFECT_NO_EFFECT_DAMAGE`, o oficial Raidraptor - Readiness `c21648584`); uma
+  sem a outra deixa passar metade do dano.
+- **Momento `ativou-cartas`** — "se você ativar 1 X e 1 Y enquanto esta carta
+  estiver no seu Cemitério". É um gatilho de Cemitério em `EVENT_CHAINING` com
+  `EFFECT_FLAG_DELAY` (oficial `c13567610`) MAIS um efeito contínuo, também no
+  Cemitério, que marca a carta a cada ativação que casa (`RegisterFlagEffect`
+  com `RESETS_STANDARD|PHASE_END`). A marca morre quando a carta sai do Cemitério
+  — é isso que faz valer o "enquanto". A condição soma a ativação de AGORA às
+  marcas, então não depende de quem roda primeiro no mesmo evento. `gatilhoFiltros`
+  aqui é "1 de cada", e não "ou".
+
+**Magia/Armadilha Contínua e Magia de Campo aceitam 5 efeitos** (28/09/2026). A
+Revenge MAX (950000004) tem dois contínuos — Invocação sem tributo e "Dragões em
+campo perdem 800 de ATK e DEF" (`bonus` contínuo, `lado: qualquer`, valor
+negativo) — e três ativados; com o teto em 4 o quinto não cabia, e o sintoma era
+só o botão "+ efeito" desligado. O resto continua em 4. O `n` dos efeitos vai até
+5, longe do `{id,9}` da Invocação por procedimento próprio.
+
+> **Provado no motor** (`--test-card-builder`, seção Shiny Medicine, 10
+> asserções): o custo manda 1 Red + 1 Blue, o Mystical Elf morre contra o Battle
+> Ox **sem tirar LP**, ativar só a Red NÃO a traz de volta e a Blue traz, e do
+> Cemitério ela se bane e busca as duas. O controle é o mesmo ataque sem ela, que
+> tira LP. As duas primeiras falhas da suíte eram do ARNÊS, não da carta: com o
+> Elfo morto a Battle Phase acaba sem idle nenhum, e a volta à mão chega na mesma
+> resposta que ativa a Medicine — medido pelos eventos com `CB_DIAG=1`.
+
+**Quatro peças para a Evil Dragon of Darkness** (Monstro de Efeito, id 950000008,
+26/09/2026) — todas genéricas:
+
+- **`carta.normalNoCemiterio`** — *"enquanto estiver no Cemitério, é tratada como
+  um monstro Normal"*. Irmã de alcance LIMITADO do `tratadoComoNormal`, e por isso
+  **não** pode ser o bit de `dadosDoMotor` (na mão e em campo ela continua de
+  Efeito): é o par do Gemini oficial (`proc_gemini.lua`), `EFFECT_ADD_TYPE`
+  `TYPE_NORMAL` **e** `EFFECT_REMOVE_TYPE` `TYPE_EFFECT`, com `SINGLE_RANGE` no
+  Cemitério. Só a primeira metade deixaria a carta Normal e de Efeito ao mesmo
+  tempo. Marcar as duas opções é recusado (redundante).
+- **Passo `fundir`** — *"Invoque por Invocação-Fusão 1 X usando esta carta"*. A
+  forma manual da Polymerization que a dll daqui roda (`GetFusionMaterial`,
+  `CheckFusionMaterial` com ESTA carta como `gc`, `SelectFusionMaterial`,
+  `SetMaterial`, `REASON_FUSION`, `CompleteProcedure` — sem o último o
+  `EnableReviveLimit` prende a Fusão no Cemitério depois). Só em monstro
+  (`acoesDoPasso(carta)`), e só com momento da mão/campo/"ao ser Invocado": do
+  Cemitério o passo nunca acharia a carta, calado — por isso é problema na tela.
+- **Passo `opcional`** — o *"você pode"*: `Duel.SelectYesNo` antes do passo, e
+  **só se o passo for possível** (perguntar "quer Invocar?" sem nada a Invocar é
+  prometer o que o motor não cumpre). Chega na tela como a caixa "Efeito
+  opcional" (MSG 13). Vale para qualquer passo.
+- **Passo com `seFiltros`/`seDoCemiterio`** — *"se você adicionou 1 X do seu
+  Cemitério POR ESTE EFEITO"*. É pergunta sobre o que ACONTECEU, não sobre o
+  campo: o passo anterior guarda o grupo que moveu (`s.moveuN`, zerado na entrada
+  da operação) e este confere `IsLocation` + `IsPreviousLocation(LOCATION_GRAVE)`.
+  O passo anterior só guarda quando o seguinte pergunta — gravar sempre mudaria o
+  Lua de toda carta já salva. Só existe depois de adicionar/Invocar OUTRA carta.
+
+> **Provado no motor** (`--test-card-builder`, seção Evil Dragon, 11 asserções):
+> a Foolish Burial põe o Dragon Knight no Cemitério, a Evil o busca DE LÁ, o
+> motor pergunta, e a Evil Dragon Knight sai do Extra com a Evil e o Dragon Knight
+> de material. Três controles: respondendo NÃO a Fusão não acontece; buscado do
+> DECK nem se pergunta; e uma Magia de teste "busque 1 monstro Normal do seu
+> Cemitério" só é oferecida com a Evil lá dentro se o "Normal no Cemitério" existir.
+
+**Sete peças para a Evil Dragon Knight of Darkness** (a Fusão, id 950000011,
+26/09/2026) — todas genéricas:
+
+- **Momento `invocado-especial`** — só `EVENT_SPSUMMON_SUCCESS` (o `invocado`
+  pega também a Normal, pelo clone).
+- **Momento `esta-deixou-campo`** — *"se este card deixar o campo"* por QUALQUER
+  motivo (o irmão `esta-saiu-do-campo` exige carta do oponente). Mesmas flags
+  `DAMAGE_STEP`+`DELAY`; a condição só confere `IsPreviousLocation(ONFIELD)` e
+  `IsPreviousControler(tp)`.
+- **`ef.obrigatorio`** — gatilho sem "você pode" vira `TRIGGER_F`. Só existe nos
+  momentos de `GATILHOS`; fora deles a normalização o zera.
+- **Destruir `todas`** (e o lado **"suas"** no destruir) — sem escolha nem alvo,
+  exceto esta carta, e **sempre resolve**: sem nada a destruir o "então" seguinte
+  roda igual (é o chefe que limpa o próprio campo e depois age).
+- **Ação `enviar-cemiterio`** — "envie até N cartas no campo ao Cemitério",
+  escolha na resolução; não é destruir (não dispara "se for destruída").
+- **Condição `nada-mais`** — *"se você não controlar nenhuma OUTRA carta"*: a
+  ausência no campo inteiro, viradas incluídas. É a única condição que aceita
+  filtro de Magia/Armadilha.
+- **Invocação "1 X e 1 Y"** (`umDeCada` no `reviver`) — a busca com volta atrás
+  do `funcoesDeCada`, que ganhou o modo `comE` (filtros `(c,e,tp)`, para o
+  `IsCanBeSpecialSummoned`) sem mudar a saída de quem já o usava. Zonas livres
+  para todas; Invoca as duas ou nenhuma; só do seu lado.
+
+> **Provado no motor** (seção Evil Dragon Knight): pelo combo da Evil, a Fusão
+> chega, destrói a carta baixada do jogador sem perguntar, pergunta e manda o
+> Battle Ox ao Cemitério, baixa a Dragon's Inferno (id real) com o campo vazio, e
+> destruída pela Magia de teste traz o Dragon Knight e a Evil de volta. Controle:
+> sem o 1º efeito a carta baixada fica, e o baixar nunca é oferecido. Foi ESTA
+> seção que achou o bug do `GetLocationCount` descrito mais acima.
+
+**Arquétipo** (`carta.arquetipo = { setcode, nome }`, 27/09/2026, pedido pelo
+Bickuribox 950000012 — *"sempre tratado como um monstro 'Toon'"*): é o SETCODE,
+o que `IsSetCard` pergunta, e não o tipo `TYPE_TOON` (que traria as regras de
+monstro Toon). Vai no Lua como `EFFECT_ADD_SETCODE` SINGLE e sem alcance — vale
+em toda zona, inclusive no Deck, onde uma busca por arquétipo procura. É no
+SCRIPT porque o motor **não lê setcode de carta do builder pelos dados**: o
+`CardReaderCallback` deixa `setcodes` nulo para elas (e `dadosDoMotor` manda
+`setcode: 0`). O valor sai em número (`0x62`): o `SET_*` mora em
+`archetype_setcode_constants.lua`, fora do `constant.lua` que o teste confere. O
+nome entra no `a` do índice, e o filtro de arquétipo do Deck Builder o acha.
 
 A tela também importa o **`.json` do card maker** (`cartaDoCardmaker`): nome,
 tipo/subtipo, os números, o texto COM as quebras (o `strip` do import do Deck
@@ -2976,7 +3376,7 @@ pra `web/login.html` sem sessão.
 (`web/js/auth.js`): sem sessão vai pro login, com sessão de jogador comum volta
 pra home. Vale para o `teste.html` e para CADA ferramenta dele —
 `banlist`, `listas`, `npcs`, `campo`, `ordenar`, `icones`, `estrutural`, `cardbuilder`,
-`booster` (Booster Builder), `adversario`, `mundo`/`cidade`, e o
+`cardmaker`, `booster` (Booster Builder), `adversario`, `mundo`/`cidade`, e o
 `deck.html?npc=<id>` (que edita o deck e o pool de drop de um ADVERSÁRIO). O
 botão "⚙ Área de Teste" da home nasce `hidden` e só aparece com
 `meuPerfil().admin` — ao contrário, ele piscaria na tela de todo jogador no

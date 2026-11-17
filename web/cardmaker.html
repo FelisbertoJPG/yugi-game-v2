@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classic Duels — Card Maker</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { margin: 0; }
+  .tela { display: flex; flex-direction: column; height: 100vh; }
+
+  .topo { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; flex: none;
+          border-bottom: 2px solid var(--line); padding: 14px 18px; }
+  .topo h1 { margin: 0; font-size: 22px; letter-spacing: 4px; color: var(--gold); }
+  .topo .sub { font-size: 10px; color: var(--dim); line-height: 1.6; flex: 1; min-width: 260px; }
+  .topo .acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .passos { display: flex; gap: 20px; flex-wrap: wrap; flex: none;
+            padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .passo { font-size: 10px; color: var(--dim); line-height: 1.7; }
+  .passo b { color: var(--ink); letter-spacing: 1px; }
+  .passo .n { color: var(--gold); }
+  .passo code { color: var(--ink); }
+  .credito { font-size: 9px; color: var(--dim); line-height: 1.7; margin-left: auto; text-align: right; }
+
+  /* A faixa dos PRESETS: o modelo de carta que abre pronto (ver o cabeçalho de
+     `web/js/cardmakerpresets.js`). Uma linha só, que quebra em janela estreita. */
+  .presets { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: none;
+             padding: 8px 18px; border-bottom: 1px solid var(--line); font-size: 11px; }
+  .presets .rotulo { color: var(--gold); letter-spacing: 2px; font-weight: bold; }
+  .presets .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  .presets select { min-width: 200px; }
+  .presets .nome { width: 180px; }
+  .presets label { color: var(--dim); display: inline-flex; gap: 4px; align-items: center; }
+  .presets .status { color: var(--dim); flex: 1; min-width: 200px; line-height: 1.5; }
+  .presets .status.erro { color: #ff8a9a; }
+  .presets .status.ok { color: #8fe3a0; }
+
+  /* O quadro ocupa o que sobra da altura da janela — `min-height: 0` é o que
+     deixa um filho de flex encolher; sem ele o iframe empurra a página e nasce
+     uma barra de rolagem dupla. */
+  .quadro { flex: 1; min-height: 0; width: 100%; display: block; border: 0; background: var(--bg2); }
+</style>
+</head>
+<body>
+<div class="tela">
+  <div class="topo">
+    <h1>CARD MAKER</h1>
+    <div class="sub">
+      Aqui se desenha o <b>layout</b> da carta — moldura, arte, nome, números e texto.
+      O <b>efeito</b> é no Card Builder: o motor roda Lua, e o card maker não escreve Lua nenhum.
+    </div>
+    <div class="acoes">
+      <button id="btn-voltar">← Área de Teste</button>
+      <button id="btn-builder" class="btn-primary">→ Card Builder</button>
+    </div>
+  </div>
+
+  <div class="passos">
+    <div class="passo"><span class="n">1 ·</span> <b>DESENHE</b> a carta aqui embaixo.</div>
+    <div class="passo"><span class="n">2 ·</span> <b>BAIXE OS DOIS</b>: o <code>.json</code> (Export) e o <code>.png</code> (Download).</div>
+    <div class="passo"><span class="n">3 ·</span> <b>LEVE AO CARD BUILDER</b>: os dois juntos no campo <code>card maker</code>, e monte o efeito.</div>
+    <div class="passo">Não abriu? <a id="abrir-fora" target="_blank" rel="noopener">abra em outra aba</a> — sem internet ele não carrega.</div>
+    <div class="credito">
+      ygocarder, de lauqerm<br>
+      molduras de Grezar, 9558able, SlackerMagician e icycatelf
+    </div>
+  </div>
+
+  <div class="presets">
+    <span class="rotulo" title="Um modelo de carta: moldura, fundo, degradê da borda, opacidades e estilo do nome. Abrir recarrega o card maker com ele.">PRESETS</span>
+    <select id="preset-lista" aria-label="preset"></select>
+    <button id="preset-abrir" disabled>abrir</button>
+    <button id="preset-apagar" disabled>apagar</button>
+    <span class="sep"></span>
+    <input id="preset-nome" class="nome" maxlength="60" placeholder="nome do preset (opcional)">
+    <label title="Sem marcar, o preset abre sem a arte do monstro — ela é o que muda de uma carta para outra.">
+      <input type="checkbox" id="preset-com-arte"> com a arte
+    </label>
+    <button id="preset-salvar" class="btn-primary"
+            title="No card maker: Export → Yugioh Carder → Download. Depois escolha aqui esse .json.">salvar preset (.json)…</button>
+    <input type="file" id="preset-arquivo" accept="application/json,.json" hidden>
+    <span id="preset-status" class="status">Exporte a carta em <b>Export → Yugioh Carder</b> e salve o <code>.json</code> aqui; depois é só abrir.</span>
+  </div>
+
+  <iframe id="carder" class="quadro" title="Card Maker" referrerpolicy="no-referrer" allow="clipboard-write"></iframe>
+</div>
+
+<script type="module" src="/web/js/bootguard.js"></script>
+<script type="module">
+import { requireAdmin } from '/web/js/auth.js';
+import { SUPABASE_URL, SUPABASE_KEY, tokenValido } from '/web/js/supabase.js';
+import { pullFileEx, pushFileGuardado, aoGravar } from '/web/js/projectstore.js';
+import {
+  CHAVE, lerCartaDoCardmaker, imagensEmbutidas, montarPreset, urlDoPreset,
+  normalizarPresets, comPreset, semPreset, subirImagem,
+} from '/web/js/cardmakerpresets.js';
+
+// Ferramenta de conteúdo, como o resto da Área de Teste: só admin. Aqui não há
+// fechadura de servidor a acompanhar (a tela não grava nada — quem grava é o
+// Card Builder, contra a RLS de `cartas_custom`); isto é a porta, e o que ela
+// evita é o jogador comum abrir uma tela que não tem nada a ver com jogar.
+// (Os PRESETS gravam, e a fechadura deles é a RLS: `conteudo` e o bucket
+// `cardmaker` só aceitam escrita de `eh_admin()` — migration 0061.)
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Card Maker: só admin');
+
+const $ = (id) => document.getElementById(id);
+
+// O ENDEREÇO mora aqui, uma vez só, e o quadro e o link de escape saem os dois
+// dele. Escrito duas vezes — um no `src` do HTML, outro no `href` —, um dia um
+// mudaria e o outro não, e o link de escape levaria ao lugar errado justamente
+// no dia em que ele fosse necessário.
+//
+// **Por que um iframe e não o app dentro do nosso front:** o ygocarder é React
+// com trinta dependências e build step (Vite); este front é zero-dep e sem
+// build. Embuti-lo de verdade custaria vendorizar o `dist/` mais ~24 MB de
+// moldura e fonte (já cortados para TCG/inglês) num `game.zip` que hoje tem
+// 1,2 MB e que o jogador baixa quase todo dia — para uma tela que só o admin
+// abre. O Card Builder já exige rede (login e Supabase), então depender do site
+// aqui não tira nada de quem usa isto.
+//
+// **A armadilha:** o site não manda `X-Frame-Options` nem `frame-ancestors`
+// (conferido em 19/09/2026), e é só por isso que o quadro abre. No dia em que
+// ele passar a mandar, o quadro fica BRANCO e não há erro em lugar nenhum —
+// cross-origin não deixa a página de fora saber o que houve lá dentro. É por
+// isso que o link "abra em outra aba" está SEMPRE visível, e não escondido
+// atrás de uma detecção que não existe.
+const CARD_MAKER_URL = 'https://lauqerm.github.io/ygocarder/';
+
+/** Aponta o quadro E o link de escape para o mesmo lugar — o link abre com o preset também. */
+function abrirNoQuadro(url) {
+  $('carder').src = url;
+  $('abrir-fora').href = url;
+}
+abrirNoQuadro(CARD_MAKER_URL);
+
+$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+$('btn-builder').onclick = () => (location.href = '/web/cardbuilder.html');
+document.addEventListener('keydown', (e) => {
+  // Só quando o foco está FORA do quadro: dentro dele o Escape é do card maker,
+  // que usa a tecla para fechar os próprios diálogos. E fora dos campos desta
+  // tela: Escape no nome do preset não pode tirar ninguém da página.
+  if (e.key !== 'Escape' || e.target?.closest?.('input, select, textarea')) return;
+  $('btn-voltar').click();
+});
+
+// ------------------------------------------------------------------ PRESETS
+//
+// Um preset é a carta exportada pelo ygocarder com as imagens embutidas
+// trocadas por LINKS (sobem para o bucket `cardmaker`), aberta pela URL — o
+// próprio ygocarder lê a carta da URL no boot. As regras moram em
+// `cardmakerpresets.js`, com teste; aqui só se junta tela, rede e lista.
+
+let presets = [];
+let leuPresets = false;   // a hidratação alcançou banco ou disco? (trava de `pushFileGuardado`)
+
+function status(texto, tipo = '') {
+  const el = $('preset-status');
+  el.textContent = texto;
+  el.className = `status ${tipo}`;
+}
+
+const escolhido = () => presets.find((p) => p.id === $('preset-lista').value) ?? null;
+
+function desenharLista(selecionar = '') {
+  const sel = $('preset-lista');
+  sel.replaceChildren(new Option(presets.length ? '— escolha um preset —' : '— nenhum preset salvo —', ''));
+  for (const p of presets) sel.append(new Option(p.nome, p.id));
+  sel.value = presets.some((p) => p.id === selecionar) ? selecionar : '';
+  atualizarBotoes();
+}
+
+function atualizarBotoes() {
+  const tem = !!escolhido();
+  $('preset-abrir').disabled = !tem;
+  $('preset-apagar').disabled = !tem;
+}
+
+function ocupado(sim) {
+  for (const id of ['preset-salvar', 'preset-lista', 'preset-nome', 'preset-com-arte']) $(id).disabled = sim;
+  if (sim) { $('preset-abrir').disabled = true; $('preset-apagar').disabled = true; } else atualizarBotoes();
+}
+
+/** Publica a lista e diz na faixa se o BANCO aceitou — o disco sozinho não conta. */
+function publicar(mensagemOk) {
+  aoGravar(CHAVE, (r) => {
+    if (r?.banco?.ok) status(mensagemOk, 'ok');
+    else status(`salvo nesta máquina, mas o banco recusou (${r?.banco?.erro ?? 'sem resposta'}) — tento de novo sozinho`, 'erro');
+  });
+  pushFileGuardado(CHAVE, { presets }, leuPresets);
+  if (!leuPresets) status('guardado nesta máquina — publico assim que conseguir ler a lista do banco', 'erro');
+}
+
+$('preset-lista').onchange = atualizarBotoes;
+
+$('preset-abrir').onclick = () => {
+  const p = escolhido();
+  if (!p) return;
+  const r = urlDoPreset(CARD_MAKER_URL, p.carta);
+  if (!r.ok) return status(r.erro, 'erro');
+  abrirNoQuadro(r.url);
+  status(`"${p.nome}" aberto — troque a arte, o nome e o texto, e exporte como sempre.`, 'ok');
+};
+
+$('preset-apagar').onclick = () => {
+  const p = escolhido();
+  if (!p || !confirm(`Apagar o preset "${p.nome}"?`)) return;
+  presets = semPreset(presets, p.id);
+  desenharLista();
+  publicar(`"${p.nome}" apagado.`);
+};
+
+$('preset-salvar').onclick = () => $('preset-arquivo').click();
+
+$('preset-arquivo').onchange = async () => {
+  const arquivo = $('preset-arquivo').files?.[0];
+  $('preset-arquivo').value = '';   // escolher o MESMO arquivo de novo tem de disparar outra vez
+  if (!arquivo) return;
+  ocupado(true);
+  try {
+    await salvarDoArquivo(arquivo);
+  } catch (e) {
+    console.error('[presets]', e);
+    status(`não consegui salvar: ${e?.message ?? e}`, 'erro');
+  } finally {
+    ocupado(false);
+  }
+};
+
+async function salvarDoArquivo(arquivo) {
+  const lida = lerCartaDoCardmaker(await arquivo.text());
+  if (!lida.ok) return status(lida.erro, 'erro');
+
+  const comArte = $('preset-com-arte').checked;
+  const nome = ($('preset-nome').value.trim()
+    || String(lida.carta.na ?? '').trim()
+    || arquivo.name.replace(/\.json$/i, '')).slice(0, 60);
+
+  // Cada imagem embutida vira um link no bucket. Uma que falhe derruba o
+  // salvamento inteiro: um preset com o degradê faltando abriria "quase certo",
+  // que é o pior jeito de errar.
+  const imagens = imagensEmbutidas(lida.carta, { comArte });
+  const token = await tokenValido();
+  const links = {};
+  for (const [i, im] of imagens.entries()) {
+    status(`subindo a imagem do ${im.nome} (${i + 1} de ${imagens.length})…`);
+    const r = await subirImagem(im.dataUrl, {
+      supabaseUrl: SUPABASE_URL, chave: SUPABASE_KEY, token, fetch: (...a) => fetch(...a),
+    });
+    if (!r.ok) return status(`${im.nome}: ${r.erro}`, 'erro');
+    links[im.nome] = r.url;
+  }
+
+  const carta = montarPreset(lida.carta, links, { comArte });
+  const url = urlDoPreset(CARD_MAKER_URL, carta);   // confere o teto ANTES de guardar
+  if (!url.ok) return status(url.erro, 'erro');
+
+  presets = comPreset(presets, { id: crypto.randomUUID(), nome, carta, salvoEm: new Date().toISOString() });
+  const salvo = presets.find((p) => p.nome.trim().toLocaleLowerCase('pt-BR') === nome.toLocaleLowerCase('pt-BR'));
+  desenharLista(salvo?.id);
+  $('preset-nome').value = '';
+  status(`"${nome}" salvo — publicando…`);
+  publicar(`"${nome}" salvo e publicado. Para usar: escolha na lista e clique em abrir.`);
+}
+
+// Hidrata ANTES de qualquer gravação — gravar antes de ler é como uma lista
+// vazia sobrescreve a boa (regra do projeto; ver `projectstore.js`).
+{
+  const r = await pullFileEx(CHAVE);
+  leuPresets = r.alcancou;
+  presets = normalizarPresets(r.data);
+  desenharLista();
+}
+</script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
+</body>
+</html>

@@ -160,7 +160,7 @@ export function parseCardmaker(json) {
     subtype: cat === 'Monster' ? null : (SUBTYPE[json.sf] || 'Normal'),
     attribute: cat === 'Monster' ? (json.at || 'DARK') : null,
     race: cat === 'Monster' ? (RACE_PT[(json.ta || [])[0]] || (json.ta || [])[0] || '') : null,
-    level: cat === 'Monster' ? numOrNull(json.level ?? json.lv) : null, // o maker costuma NÃO ter nível
+    level: (cat === 'Monster' && frame.kind !== 'Link') ? numOrNull(json.st ?? json.level ?? json.lv) : null, // `st` = "star": o Nível (o Rank, no Xyz). Link não tem — o rating dele é `lr`
     atk: cat === 'Monster' ? (numOrNull(json.atk) ?? 0) : null,
     def: (cat === 'Monster' && frame.kind !== 'Link') ? (numOrNull(json.def) ?? 0) : null,
     desc: strip(json.ef),

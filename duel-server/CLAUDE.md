@@ -227,7 +227,52 @@ Deck/Cemitério; o baixar de 2 cartas de nomes diferentes; e a conta de cada efe
 (`{id,n}`). Cada efeito é reconhecido pelo que a resolução FEZ, porque os três
 chegam com o mesmo código e sem descrição. Os controles trocam uma coisa só no
 mesmo script: sem o alcance da mão, o Curse que a própria busca trouxe nunca fica
-invocável; com a conta dividida (`id`), usar um efeito apaga os outros),
+invocável; com a conta dividida (`id`), usar um efeito apaga os outros.
+Joga por fim a **Max Rider** (`LUA_MAX_RIDER`, a carta do usuário com os ids
+REAIS do banco), e foi ela que provou o valor desta suíte: o relato era *"ativei
+o efeito e não trouxe o card"*, e o duelo dirigido — ativar o efeito rápido DA
+MÃO, Invocar o Normal Nv5 que o desconto de tributo destravou, e deixar o Battle
+Ox do NPC atropelá-lo — achou **dois erros do gerador que nenhuma leitura
+acharia**, os dois mudos: faltava `EFFECT_FLAG_DAMAGE_STEP` (sem ela o gatilho
+não pode ser ativado na Etapa de Dano, que é onde um monstro morto em BATALHA
+deixa o campo) e faltava `REASON_BATTLE` na condição (o motor não marca o
+oponente como razão de uma destruição em batalha). E prova que o *"então baixe"*
+ACONTECE, mesmo com o gatilho vindo de batalha — até 26/09/2026 esta seção
+afirmava o contrário como "regra do jogo", e era um terceiro bug do gerador:
+`Duel.GetLocationCount` devolve DOIS valores nesta dll, e como último argumento
+do `math.min` o segundo (0 com a zona de Magia/Armadilha vazia) zerava o `ft`. O
+controle novo é a linha antiga, sem os parênteses, que não baixa. Os
+controles são o deck sem ativar o efeito (o Nv5 não fica invocável) e a condição
+pedindo que o monstro fosse DELE (o gatilho não acorda).
+E joga o **Dark Eradicator Sorcerer** (`LUA_SORCERER`, id real 950000005), o
+combo inteiro que o usuário desenhou: Yami em campo, Ancient Sorcerer invocado,
+uma cópia REVELADA — que vira "Dark Magician" na MÃO e busca a Thousand Knives
+pelo `ListsCode` — e a OUTRA entrando pelo procedimento próprio, pagando com a
+revelada. **O deck não tem Dark Magician nenhum**: se a Invocação acontece, foi o
+nome ganho que pagou. Depois o gatilho obrigatório destrói o Mago de TREVAS e a
+Magia (sem se oferecer à própria destruição), e o Battle Ox a destrói para ela
+buscar o Warlock. Os números da carta no teste são de TESTE (ATK 1000, para
+morrer em batalha); o Lua é o da carta de verdade. O controle é o mesmo deck sem
+a Yami: revelado, ela não entra.
+E joga a **Shiny Medicine** (`LUA_SHINY`, id real 950000006, Armadilha Normal):
+o custo "1 Red + 1 Blue Medicine" da mão/Deck, o dano de batalha ZERADO no turno
+(Mystical Elf contra Battle Ox; o controle é o mesmo ataque sem ela, que tira
+LP), o gatilho de Cemitério que só acorda com as DUAS Medicines ativadas (a Red
+sozinha não a traz), e o banir-e-buscar do Cemitério. O LP só conta na Battle
+Phase do jogador, e a conta fecha na virada de turno — com o atacante morto a
+fase acaba sem idle nenhum.
+E joga a **Evil Dragon of Darkness** (`LUA_EVIL`, id real 950000008, com a
+Fusão `LUA_EVIL_KNIGHT` 950000011 do banco): Foolish Burial no Dragon Knight, a
+Evil o busca do Cemitério, o `yesno` do "você pode" e a Fusão manual saindo do
+Extra. Controles: responder NÃO, buscar do DECK (nem pergunta) e a Magia de
+teste `LUA_BUSCA_NORMAL`, que só acha a Evil no Cemitério como monstro Normal
+com o par ADD_TYPE/REMOVE_TYPE no script.
+E a **Evil Dragon Knight of Darkness** (`LUA_EVIL_KNIGHT`, a Fusão real, com a
+Dragon's Inferno registrada pelo id real 950000002 e a Magia de teste
+`LUA_DESTROI_MEU`): o gatilho obrigatório que destrói tudo o que é seu e manda o
+Ox ao Cemitério, o baixar com o campo vazio e a volta dos dois materiais ao
+deixar o campo. Controle: sem o 1º efeito registrado, com a carta baixada ainda
+em campo, o baixar nunca é oferecido),
 `--test-dust` (Dust Tornado/remoção de magia-armadilha), `--test-synchro`
 (Invocação-Sincro pelo Extra Deck + negação do Stardust Dragon via corrente),
 `--test-xyz` (Invocação-Xyz + desanexação de material do Number 39: Utopia),
@@ -873,6 +918,17 @@ O teste prova o evento que sai para `web/duel.html` (com `flip: true`, pos 0x1 e
 o código real, sem o qual a arte não aparece) e traz o par CONTROLE: o mesmo
 comando num monstro já aberto emite `pos` SEM `flip`, deitando em 0x4 — que era
 exatamente o evento errado que chegava antes),
+`--test-mao-inicial` (a **MÃO INICIAL escolhida** do "Testar Duelo" da Área de
+Teste — `web/testarduelo.html` → `duel.html?teste=1`. O motor não tem "mão
+inicial": ela é a compra de regra (`startingDrawCount`) tirada do topo. Então o
+`/start` aceita `maoInicial` (ids) e `tamanhoMao`, as escolhidas vão para o TOPO
+do deck (`DuelSession.ComMaoNoTopo`: o fim da lista, que é a carta de MAIOR
+sequência) e o tamanho vira a compra do jogador — o NPC continua com 5. Nada é
+injetado na mão: carta posta direto em `LOCATION_HAND` não gera MSG_DRAW, e a
+tela nasceria sem ela. Prova o corpo (`MaoInicialDoCorpo`: cópia a cópia contra
+o deck, tamanho nunca abaixo das escolhidas nem acima do deck; ignorado no
+multiplayer) e o evento `draw` inicial, com o par CONTROLE da mesma seed sem
+escolha),
 `--test-card-advance` (a **Card Advance**, e com ela toda carta que pede para
 **declarar um número** ou **ordenar cartas**. O relato: *"a Card Advance não é
 tratada no jogo"*, e o log de uma sessão real mostra como: o jogador ativa,

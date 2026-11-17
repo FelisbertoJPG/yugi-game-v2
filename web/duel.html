@@ -1162,7 +1162,7 @@
 <script type="module" src="/web/js/bootguard.js"></script>
 <script type="module">
 import { YgoDB } from '/ygo-data/src/ygodb.js';
-import { getActiveDeck, hydrateDecks } from '/web/js/storage.js';
+import { getActiveDeck, hydrateDecks, listDecks } from '/web/js/storage.js';
 import { getNpc, loadNpcDecks, getNpcActiveDeck, getNpcDecks, hydrateCustomNpcs, npcLevel } from '/web/js/npcs.js';
 import { encerrarDuelo, iniciarDuelo, WIN_REWARD, hydrateWallet } from '/web/js/wallet.js';
 // A BANLIST vale na PORTA do duelo, e nao so' na hora de salvar. Ver
@@ -1237,6 +1237,18 @@ const advId = new URLSearchParams(location.search).get('npc');
 // de Duelos). Sem ele vale o deck ativo, que é como todo link antigo funciona.
 // Vai pelo NOME, a mesma chave do deck ativo (migration 0030) e do `#libera`.
 const advDeckParam = new URLSearchParams(location.search).get('deck');
+// TESTAR DUELO (Área de Teste, `testarduelo.html`): `?teste=1` + o deck SEU que
+// vai duelar (`meu`, pelo nome — não o ativo do Deck Builder), quantas cartas na
+// mão inicial (`mao`) e quais (`cartas`, ids separados por vírgula). Quem põe as
+// escolhidas na mão é o MOTOR (elas vão ao topo do deck e chegam pela compra
+// inicial); aqui só se repassa. Duelo de teste não é registrado nem premiado.
+const paramsTeste = new URLSearchParams(location.search);
+const modoTeste = paramsTeste.get('teste') === '1';
+const testeMeuDeck = modoTeste ? paramsTeste.get('meu') : null;
+const testeTamanhoMao = modoTeste && paramsTeste.has('mao') ? Number(paramsTeste.get('mao')) : null;
+const testeCartas = modoTeste
+  ? (paramsTeste.get('cartas') ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
+  : [];
 let advNpc = advId ? getNpc(advId) : null;
 let advDeckNome = null;    // nome do deck do NPC neste duelo (registrado no banco)
 let advDeck = null;        // deck do NPC (main ids), carregado no boot
@@ -1809,6 +1821,8 @@ function chosenDeck() {
   // O deck do duelo e' o ATIVO, escolhido no Deck Builder. Havia um <select> na
   // barra do topo que trocava o deck e recomecava o duelo; ele saiu junto com o
   // resto da barra, e um lugar so' para escolher deck e' melhor que dois.
+  // A excecao e' o Testar Duelo, que escolhe o deck na propria tela de teste.
+  if (testeMeuDeck) return listDecks().find((d) => d.name === testeMeuDeck) ?? getActiveDeck();
   return getActiveDeck();
 }
 
@@ -1857,7 +1871,8 @@ async function start() {
   // Só no modo Adversário: o Treino (`duel.html` sem `?npc=`) não registra nada
   // e não paga nada, então ali quem responde é só a porta.
   let registro = null;
-  if (advNpc) {
+  // O Testar Duelo também não: a mão escolhida a dedo não pode valer prêmio.
+  if (advNpc && !modoTeste) {
     registro = await iniciarDuelo(advNpc.id, advDeckNome, [...ids, ...extraIds]);
     if (!registro.id) { warn(registro.erro); return; }
   }
@@ -1907,11 +1922,22 @@ async function start() {
     }
     // Cartas do Card Builder (dados + Lua), lidas lá em cima, na porta.
     if (cartasBuilder.cartas.length) body.customCards = cartasBuilder.cartas;
+    // Mão inicial do Testar Duelo. O servidor confere de novo (carta fora do
+    // deck é ignorada, o tamanho nunca fica abaixo das escolhidas).
+    if (modoTeste) {
+      if (testeCartas.length) body.maoInicial = testeCartas;
+      if (Number.isInteger(testeTamanhoMao)) body.tamanhoMao = testeTamanhoMao;
+    }
     const j = await rpc('/start', body);            // seed aleatória no servidor
     conn(true);
 
     const vs = advNpc ? ` vs ${advNpc.name}` : '';
     log(`● novo duelo — deck "${deck.name}" (${ids.length} cartas)${vs}`, true);
+    if (modoTeste) {
+      log(`● TESTE — mão de ${body.tamanhoMao ?? 5}`
+        + (testeCartas.length ? `, escolhidas: ${testeCartas.map((id) => nameOf(id)).join(', ')}` : '')
+        + ' · sem registro e sem prêmio', true);
+    }
     aplicarEmOrdem(j);
   } catch (e) { conn(false); warn('Sem conexão com o duel-server. Rode:  duel-server.exe --serve  (porta 8770).'); }
 }
@@ -5272,7 +5298,11 @@ function encerrarDueloNoServidor() {
 window.addEventListener('pagehide', encerrarDueloNoServidor);
 
 $('chain-pass').onclick = () => { $('chain-overlay').hidden = true; act('chain', -1, 'não ativar'); };
-$('end-home').onclick = () => { encerrarDueloNoServidor(); location.href = '/web/index.html'; };
+// O Testar Duelo volta para a tela de teste, com a mesma escolha na URL.
+$('end-home').onclick = () => {
+  encerrarDueloNoServidor();
+  location.href = modoTeste ? `/web/testarduelo.html${location.search}` : '/web/index.html';
+};
 // No online a sala ja' acabou: "novo duelo" e' procurar OUTRA partida, nao
 // reabrir a que fechou (o `start()` tentaria carregar uma partida encerrada).
 $('end-again').onclick = () => {
@@ -5330,6 +5360,7 @@ if (advNpc) {
     advSignature = active?.signatureId ?? advNpc.signatureId;
     advReward = Number.isFinite(Number(active?.rewardDp)) ? Number(active.rewardDp) : WIN_REWARD;
     if (h1 && active?.name) h1.textContent = `▚ ADVERSÁRIO — vs ${advNpc.name} · ${active.name}`;
+    if (h1 && modoTeste) h1.textContent = `▚ TESTE — vs ${advNpc.name}${active?.name ? ` · ${active.name}` : ''}`;
   } catch { advSignature = advNpc.signatureId; }
 }
 

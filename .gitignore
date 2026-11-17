@@ -187,3 +187,19 @@ bancada-trilha.html
 # A bancada da Cena, como as outras: e SAIDA de `tools/bancada-cena.mjs`,
 # 3 MB regerados num comando.
 bancada-cena.html
+
+# O CARD MAKER (`ygocarder-main/`) — projeto de TERCEIRO, 110 MB.
+#
+# E' o ygocarder (de lauqerm), usado como criador do LAYOUT das cartas: o admin
+# desenha nele, em `web/cardmaker.html`, e traz o `.json` + o `.png` para o Card
+# Builder. Nao e' codigo nosso e nao e' importado por nada em `web/` — a tela o
+# embute por iframe, do site dele.
+#
+# Nao entra em pacote nenhum, e isso ja' esta' garantido em dois lugares: o
+# `publish-release.ps1` so' copia `web/`, `ygo-data\src` e `boards/`, e a semente
+# do `pack.ps1` FALHA com qualquer caminho fora de `store|decks|package.json`.
+#
+# Fica fora do git pelo mesmo motivo de `/modelos-teste/`, com um agravante: sao
+# 110 MB de codigo e fonte de OUTRA PESSOA, e este repositorio E' PUBLICO. O que
+# sobe fica no historico para sempre.
+ygocarder-main/

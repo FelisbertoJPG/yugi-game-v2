@@ -399,11 +399,32 @@ let TIPOS = new Set(LISTA1_TIPOS);
  */
 let OBTENIVEIS = new Set();
 
+/**
+ * **As cartas do CARD BUILDER** (`cartas_custom`, ids 950000000+) — toda carta
+ * criada ali entra na Lista 1 sozinha, sem passar pelo editor de listas. É o
+ * que deixa uma carta nova ganhar regra na Banlist (e ser montada no deck) no
+ * mesmo instante em que é salva.
+ *
+ * O mesmo desenho das obteníveis, e pelos mesmos motivos: conjunto À PARTE
+ * (misturar na fonte carimbaria como escolha à mão, e apagar a carta do builder
+ * deixaria o id pendurado na lista para sempre), e a lista vem do SERVIDOR
+ * (`cartas_do_builder()`, migration 0060) — a mesma função que `lista_ativa()`
+ * soma para `salvar_deck` e para a porta do duelo. Só a Lista 1: é ela que o
+ * pedido nomeia, e uma lista restrita criada à parte continua restrita.
+ */
+let DO_BUILDER = new Set();
+
 /** A carta (entrada do índice) faz parte da Lista 1? */
 export function inLista1(card) {
-  if (SET.has(card.id) || OBTENIVEIS.has(card.id)) return true;
+  if (SET.has(card.id) || OBTENIVEIS.has(card.id) || DO_BUILDER.has(card.id)) return true;
   if (card.t !== 'M') return false;
   return TIPOS.has(card.tl);
+}
+
+/** Instala a resposta do servidor. Ver o comentário de `DO_BUILDER`. */
+export function aplicarDoBuilder(ids) {
+  if (!Array.isArray(ids)) return;
+  DO_BUILDER = new Set(ids.map(Number).filter(Number.isFinite));
 }
 
 /** Esta carta é entregue pelo jogo (booster / estrutural / drop)? */

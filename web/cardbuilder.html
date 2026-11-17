@@ -100,9 +100,12 @@
       </div>
       <div class="campo">
         <label for="cardmaker">card maker</label>
-        <input type="file" id="cardmaker" accept=".json,application/json">
+        <input type="file" id="cardmaker" accept=".json,application/json,image/*" multiple>
       </div>
-      <p class="ajuda">Importar o <b>.json do card maker</b> abre uma carta NOVA com o nome, o tipo, os números, o texto e a arte dele. Os efeitos o card maker não sabe: monte-os no passo 3.</p>
+      <div class="acoes">
+        <button id="btn-layout">🎨 desenhar o layout</button>
+      </div>
+      <p class="ajuda">O <b>layout</b> se desenha no card maker; aqui se monta o <b>efeito</b>. Traga de lá os DOIS arquivos, juntos neste mesmo campo: o <b>.json</b> abre uma carta NOVA com o nome, o tipo, os números, o texto e a arte, e o <b>.png</b> da carta pronta entra como <b>carta completa</b> — é ele que o jogador vê. Os efeitos o card maker não sabe: monte-os no passo 3.</p>
 
       <h2>2 · TIPO</h2>
       <div class="campo">
@@ -211,6 +214,24 @@ function numero(valor, aoMudar, { min, max, step = 1, placeholder = '' } = {}) {
   i.value = valor ?? '';
   i.oninput = () => aoMudar(i.value === '' ? null : Number(i.value));
   return i;
+}
+
+/**
+ * Texto livre curto. Só o NOME da carta apontada por um id usa isto — e ele é
+ * rótulo do TEXTO da carta, nunca do Lua: quem o motor lê é o id (`IsCode`).
+ */
+function textoCurto(valor, aoMudar, { placeholder = '', max = 80 } = {}) {
+  const i = el('input', { type: 'text', placeholder, maxLength: max });
+  i.value = valor ?? '';
+  i.oninput = () => aoMudar(i.value);
+  return i;
+}
+
+/** Uma caixa de marcar com rótulo, do jeito que a tela já desenha as outras. */
+function marcar(rotulo, valor, aoMudar) {
+  const c = el('input', { type: 'checkbox', checked: !!valor });
+  c.onchange = () => aoMudar(c.checked);
+  return el('div', { class: 'campo check' }, c, el('label', { textContent: rotulo }));
 }
 
 const campo = (rotulo, ...controles) => el('div', { class: 'campo' }, el('label', { textContent: rotulo }), ...controles);
@@ -332,7 +353,58 @@ function pintarTipo() {
       campo('nível', numero(carta.nivel, (v) => { carta.nivel = v; atualizar(); }, { min: 1, max: 12 })),
       campo('ATK', numero(carta.atk, (v) => { carta.atk = v; atualizar(); }, { min: 0, max: 9999, step: 50 })),
       campo('DEF', numero(carta.def, (v) => { carta.def = v; atualizar(); }, { min: 0, max: 9999, step: 50 })),
+      // Vira o BIT `TYPE_NORMAL` no banco, e nenhuma linha de Lua: a carta passa
+      // a casar com todo filtro de "monstro Normal", em qualquer zona — inclusive
+      // os filtros dela mesma. Ver `dadosDoMotor`.
+      marcar('sempre tratada como um monstro Normal', carta.tratadoComoNormal,
+        (v) => { carta.tratadoComoNormal = v; atualizar(); }),
+      // Só no Cemitério: na mão e em campo ela segue de Efeito. É Lua (o par
+      // ADD_TYPE/REMOVE_TYPE do Gemini), e não o bit — ver `normalizarCarta`.
+      marcar('tratada como monstro Normal enquanto estiver no Cemitério', carta.normalNoCemiterio,
+        (v) => { carta.normalNoCemiterio = v; atualizar(); }),
+      // "Esta carta é sempre tratada como <outra carta>" — o EFFECT_ADD_CODE.
+      // Vale para todo efeito que pergunte pelo NOME da outra carta (as magias
+      // de suporte, as buscas, os rituais que a nomeiam).
+      campo('tratada como (id)', numero(carta.tratadoComo.codigo, (v) => { carta.tratadoComo.codigo = v; atualizar(); },
+        { min: 1, placeholder: 'ex.: 46986414' })),
+      campo('nome dela', textoCurto(carta.tratadoComo.nome, (v) => { carta.tratadoComo.nome = v; atualizar(); },
+        { placeholder: 'só para o texto da carta' })),
+      // "Sempre tratada como um card 'Toon'" — o ARQUÉTIPO (setcode, o que
+      // `IsSetCard` pergunta), e não o tipo Toon. O setcode sai de
+      // `ygo-data/data/scripts/core/archetype_setcode_constants.lua`.
+      campo('arquétipo (setcode)', textoCurto(typeof carta.arquetipo.setcode === 'number'
+        ? `0x${carta.arquetipo.setcode.toString(16)}` : (carta.arquetipo.setcode ?? ''),
+        (v) => { carta.arquetipo.setcode = v; atualizar(); }, { placeholder: 'ex.: 0x62 (Toon)' })),
+      campo('nome do arquétipo', textoCurto(carta.arquetipo.nome, (v) => { carta.arquetipo.nome = v; atualizar(); },
+        { placeholder: 'ex.: Toon' })),
+      // PROCEDIMENTO PRÓPRIO de Invocação-Especial: é propriedade da CARTA (como
+      // a receita da Fusão), e não um efeito da lista — por isso mora aqui.
+      marcar('tem Invocação-Especial própria (sai da mão pagando um preço)',
+        carta.invocacaoEspecial.ligado,
+        (v) => { carta.invocacaoEspecial.ligado = v; pintarTudo(); }),
     );
+    if (carta.invocacaoEspecial.ligado) {
+      const inv = carta.invocacaoEspecial;
+      const box = el('div');
+      box.append(marcar('só uma vez por turno (desta forma)', inv.umaVezPorTurno,
+        (v) => { inv.umaVezPorTurno = v; atualizar(); }));
+      box.append(el('div', { class: 'ou', textContent: 'enviar ao Cemitério (da sua mão ou Deck):' }));
+      box.append(editorDeFiltros(inv.custoFiltros, 'sem condição: qualquer carta'));
+      box.append(el('div', { class: 'ou', textContent: 'e destruir em campo — sem elas a Invocação nem é oferecida:' }));
+      inv.destruir.forEach((g, i) => {
+        const tirar = el('button', { textContent: '×', title: 'tirar esta destruição' });
+        tirar.onclick = () => { inv.destruir.splice(i, 1); pintarTudo(); };
+        box.append(el('div', { class: 'grupo' },
+          el('div', { class: 'grupo-topo' }, el('span', { textContent: `DESTRUIR ${i + 1}` }), tirar),
+          editorDeFiltros(g.filtros, 'sem condição: qualquer carta com a face para cima')));
+      });
+      if (inv.destruir.length < 3) {
+        const mais = el('button', { textContent: '+ destruir mais 1' });
+        mais.onclick = () => { inv.destruir.push({ filtros: [CB.novoFiltro()] }); pintarTudo(); };
+        box.append(el('div', { class: 'acoes' }, mais));
+      }
+      filhos.push(box);
+    }
   }
   if (carta.tipo === 'monstro-fusao') {
     // Os materiais valem JUNTOS ("A + B + 2 C"): cada um é "N monstros que
@@ -381,11 +453,13 @@ $('tipo').onchange = () => { trocarTipo($('tipo').value); pintarTudo(); };
  * dentro dela as condições valem juntas. Mexer num número só atualiza a saída;
  * acrescentar ou tirar um grupo redesenha.
  */
-function editorDeFiltros(filtros, textoVazio, categoria = null) {
+function editorDeFiltros(filtros, textoVazio, categoria = null, cada = false) {
+  // `cada`: as opções são "1 X E 1 Y" (todas obrigatórias), e não "X OU Y" —
+  // o custo `enviar-cada`, o gatilho `ativou-cartas` e o "1 de cada" da busca.
   const box = el('div');
   if (!filtros.length) box.append(el('div', { class: 'ou', textContent: textoVazio }));
   filtros.forEach((f, i) => {
-    if (i > 0) box.append(el('div', { class: 'ou', textContent: '— ou —' }));
+    if (i > 0) box.append(el('div', { class: 'ou', textContent: cada ? '— e —' : '— ou —' }));
     const tirar = el('button', { textContent: '×', title: 'tirar esta opção' });
     tirar.onclick = () => { filtros.splice(i, 1); pintarTudo(); };
     const muda = (k) => (v) => { f[k] = v; atualizar(); };
@@ -401,9 +475,21 @@ function editorDeFiltros(filtros, textoVazio, categoria = null) {
       campo('DEF', numero(f.defMin, muda('defMin'), { min: 0, step: 50, placeholder: 'mín' }),
         el('span', { class: 'entre', textContent: 'a' }), numero(f.defMax, muda('defMax'), { min: 0, step: 50, placeholder: 'máx' })),
       campo('carta (id)', numero(f.codigo, muda('codigo'), { min: 1, placeholder: 'uma carta específica' })),
+      // O nome existe para o TEXTO da carta ("baixe 1 'Legado dos Guerreiros'").
+      // O id pode apontar para uma carta que você ainda NÃO criou: o motor só
+      // compara `IsCode`, então o filtro fica inerte até ela existir — não
+      // quebra duelo nenhum.
+      campo('nome dela', textoCurto(f.codigoNome, muda('codigoNome'), { placeholder: 'só para o texto da carta' })),
+      // "que LISTA a carta X" — o `ListsCode` do motor: é como se pede "1 Magia
+      // que liste 'Dark Magician'". Ele responde pelo que o SCRIPT da carta
+      // declara, não por busca no texto.
+      campo('que lista (id)', numero(f.lista, muda('lista'), { min: 1, placeholder: 'cita esta carta' })),
+      campo('nome dela', textoCurto(f.listaNome, muda('listaNome'), { placeholder: 'só para o texto da carta' })),
     ));
   });
-  const mais = el('button', { textContent: filtros.length ? '+ ou outra opção' : '+ condição' });
+  const mais = el('button', {
+    textContent: cada ? '+ e mais 1 carta' : filtros.length ? '+ ou outra opção' : '+ condição',
+  });
   // "Baixar" começa em "qualquer carta": com o padrão "monstro" a opção nasceria recusada.
   mais.onclick = () => { filtros.push(categoria ? { ...CB.novoFiltro(), categoria } : CB.novoFiltro()); pintarTudo(); };
   box.append(el('div', { class: 'acoes' }, mais));
@@ -426,6 +512,10 @@ function editorDeEfeito(ef, i) {
     el('div', { class: 'efeito-topo' }, el('b', { textContent: `EFEITO ${i + 1}` }), tirar));
 
   box.append(campo('quando', seletor(pares(CB.QUANDO, CB.quandoPermitidos(carta)), ef.quando, estrutura('quando'))));
+  // Gatilho sem "você pode" no texto: ativa sozinho, ninguém pergunta.
+  if (CB.GATILHOS.has(ef.quando)) {
+    box.append(marcar('obrigatório (o texto não diz "você pode")', ef.obrigatorio, (v) => { ef.obrigatorio = v; atualizar(); }));
+  }
   box.append(campo('custo', seletor(pares(CB.CUSTOS, CB.custosPermitidos(carta, ef.quando)), ef.custo, estrutura('custo'))));
   if (ef.custo === 'pagar-lp') box.append(campo('LP', numero(ef.custoLp, muda('custoLp'), { min: 1, max: 8000, step: 100 })));
   if (ef.custo === 'descartar-filtro') {
@@ -437,17 +527,47 @@ function editorDeEfeito(ef, i) {
     box.append(el('div', { class: 'ou', textContent: 'descartar quais:' }));
     box.append(editorDeFiltros(ef.custoFiltros, 'sem condição: qualquer carta da mão'));
   }
+  // QUEM disparou o gatilho é pergunta separada de QUEM a ação afeta: em "se um
+  // monstro Normal seu deixar o campo, busque 1 Magia", as duas listas falam de
+  // cartas diferentes. Por isso `gatilhoFiltros`, e não `filtros`.
+  if (ef.quando === 'saiu-do-campo') {
+    box.append(el('div', { class: 'ou', textContent: 'o monstro que deixou o campo:' }));
+    box.append(editorDeFiltros(ef.gatilhoFiltros, 'sem condição: qualquer monstro seu'));
+  }
+  if (ef.custo === 'enviar-cada') {
+    box.append(el('div', { class: 'ou', textContent: 'enviar ao Cemitério (1 de cada, da mão ou Deck):' }));
+    box.append(editorDeFiltros(ef.custoFiltros, 'nenhuma carta ainda — acrescente uma', 'qualquer', true));
+  }
+  // "Se você ativar 1 X e 1 Y": cada opção é UMA carta que precisa ser ativada,
+  // todas no mesmo turno, com esta no Cemitério.
+  if (ef.quando === 'ativou-cartas') {
+    box.append(el('div', { class: 'ou', textContent: 'as cartas que você precisa ativar (1 de cada):' }));
+    box.append(editorDeFiltros(ef.gatilhoFiltros, 'nenhuma carta ainda — acrescente uma', 'qualquer', true));
+  }
   box.append(campo('limite', seletor(pares(CB.LIMITES, CB.limitesPermitidos(carta, ef.quando)), ef.limite, muda('limite'))));
   // "Se você controlar…": soma-se ao momento (ver `condicaoDeControlar`).
   if (CB.permiteCondicao(ef)) {
     box.append(campo('condição', seletor(pares(CB.CONDICOES, Object.keys(CB.CONDICOES)), ef.condicao, (v) => {
       ef.condicao = v;
-      if (v === 'controla' && !ef.condicaoFiltros.length) ef.condicaoFiltros.push(CB.novoFiltro());
+      // Toda condição escrita pergunta "qual monstro": nascer sem uma opção
+      // deixaria a caixa vazia e a condição valendo para qualquer um.
+      // "Nenhuma outra carta" fala de QUALQUER carta — nascer com "monstro"
+      // deixaria as magias/armadilhas de fora, calado.
+      if (v === 'nada-mais') ef.condicaoFiltros = [{ ...CB.novoFiltro(), categoria: 'qualquer' }];
+      else if (v !== 'nenhuma' && !ef.condicaoFiltros.length) ef.condicaoFiltros.push(CB.novoFiltro());
       pintarTudo();
     })));
-    if (ef.condicao === 'controla') {
-      box.append(el('div', { class: 'ou', textContent: 'só se você controlar, com a face para cima:' }));
-      box.append(editorDeFiltros(ef.condicaoFiltros, 'sem condição: qualquer monstro'));
+    if (ef.condicao !== 'nenhuma') {
+      box.append(el('div', {
+        class: 'ou',
+        textContent: ef.condicao === 'controla'
+          ? 'só se você controlar, com a face para cima:'
+          : ef.condicao === 'nada-mais'
+            ? 'só se você não controlar nenhuma outra carta assim:'
+            : 'só se este monstro foi Invocado por Invocação-Especial neste turno:',
+      }));
+      box.append(editorDeFiltros(ef.condicaoFiltros,
+        ef.condicao === 'nada-mais' ? 'sem condição: nenhuma outra carta' : 'sem condição: qualquer monstro'));
     }
   }
   // Com "e depois" à vista, a ação é o 1º PASSO: sem o número ela parecia um
@@ -488,6 +608,11 @@ function camposDaAcao(box, obj, muda) {
     case 'adicionar':
       if (outra) {
         box.append(campo('de onde', seletor(CB.ORIGENS.adicionar, obj.origem, muda('origem'))));
+        // "Adicione 1 X e 1 Y": cada opção vira UMA carta, e a quantidade some —
+        // quem manda é o número de opções. Redesenha para trocar "ou" por "e".
+        box.append(marcar('1 de cada opção (adiciona uma carta de cada)', obj.umDeCada,
+          (v) => { obj.umDeCada = v; pintarTudo(); }));
+        if (obj.umDeCada) break;
         box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
         // Marcar os dois = uma carta de cada Tipo E de cada Atributo.
         for (const [chave, rotulo] of [['tiposDiferentes', 'de Tipos diferentes'], ['atributosDiferentes', 'de Atributos diferentes']]) {
@@ -500,22 +625,58 @@ function camposDaAcao(box, obj, muda) {
     case 'comprar':
       box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
       break;
+    case 'menos-tributo':
+      // Nível 5–6 pedem 1 tributo e 7+ pedem 2: é essa a faixa que quer dizer
+      // alguma coisa no jogo.
+      box.append(campo('tributos a menos', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 2 })));
+      break;
+    case 'nao-alvo':
+      // "Esta carta" já sabe de quem fala: o lado só existe na proteção de grupo.
+      if (obj.alvo !== 'esta') box.append(campo('em quem', seletor(CB.LADOS['nao-alvo'], obj.lado, muda('lado'))));
+      break;
+    case 'ganhar-nome':
+      // O nome GANHO neste turno — o "revele: vire Dark Magician". O permanente
+      // mora no passo 2 · TIPO ("tratada como").
+      box.append(campo('tratada como (id)', numero(obj.ganhaCodigo, muda('ganhaCodigo'), { min: 1, placeholder: 'ex.: 46986414' })));
+      box.append(campo('nome dela', textoCurto(obj.ganhaNome, muda('ganhaNome'), { placeholder: 'só para o texto da carta' })));
+      break;
     case 'baixar': {
       box.append(campo('de onde', seletor(CB.ORIGENS.baixar, obj.origem, muda('origem'))));
       box.append(campo('até', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
-      const c = el('input', { type: 'checkbox', checked: !!obj.nomesDiferentes });
-      c.onchange = () => { obj.nomesDiferentes = c.checked; atualizar(); };
-      box.append(el('div', { class: 'campo check' }, c, el('label', { textContent: 'de nomes diferentes (só 1 de cada)' })));
+      box.append(marcar('de nomes diferentes (só 1 de cada)', obj.nomesDiferentes,
+        (v) => { obj.nomesDiferentes = v; atualizar(); }));
+      // Tira a trava de "foi baixada neste turno, não pode ativar" da carta que
+      // ACABOU de ser baixada — o "(Este card pode ser ativado neste turno)".
+      box.append(marcar('pode ser ativada neste turno', obj.ativaNoTurno,
+        (v) => { obj.ativaNoTurno = v; atualizar(); }));
       break;
     }
     case 'reviver':
-      if (outra) box.append(campo('de onde', seletor(CB.ORIGENS.reviver, obj.origem, muda('origem'))));
+      if (outra) {
+        box.append(campo('de onde', seletor(CB.ORIGENS.reviver, obj.origem, muda('origem'))));
+        // "Invoque 1 X e 1 Y": cada opção vira UMA carta, todas juntas.
+        box.append(marcar('1 de cada opção (Invoca uma carta de cada, juntas)', obj.umDeCada,
+          (v) => { obj.umDeCada = v; pintarTudo(); }));
+      }
+      break;
+    case 'enviar-cemiterio':
+      box.append(campo('de quem', seletor(CB.LADOS['enviar-cemiterio'], obj.lado, muda('lado'))));
+      box.append(campo('zona', seletor(CB.ZONAS, obj.zona, muda('zona'))));
+      box.append(campo('até', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
+      break;
+    case 'fundir':
+      // O monstro do Extra Deck; os OUTROS materiais saem da receita dele, da mão
+      // ou do campo. Esta carta é sempre um deles.
+      box.append(campo('monstro de Fusão (id)', numero(obj.fusaoCodigo, muda('fusaoCodigo'), { min: 1, placeholder: 'ex.: 950000011' })));
+      box.append(campo('nome dele', textoCurto(obj.fusaoNome, muda('fusaoNome'), { placeholder: 'só para o texto da carta' })));
       break;
     case 'destruir':
       if (outra) {
         box.append(campo('de quem', seletor(CB.LADOS.destruir, obj.lado, muda('lado'))));
         box.append(campo('zona', seletor(CB.ZONAS, obj.zona, muda('zona'))));
-        box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
+        // "Destrua TODAS": sem escolha, e o "então" seguinte roda mesmo sem nada a destruir.
+        box.append(marcar('todas (sem escolher; exceto esta carta)', obj.todas, (v) => { obj.todas = v; pintarTudo(); }));
+        if (!obj.todas) box.append(campo('quantas', numero(obj.quantidade, muda('quantidade'), { min: 1, max: 5 })));
       }
       break;
     case 'bonus':
@@ -550,18 +711,33 @@ function camposDaAcao(box, obj, muda) {
       break;
   }
 
-  if (obj.acao === 'sem-tributo') {
-    box.append(el('div', { class: 'ou', textContent: 'quais monstros da sua mão:' }));
-    box.append(editorDeFiltros(obj.filtros, 'sem condição: todo monstro de Nível 5 ou mais'));
-  } else if ((outra || obj.alvo === 'gatilho') && obj.acao !== 'comprar') {
-    const baixar = obj.acao === 'baixar';
-    box.append(el('div', {
-      class: 'ou',
-      textContent: obj.alvo === 'gatilho' ? 'só se o monstro for:' : baixar ? 'quais cartas (um id por opção = "uma destas"):' : 'qual carta:',
-    }));
-    box.append(editorDeFiltros(obj.filtros,
-      obj.alvo === 'gatilho' ? 'sem condição: qualquer monstro' : baixar ? 'sem condição: qualquer Magia/Armadilha' : 'sem condição: qualquer carta',
-      baixar ? 'qualquer' : null));
+  // QUEM decide é `CB.usaFiltros`, no módulo, e não esta tela: ação que o
+  // gerador filtra e a tela não mostra sai GENÉRICA, e o Lua vale para qualquer
+  // carta sem ninguém ver. Coberto por `cardbuilder.test.mjs`.
+  if (CB.usaFiltros(obj)) {
+    // As duas Invocações com desconto não têm ALVO: o filtro é a única coisa que
+    // diz de quem elas falam, e por isso o rótulo delas é outro.
+    if (obj.acao === 'sem-tributo' || obj.acao === 'menos-tributo') {
+      box.append(el('div', { class: 'ou', textContent: 'quais monstros da sua mão ganham isso:' }));
+      box.append(editorDeFiltros(obj.filtros, obj.acao === 'sem-tributo'
+        ? 'sem condição: todo monstro de Nível 5 ou mais'
+        : 'sem condição: QUALQUER monstro da sua mão'));
+    } else if (obj.acao === 'nao-alvo') {
+      box.append(el('div', { class: 'ou', textContent: 'quais monstros ficam protegidos:' }));
+      box.append(editorDeFiltros(obj.filtros, 'sem condição: QUALQUER monstro'));
+    } else {
+      const baixar = obj.acao === 'baixar';
+      const cada = (obj.acao === 'adicionar' || obj.acao === 'reviver') && !!obj.umDeCada;
+      box.append(el('div', {
+        class: 'ou',
+        textContent: obj.alvo === 'gatilho' ? 'só se o monstro for:' : baixar ? 'quais cartas (um id por opção = "uma destas"):'
+          : cada ? 'quais cartas (1 de cada):' : 'qual carta:',
+      }));
+      box.append(editorDeFiltros(obj.filtros,
+        obj.alvo === 'gatilho' ? 'sem condição: qualquer monstro' : baixar ? 'sem condição: qualquer Magia/Armadilha'
+          : cada ? 'nenhuma carta ainda — acrescente uma' : 'sem condição: qualquer carta',
+        baixar || cada ? 'qualquer' : null, cada));
+    }
   }
 }
 
@@ -584,10 +760,25 @@ function editorDePasso(ef, k) {
   // ("adicionar outra carta") — foi assim que a Dragias saiu buscando no Deck.
   const box = el('div', { class: 'grupo' },
     el('div', { class: 'grupo-topo' }, el('span', { textContent: `${k + 2}º PASSO — E DEPOIS, SE O ANTERIOR RESOLVER` }), tirar));
-  box.append(campo('ação', seletor(pares(CB.ACOES, CB.acoesDoPasso()), passo.acao, estrutura('acao'))));
+  box.append(campo('ação', seletor(pares(CB.ACOES, CB.acoesDoPasso(carta)), passo.acao, estrutura('acao'))));
   const alvos = CB.alvosDoPasso(carta, passo.acao, ef.quando);
   if (alvos.length > 1) box.append(campo('para', seletor(pares(CB.ALVOS, alvos), passo.alvo, estrutura('alvo'))));
   camposDaAcao(box, passo, muda);
+  // "…você PODE": pergunta sim/não na resolução, e só se o passo for possível.
+  box.append(marcar('opcional ("você pode") — pergunta antes de fazer', passo.opcional,
+    (v) => { passo.opcional = v; atualizar(); }));
+  // "Se você adicionou 1 X do seu Cemitério POR ESTE EFEITO": pergunta ao que o
+  // passo ANTERIOR moveu. Ligar já põe uma opção — sem ela a condição valeria
+  // para qualquer carta, e a caixa nasceria vazia.
+  box.append(marcar('só se o passo anterior moveu uma carta específica', passo.seFiltros.length > 0, (v) => {
+    passo.seFiltros = v ? [CB.novoFiltro()] : [];
+    pintarTudo();
+  }));
+  if (passo.seFiltros.length) {
+    box.append(marcar('e ela veio do Cemitério', passo.seDoCemiterio, (v) => { passo.seDoCemiterio = v; atualizar(); }));
+    box.append(el('div', { class: 'ou', textContent: 'a carta que o passo anterior adicionou/Invocou:' }));
+    box.append(editorDeFiltros(passo.seFiltros, 'sem condição: qualquer carta'));
+  }
   return box;
 }
 
@@ -650,22 +841,58 @@ $('btn-texto').onclick = () => {
 
 // ------------------------------------------------------ import do card maker
 
-// O .json do card maker traz o nome, o tipo, os números, o texto e a arte — os
-// efeitos não, porque ele desenha a carta sem saber regra nenhuma. A carta
-// importada é NOVA (sem id): salvar cria outra linha, nunca sobrescreve a aberta.
+// A divisão de trabalho: o card maker DESENHA a carta, este builder escreve o
+// EFEITO. De lá vêm dois arquivos, e os dois entram por este mesmo campo — o
+// `.json` (o nome, o tipo, os números, o texto e a arte) e o `.png` da carta
+// pronta, que vira o `visual: completa`, a carta como o jogador a vê. Efeito o
+// card maker não sabe: ele sai do passo 3. A carta importada é NOVA (sem id):
+// salvar cria outra linha, nunca sobrescreve a aberta.
+//
+// O layout se desenha em `cardmaker.html`, a tela da Área de Teste que embute o
+// card maker. O endereço do site mora LÁ, uma vez só: repetido aqui, os dois
+// envelheceriam separados. Abre em outra aba de propósito — a carta que estiver
+// pela metade nesta tela continua aqui, esperando.
+$('btn-layout').onclick = () => window.open('/web/cardmaker.html', '_blank', 'noopener');
+
 $('cardmaker').onchange = async () => {
-  const f = $('cardmaker').files?.[0];
+  const arquivos = [...($('cardmaker').files ?? [])];
   $('cardmaker').value = '';
-  if (!f) return;
-  let json;
-  try { json = JSON.parse(await f.text()); } catch { return void avisar('esse arquivo não é um JSON do card maker'); }
-  carta = CB.cartaDoCardmaker(json);
-  arteSalva = null; imagemNova = null; imagemSalva = null;
-  arteNova = typeof json?.ad === 'string' && json.ad.startsWith('data:image/')
-    ? await downscaleDataUrl(json.ad, { maxW: 400 })
-    : null;
-  $('nome').value = carta.nome; $('texto').value = carta.texto;
-  avisar(`"${carta.nome || 'sem nome'}" importada do card maker — monte os efeitos e salve`);
+  if (!arquivos.length) return;
+
+  const oJson = arquivos.find((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
+  const aImagem = arquivos.find((f) => f.type.startsWith('image/'));
+  if (!oJson && !aImagem) return void avisar('mande o .json do card maker, o .png da carta, ou os dois');
+
+  // O `.json` vem PRIMEIRO, sempre: ele troca a carta inteira e zera a imagem.
+  // Lido depois, jogaria fora a carta completa que tivesse acabado de entrar.
+  if (oJson) {
+    let json;
+    try { json = JSON.parse(await oJson.text()); } catch { return void avisar('esse arquivo não é um JSON do card maker'); }
+    carta = CB.cartaDoCardmaker(json);
+    arteSalva = null; imagemNova = null; imagemSalva = null;
+    arteNova = typeof json?.ad === 'string' && json.ad.startsWith('data:image/')
+      ? await downscaleDataUrl(json.ad, { maxW: 400 })
+      : null;
+    $('nome').value = carta.nome; $('texto').value = carta.texto;
+  }
+
+  if (aImagem) {
+    const lido = await lerArquivo(aImagem);
+    if (!lido.startsWith('data:image/')) return void avisar('isso não é uma imagem');
+    // A carta que o card maker baixa já TEM moldura, nome, texto e números: ela
+    // é a carta inteira, e o visual que a usa como está é o `completa`. Marcar
+    // aqui é o que evita o erro calado de subir a imagem com o visual
+    // `desenhada`, que a ignora e mostra o layout do builder no lugar dela.
+    imagemNova = await downscaleDataUrl(lido, { maxW: 480, quality: 0.86 });
+    carta.visual = 'completa';
+  }
+
+  const nome = carta.nome || 'sem nome';
+  avisar(oJson && aImagem
+    ? `"${nome}" importada com a carta desenhada — agora só os efeitos, no passo 3`
+    : oJson
+      ? `"${nome}" importada — falta o .png da carta desenhada; monte os efeitos e salve`
+      : 'carta desenhada carregada — ela sobe no próximo salvar');
   pintarTudo();
 };
 

@@ -38,7 +38,8 @@ namespace DuelServer
 
         public DuelSession(string streamingAssets, uint[] deck0, uint[] deck1, ulong seed = 12345, ulong flags = 0,
                            uint[] extra0 = null, uint[] extra1 = null, uint? fieldSpell = null,
-                           int fieldSpellController = 0, CartaCustom[] cartasCustom = null)
+                           int fieldSpellController = 0, CartaCustom[] cartasCustom = null,
+                           uint[] maoInicial0 = null, int tamanhoMao0 = TAMANHO_MAO_PADRAO)
         {
             _db = new DatabaseManager(streamingAssets);
             _sm = new ScriptManager(streamingAssets);
@@ -86,8 +87,10 @@ namespace DuelServer
                 seed2 = Next(),
                 seed3 = Next(),
                 flags = flags,
-                team1 = new OCG_Player { startingLP = 8000, startingDrawCount = 5, drawCountPerTurn = 1 },
-                team2 = new OCG_Player { startingLP = 8000, startingDrawCount = 5, drawCountPerTurn = 1 },
+                // O tamanho da mão do jogador só muda no "Testar Duelo" da Área de
+                // Teste (`tamanhoMao` no /start); o NPC compra sempre as 5 de regra.
+                team1 = new OCG_Player { startingLP = 8000, startingDrawCount = (uint)tamanhoMao0, drawCountPerTurn = 1 },
+                team2 = new OCG_Player { startingLP = 8000, startingDrawCount = TAMANHO_MAO_PADRAO, drawCountPerTurn = 1 },
                 cardReader = Marshal.GetFunctionPointerForDelegate(_cardReader),
                 scriptReader = Marshal.GetFunctionPointerForDelegate(_scriptReader),
                 logHandler = Marshal.GetFunctionPointerForDelegate(_logHandler),
@@ -107,7 +110,7 @@ namespace DuelServer
             // O ocgcore NÃO embaralha o deck sozinho (a mão sairia sempre igual),
             // então embaralhamos nós, com um RNG derivado da seed.
             var rng = new Random(unchecked((int)seed));
-            InjectDeck(team: 0, controller: 0, deck: Shuffle(deck0, rng));
+            InjectDeck(team: 0, controller: 0, deck: ComMaoNoTopo(deck0, maoInicial0, rng));
             InjectDeck(team: 1, controller: 1, deck: Shuffle(deck1, rng));
 
             // Extra Deck: MESMA injeção, outra localização. Não se embaralha — o
@@ -138,6 +141,35 @@ namespace DuelServer
             }
 
             YgoCoreAPI.OCG_StartDuel(_duel);
+        }
+
+        /// <summary>Quantas cartas cada lado compra antes do primeiro turno (regra).</summary>
+        public const int TAMANHO_MAO_PADRAO = 5;
+
+        /// <summary>
+        /// A MÃO INICIAL escolhida (o "Testar Duelo" da Área de Teste): embaralha o
+        /// resto do deck e põe as cartas escolhidas no TOPO, que é de onde sai a
+        /// compra inicial. Não se injeta nada na mão: a carta posta direto em
+        /// LOCATION_HAND não gera MSG_DRAW, e o front só sabe da mão por evento — o
+        /// motor teria a carta e a tela, não. Pelo topo, a compra de regra leva as
+        /// cartas até a mão pelo caminho de sempre.
+        ///
+        /// O topo é o FIM da lista: cada `OCG_DuelNewCard` com `seq = 0` empilha por
+        /// cima (a Card Advance mediu: a carta de cima tem a MAIOR sequência). Uma
+        /// escolha que não está no deck é ignorada — quem chama já confere, e aqui
+        /// ela criaria uma carta a mais, fora da decklist.
+        /// </summary>
+        private static uint[] ComMaoNoTopo(uint[] deck, uint[] mao, Random rng)
+        {
+            if (mao == null || mao.Length == 0) return Shuffle(deck, rng);
+            var resto = new System.Collections.Generic.List<uint>(deck);
+            var topo = new System.Collections.Generic.List<uint>();
+            foreach (uint code in mao)
+                if (resto.Remove(code)) topo.Add(code);
+            var ordem = new System.Collections.Generic.List<uint>(Shuffle(resto.ToArray(), rng));
+            // Invertido para a PRIMEIRA escolhida ser a primeira comprada.
+            for (int i = topo.Count - 1; i >= 0; i--) ordem.Add(topo[i]);
+            return ordem.ToArray();
         }
 
         private static uint[] Shuffle(uint[] src, Random rng)

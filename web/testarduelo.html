@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testar Duelo — Classic Duels</title>
+<link rel="icon" href="/web/img/icone.png">
+<link rel="stylesheet" href="/web/css/ui.css">
+<style>
+  body { background: radial-gradient(ellipse at 50% 0%, #2a2033 0%, var(--bg) 60%); }
+  .tela { width: min(1100px, 96vw); margin: 18px auto 40px; }
+  .title { text-align: center; margin-bottom: 16px; border-bottom: 2px solid var(--line); padding-bottom: 12px; }
+  .title h1 { margin: 0; font-size: 22px; letter-spacing: 4px; color: #c9a6e0; }
+  .title p { margin: 6px 0 0; color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+
+  .painel { background: var(--panel); border: 1px solid var(--line); padding: 10px 14px; margin-bottom: 12px; }
+  .painel h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 2px; color: #c9a6e0; }
+  .painel h2 small { color: var(--dim); letter-spacing: 0; font-weight: normal; }
+  .linha { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+  .linha label { color: var(--dim); }
+  select, input[type=number] {
+    background: var(--bg2); color: var(--ink); border: 1px solid var(--line);
+    font-size: 12px; padding: 4px 6px;
+  }
+  select { min-width: 220px; }
+  input[type=number] { width: 64px; }
+  .nota { font-size: 10px; color: var(--dim); }
+
+  /* A MÃO: uma vaga por carta comprada. Vaga vazia = carta ao acaso. */
+  .mao { display: flex; flex-wrap: wrap; gap: 6px; min-height: 96px; }
+  .vaga {
+    width: 62px; height: 90px; border: 1px dashed var(--line); background: var(--bg2);
+    color: var(--dim); font-size: 10px; text-align: center; line-height: 90px;
+  }
+  .vaga.cheia { border: 1px solid var(--gold); cursor: pointer; line-height: normal; padding: 0; }
+  .vaga.cheia img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .vaga.cheia:hover { outline: 2px solid #e05a5a; }
+
+  /* O DECK: uma carta por nome, com as cópias no selo. */
+  .grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+  .carta {
+    position: relative; cursor: pointer; border: 2px solid transparent; background: var(--bg2);
+    padding: 0; font: inherit; color: inherit; text-align: center;
+  }
+  .carta img { width: 100%; aspect-ratio: 59 / 86; object-fit: cover; display: block; }
+  .carta .nome { font-size: 9px; line-height: 1.2; padding: 2px; overflow: hidden;
+                 white-space: nowrap; text-overflow: ellipsis; }
+  .carta .selo {
+    position: absolute; top: 3px; right: 3px; background: rgba(0,0,0,.8); color: var(--ink);
+    font-size: 10px; padding: 1px 4px; border-radius: 3px;
+  }
+  .carta.escolhida { border-color: var(--gold); }
+  .carta.escolhida .selo { background: var(--gold); color: #000; }
+  .carta.esgotada { opacity: .4; cursor: default; }
+  .carta:hover:not(.esgotada) { border-color: #c9a6e0; }
+
+  .acoes { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  .acoes .espaco { flex: 1; }
+  #btn-iniciar { font-size: 14px; padding: 10px 22px; }
+</style>
+</head>
+<body>
+<div class="tela">
+  <div class="title">
+    <h1>⚔ TESTAR DUELO</h1>
+    <p>seu deck × um adversário, com a mão inicial que você escolher · sem registro e sem prêmio</p>
+  </div>
+
+  <div class="painel">
+    <h2>1 · SEU DECK</h2>
+    <div class="linha">
+      <select id="sel-deck"></select>
+      <span id="deck-info" class="nota"></span>
+    </div>
+  </div>
+
+  <div class="painel">
+    <h2>2 · MÃO INICIAL <small>— clique numa carta do deck para pô-la na mão; clique na mão para tirar</small></h2>
+    <div class="linha" style="margin-bottom:8px">
+      <label for="tam-mao">cartas na mão</label>
+      <input type="number" id="tam-mao" min="0" max="20" step="1" value="5">
+      <button id="btn-limpar">limpar escolhidas</button>
+      <span id="mao-info" class="nota"></span>
+    </div>
+    <div class="mao" id="mao"></div>
+  </div>
+
+  <div class="painel">
+    <h2>DECK <small id="grade-info"></small></h2>
+    <div class="grade" id="grade"></div>
+  </div>
+
+  <div class="painel">
+    <h2>3 · ADVERSÁRIO</h2>
+    <div class="linha">
+      <select id="sel-npc"></select>
+      <select id="sel-npc-deck"></select>
+      <span id="npc-info" class="nota"></span>
+    </div>
+  </div>
+
+  <div class="acoes">
+    <button class="back" id="btn-voltar">← Área de Teste</button>
+    <span class="espaco"></span>
+    <span id="aviso" class="nota"></span>
+    <button id="btn-iniciar" class="btn-primary">iniciar duelo</button>
+  </div>
+</div>
+
+<script type="module" src="/web/js/bootguard.js"></script>
+<script type="module">
+import { requireAdmin } from '/web/js/auth.js';
+import { hydrateDecks, listDecks, getActiveDeck } from '/web/js/storage.js';
+import { NPCS, hydrateCustomNpcs, loadNpcDecks, getNpcDecks, getNpcActiveDeck } from '/web/js/npcs.js';
+import { YgoDB } from '/ygo-data/src/ygodb.js';
+import { carregarCartasDoBuilder } from '/web/js/cartasdobuilder.js';
+import { configureCardDetail, showCardDetail } from '/web/js/carddetail.js';
+const $ = (id) => document.getElementById(id);
+
+// Tela de admin, como toda a Área de Teste. O duelo em si não paga nada (o
+// `duel.html?teste=1` não registra o duelo), mas escolher a mão a dedo é
+// ferramenta de quem monta o jogo, não de quem joga.
+const perfil = await requireAdmin();
+if (!perfil) throw new Error('Testar Duelo: só admin');
+
+let db = null;
+try { db = await YgoDB.load('/ygo-data/data', { full: false }); } catch {}
+const artCustom = new Map();
+for (const { entrada } of await carregarCartasDoBuilder()) {
+  db?.addCustom(entrada);
+  if (entrada.art) artCustom.set(entrada.id, entrada.art);
+}
+const nameOf = (id) => db?.brief(id)?.name ?? String(id);
+const artOf = (id) => artCustom.get(Number(id))
+  ?? `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+configureCardDetail({ db, artOf: (id) => artCustom.get(Number(id)) });
+
+await hydrateDecks();
+await hydrateCustomNpcs();
+await loadNpcDecks();
+
+// A escolha anterior volta pela URL — é o que o "voltar" do fim do duelo
+// manda (`duel.html` devolve a mesma busca), para testar de novo sem remontar.
+const pedido = new URLSearchParams(location.search);
+
+// ------------------------------------------------------------------ estado
+const decks = listDecks().filter((d) => d.main.length);
+let deckAtual = null;
+/** As escolhidas, na ordem em que foram clicadas (é a ordem da compra). */
+let escolhidas = [];
+
+// ------------------------------------------------------------------ seu deck
+function montarSelectDeck() {
+  const sel = $('sel-deck');
+  sel.replaceChildren();
+  if (!decks.length) {
+    const o = document.createElement('option');
+    o.textContent = 'nenhum deck com cartas — monte um no Deck Builder';
+    sel.append(o);
+    sel.disabled = true;
+    return;
+  }
+  const inicial = pedido.get('meu') ?? getActiveDeck()?.name;
+  decks.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = `${d.name} (${d.main.length}${d.extra.length ? ` + ${d.extra.length} extra` : ''})`;
+    if (d.name === inicial) o.selected = true;
+    sel.append(o);
+  });
+  sel.onchange = () => trocarDeck(false);
+}
+
+function trocarDeck(manterEscolhidas) {
+  deckAtual = decks[Number($('sel-deck').value)] ?? decks[0] ?? null;
+  $('deck-info').textContent = deckAtual
+    ? `main ${deckAtual.main.length} · extra ${deckAtual.extra.length}`
+    : '';
+  // Escolhidas de OUTRO deck não valem: só fica o que este deck tem, cópia
+  // por cópia (a mesma conta do servidor, `MaoInicialDoCorpo`).
+  const sobra = [...(deckAtual?.main ?? [])];
+  escolhidas = (manterEscolhidas ? escolhidas : []).filter((id) => {
+    const i = sobra.indexOf(id);
+    if (i < 0) return false;
+    sobra.splice(i, 1);
+    return true;
+  });
+  desenhar();
+}
+
+// ------------------------------------------------------------------ mão
+const tamanho = () => {
+  const n = Math.trunc(Number($('tam-mao').value));
+  return Number.isFinite(n) ? Math.max(0, Math.min(n, 20, deckAtual?.main.length ?? 20)) : 5;
+};
+
+$('tam-mao').oninput = () => {
+  // Diminuir a mão abaixo das escolhidas tira as ÚLTIMAS clicadas — a mão
+  // nunca promete uma carta que não cabe.
+  if (escolhidas.length > tamanho()) escolhidas = escolhidas.slice(0, tamanho());
+  desenhar();
+};
+$('btn-limpar').onclick = () => { escolhidas = []; desenhar(); };
+
+function desenharMao() {
+  const n = tamanho();
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < n; i++) {
+    const vaga = document.createElement('div');
+    vaga.className = 'vaga';
+    const id = escolhidas[i];
+    if (id === undefined) {
+      vaga.textContent = 'ao acaso';
+    } else {
+      vaga.classList.add('cheia');
+      vaga.title = `${nameOf(id)} — clique para tirar da mão`;
+      const img = document.createElement('img');
+      img.src = artOf(id); img.alt = nameOf(id); img.draggable = false;
+      vaga.append(img);
+      vaga.onclick = () => { escolhidas.splice(i, 1); desenhar(); };
+    }
+    frag.append(vaga);
+  }
+  $('mao').replaceChildren(frag);
+  const livres = n - escolhidas.length;
+  $('mao-info').textContent = n === 0
+    ? 'mão vazia'
+    : `${escolhidas.length} escolhida(s) · ${livres} ao acaso`;
+}
+
+// ------------------------------------------------------------------ deck (grade)
+function desenharGrade() {
+  const grade = $('grade');
+  if (!deckAtual) { grade.replaceChildren(); $('grade-info').textContent = ''; return; }
+
+  // Uma carta por nome, na ordem do deck, com quantas cópias ele tem.
+  const copias = new Map();
+  for (const id of deckAtual.main) copias.set(id, (copias.get(id) ?? 0) + 1);
+  const cheia = escolhidas.length >= tamanho();
+
+  const frag = document.createDocumentFragment();
+  for (const [id, total] of copias) {
+    const naMao = escolhidas.filter((x) => x === id).length;
+    const esgotada = naMao >= total || cheia;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'carta' + (naMao ? ' escolhida' : '') + (esgotada ? ' esgotada' : '');
+    b.title = `${nameOf(id)}\n${naMao}/${total} na mão · botão direito: detalhes`;
+    const img = document.createElement('img');
+    img.src = artOf(id); img.alt = nameOf(id); img.loading = 'lazy'; img.draggable = false;
+    const nome = document.createElement('div');
+    nome.className = 'nome'; nome.textContent = nameOf(id);
+    const selo = document.createElement('span');
+    selo.className = 'selo'; selo.textContent = naMao ? `${naMao}/${total}` : `×${total}`;
+    b.append(img, nome, selo);
+    b.onclick = () => {
+      if (naMao >= total) return aviso(`as ${total} cópia(s) de ${nameOf(id)} já estão na mão`);
+      if (cheia) return aviso('a mão está cheia — aumente "cartas na mão" ou tire uma');
+      escolhidas.push(id);
+      aviso('');
+      desenhar();
+    };
+    b.oncontextmenu = (e) => { e.preventDefault(); showCardDetail(id); };
+    frag.append(b);
+  }
+  grade.replaceChildren(frag);
+  $('grade-info').textContent = `— ${copias.size} carta(s) diferentes, ${deckAtual.main.length} no total`;
+}
+
+// ------------------------------------------------------------------ adversário
+function montarSelectNpc() {
+  const sel = $('sel-npc');
+  sel.replaceChildren();
+  const comDeck = NPCS.filter((n) => getNpcDecks(n.id).some((d) => d.deck.main.length))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!comDeck.length) {
+    const o = document.createElement('option');
+    o.textContent = 'nenhum adversário com deck montado';
+    sel.append(o);
+    sel.disabled = true;
+    return;
+  }
+  for (const npc of comDeck) {
+    const o = document.createElement('option');
+    o.value = npc.id;
+    o.textContent = npc.campaign ? `${npc.name} — ${npc.campaign}` : npc.name;
+    if (npc.id === pedido.get('npc')) o.selected = true;
+    sel.append(o);
+  }
+  sel.onchange = () => { montarSelectNpcDeck(null); desenhar(); };
+  montarSelectNpcDeck(pedido.get('deck'));
+}
+
+function montarSelectNpcDeck(nomeInicial) {
+  const id = $('sel-npc').value;
+  const sel = $('sel-npc-deck');
+  sel.replaceChildren();
+  const lista = getNpcDecks(id).filter((d) => d.deck.main.length);
+  const ativo = getNpcActiveDeck(id)?.name;
+  const alvo = nomeInicial ?? ativo;
+  for (const d of lista) {
+    const o = document.createElement('option');
+    o.value = d.name;
+    o.textContent = `${d.name}${d.name === ativo ? ' (ativo)' : ''}`
+      + (d.dificuldade ? ` · ${d.dificuldade}` : '') + ` · ${d.deck.main.length} cartas`;
+    if (d.name === alvo) o.selected = true;
+    sel.append(o);
+  }
+  sel.disabled = !lista.length;
+  $('npc-info').textContent = lista.length ? '' : 'este adversário não tem deck';
+}
+
+// ------------------------------------------------------------------ iniciar
+function aviso(texto) { $('aviso').textContent = texto; }
+
+function desenhar() {
+  desenharMao();
+  desenharGrade();
+  $('btn-iniciar').disabled = !deckAtual || $('sel-npc-deck').disabled || $('sel-npc').disabled;
+}
+
+$('btn-iniciar').onclick = () => {
+  if (!deckAtual) return aviso('escolha um deck');
+  const npc = $('sel-npc').value;
+  const npcDeck = $('sel-npc-deck').value;
+  if (!npc || !npcDeck) return aviso('escolha o adversário e o deck dele');
+  const q = new URLSearchParams({
+    teste: '1', npc, deck: npcDeck, meu: deckAtual.name, mao: String(tamanho()),
+  });
+  if (escolhidas.length) q.set('cartas', escolhidas.join(','));
+  location.href = `/web/duel.html?${q}`;
+};
+$('btn-voltar').onclick = () => (location.href = '/web/teste.html');
+
+// ------------------------------------------------------------------ boot
+if (pedido.has('mao')) $('tam-mao').value = pedido.get('mao');
+escolhidas = (pedido.get('cartas') ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+montarSelectDeck();
+montarSelectNpc();
+trocarDeck(true);
+</script>
+<!-- A batida que mantem o jogo aberto: sem ela o servidor se encerra.
+     O terminal deixou de existir, entao e' a PAGINA que diz "ainda estou
+     aqui". Toda tela de web/ precisa desta linha — `web/js/vivo.test.mjs`
+     reprova quem a esquecer. Ver o cabecalho de `web/js/vivo.js`. -->
+<script type="module">import { manterVivo } from '/web/js/vivo.js'; manterVivo();</script>
+<script type="module">import { exigirVersao } from '/web/js/versao.js'; exigirVersao();</script>
+</body>
+</html>

@@ -626,10 +626,20 @@ namespace DuelServer
             bool multi = body.TryGetProperty("multiplayer", out var mp)
                          && mp.ValueKind == JsonValueKind.True;
 
+            // MÃO INICIAL do jogador ("Testar Duelo", Área de Teste). Nunca no
+            // multiplayer: ali o deck do outro lado é de gente, e escolher a própria
+            // mão seria trapaça contra ela.
+            var (maoInicial, tamanhoMao) = multi
+                ? ((uint[])null, DuelSession.TAMANHO_MAO_PADRAO)
+                : MaoInicialDoCorpo(body, deck);
+
             Log.Info($"[rpc] /start deck={deck.Length} extra={(extra?.Length ?? 0)} npc={npc} " +
                      $"npcDeck={(npcDeck?.Length ?? 0)} seed={seed} fieldSpell={(fieldSpell?.ToString() ?? "-")} " +
                      $"campoDe={(fieldSpell.HasValue ? (fieldSpellController == 1 ? "npc" : "jogador") : "-")} " +
-                     $"nivel={(leitura ? "avancado" : "iniciante")} multiplayer={multi}");
+                     $"nivel={(leitura ? "avancado" : "iniciante")} multiplayer={multi}" +
+                     (maoInicial != null || tamanhoMao != DuelSession.TAMANHO_MAO_PADRAO
+                         ? $" mao={tamanhoMao} escolhidas=[{string.Join(",", maoInicial ?? Array.Empty<uint>())}]"
+                         : ""));
             if (body.TryGetProperty("customCards", out var cartasDoCorpo) && cartasDoCorpo.ValueKind == JsonValueKind.Array)
             {
                 if (local) Log.Info($"[rpc] /start com {cartasDoCorpo.GetArrayLength()} carta(s) do Card Builder");
@@ -643,7 +653,8 @@ namespace DuelServer
                 sala.Duel = new InteractiveDuel(_sa, deck, seed, flags, npc, npcDeck, extra, npcExtra, fieldSpell,
                                                 npcLeitura: leitura, doisHumanos: multi,
                                                 fieldSpellController: fieldSpellController,
-                                                cartasCustom: local ? CartaCustom.Ler(body) : null);
+                                                cartasCustom: local ? CartaCustom.Ler(body) : null,
+                                                maoInicial: maoInicial, tamanhoMao: tamanhoMao);
                 sala.Multiplayer = multi;
                 sala.Ultimo = DateTime.UtcNow;
                 var r = sala.Duel.Advance();
@@ -778,6 +789,31 @@ namespace DuelServer
                 sala.Encerrado = r.ended;
                 return Entregar(r, sala.Multiplayer);
             }
+        }
+
+        /// <summary>
+        /// `maoInicial` (as cartas escolhidas) e `tamanhoMao` (quantas comprar) do
+        /// corpo do /start. Só vale carta que ESTÁ no deck, cópia por cópia: pedir
+        /// três de uma carta com duas no deck dá duas — senão a mão teria uma carta
+        /// que o deck não tem. O tamanho nunca fica abaixo das escolhidas (escolher
+        /// 6 com mão de 5 deixaria uma de fora sem ninguém saber qual) nem acima do
+        /// deck. Sem nenhum dos dois campos, é a mão de regra: 5 ao acaso.
+        /// </summary>
+        internal static (uint[] mao, int tamanho) MaoInicialDoCorpo(JsonElement body, uint[] deck)
+        {
+            var pedidas = ReadDeck(body, "maoInicial");
+            var sobra = new List<uint>(deck);
+            var validas = new List<uint>();
+            foreach (uint code in pedidas)
+                if (sobra.Remove(code)) validas.Add(code);
+            if (validas.Count < pedidas.Length)
+                Log.Warn($"[rpc] /start: {pedidas.Length - validas.Count} carta(s) da mao inicial fora do deck — ignoradas");
+
+            int tamanho = body.TryGetProperty("tamanhoMao", out var t) && t.ValueKind == JsonValueKind.Number
+                ? (int)t.GetInt64()
+                : DuelSession.TAMANHO_MAO_PADRAO;
+            tamanho = Math.Clamp(Math.Max(tamanho, validas.Count), 0, deck.Length);
+            return (validas.Count > 0 ? validas.ToArray() : null, tamanho);
         }
 
         static uint[] ReadDeck(JsonElement body, string prop = "deck")

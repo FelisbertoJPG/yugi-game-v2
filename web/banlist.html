@@ -248,6 +248,7 @@ import {
   addRule, removeRule, assignCardToRule, unassignCard, cardsInRule,
 } from '/web/js/banlist.js';
 import { aoGravar } from '/web/js/projectstore.js';
+import { carregarCartasDoBuilder } from '/web/js/cartasdobuilder.js';
 
 import { requireAdmin } from '/web/js/auth.js';
 // Ferramenta de ADMIN (Área de Teste): quem não é admin volta para a home.
@@ -256,7 +257,10 @@ import { requireAdmin } from '/web/js/auth.js';
 if (!(await requireAdmin())) throw new Error('Área de Teste: só admin');
 
 const $ = (id) => document.getElementById(id);
-const ART = (id) => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
+// As cartas do Card Builder não existem no ygoprodeck: a arte delas é a carta
+// desenhada que `carregarCartasDoBuilder` devolve (data URL).
+const artesDoBuilder = new Map();
+const ART = (id) => artesDoBuilder.get(Number(id)) ?? `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`;
 const MAX_RENDER = 200;
 
 let toastTimer;
@@ -599,6 +603,14 @@ try {
 } catch (e) {
   $('pool-grid').textContent = 'Não consegui carregar o banco. Rode `npm run dev` a partir da raiz do projeto.';
   throw e;
+}
+// As cartas do Card Builder entram no POOL: elas estão na Lista 1 sozinhas
+// (`cartas_do_builder()`, migration 0060), e sem isto a lista as aceitaria mas
+// esta tela não teria como dar regra a nenhuma delas. Sem rede, o pool segue
+// só com o índice oficial.
+for (const { entrada } of await carregarCartasDoBuilder()) {
+  db.addCustom(entrada);
+  if (entrada.art) artesDoBuilder.set(Number(entrada.id), entrada.art);
 }
 await hydrateBoosters();
 annotateDb(db);

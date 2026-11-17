@@ -497,6 +497,11 @@ namespace DuelServer
             if (Array.IndexOf(args, "--test-flip") >= 0)
                 return TestFlip.Run(streamingAssets);
 
+            // A MAO INICIAL escolhida (o "Testar Duelo" da Area de Teste): as
+            // cartas vao para o TOPO do deck e chegam pela compra inicial.
+            if (Array.IndexOf(args, "--test-mao-inicial") >= 0)
+                return TestMaoInicial.Run(streamingAssets);
+
             // A CARD ADVANCE: "declare um numero" (143) e "ordene o topo do deck"
             // (25) no meio da resolucao — as duas sem traducao, e o duelo morria
             // num laco de RETRY.

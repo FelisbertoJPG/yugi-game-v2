@@ -96,8 +96,8 @@
     </button>
     <button id="btn-train">
       <span class="k">4</span>
-      <span>Treino de duelo</span>
-      <span class="why">testar a mecânica · exige o duel-server</span>
+      <span>Testar Duelo</span>
+      <span class="why">seu deck × um adversário, escolhendo a mão inicial · sem prêmio · exige o duel-server</span>
     </button>
     <button id="btn-cards">
       <span class="k">5</span>
@@ -133,6 +133,11 @@
       <span class="k">B</span>
       <span>Card Builder</span>
       <span class="why">criar carta: arte, tipo e efeitos · gera o Lua que o motor roda</span>
+    </button>
+    <button id="btn-cardmaker">
+      <span class="k">L</span>
+      <span>Card Maker (layout)</span>
+      <span class="why">desenhar a carta: moldura, arte e texto · o efeito é no Card Builder</span>
     </button>
     <button id="btn-mundo">
       <span class="k">9</span>
@@ -261,7 +266,9 @@ $('btn-deck').onclick = () => (location.href = '/web/deck.html');
 $('btn-booster').onclick = () => (location.href = '/web/booster.html');
 $('btn-estrutural').onclick = () => (location.href = '/web/estrutural.html');
 $('btn-npcs').onclick = () => (location.href = '/web/npcs.html');
-$('btn-train').onclick = () => (location.href = '/web/duel.html');
+// O Treino antigo (`duel.html` sem nada) punha o NPC jogando com o SEU deck;
+// o Testar Duelo escolhe o deck, o adversário e a mão inicial.
+$('btn-train').onclick = () => (location.href = '/web/testarduelo.html');
 $('btn-cards').onclick = () => (location.href = '/ygo-data/examples/web-demo.html');
 $('btn-campo').onclick = () => (location.href = '/web/campo.html');
 $('btn-banlist').onclick = () => (location.href = '/web/banlist.html');
@@ -269,6 +276,7 @@ $('btn-listas').onclick = () => (location.href = '/web/listas.html');
 $('btn-icones').onclick = () => (location.href = '/web/icones.html');
 $('btn-itens').onclick = () => (location.href = '/web/itens.html');
 $('btn-cardbuilder').onclick = () => (location.href = '/web/cardbuilder.html');
+$('btn-cardmaker').onclick = () => (location.href = '/web/cardmaker.html');
 $('btn-mundo').onclick = () => (location.href = '/web/mundo.html');
 $('btn-mundo3d').onclick = () => (location.href = '/web/mundo3d.html');
 $('btn-cena').onclick = () => (location.href = '/web/cena.html');
@@ -288,6 +296,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'f' || e.key === 'F') $('btn-mundo3d').click();
   if (e.key === 'c' || e.key === 'C') $('btn-cena').click();
   if (e.key === 'b' || e.key === 'B') $('btn-cardbuilder').click();
+  if (e.key === 'l' || e.key === 'L') $('btn-cardmaker').click();
   if (e.key === 'Escape') $('btn-home').click();
 });
 </script>

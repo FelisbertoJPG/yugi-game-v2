@@ -417,13 +417,14 @@ namespace DuelServer
                                ulong flags = 0, bool npc = true, uint[] npcDeck = null,
                                uint[] extra = null, uint[] npcExtra = null, uint? fieldSpell = null,
                                bool npcLeitura = false, bool doisHumanos = false,
-                               int fieldSpellController = 0, CartaCustom[] cartasCustom = null)
+                               int fieldSpellController = 0, CartaCustom[] cartasCustom = null,
+                               uint[] maoInicial = null, int tamanhoMao = DuelSession.TAMANHO_MAO_PADRAO)
         {
             // Sem `npcDeck` o oponente joga com o SEU deck; o Extra segue a mesma
             // regra, senão ele duelaria com o seu main e o extra de outro deck.
             _s = new DuelSession(streamingAssets, deck, npcDeck ?? deck, seed, flags,
                                  extra, npcDeck != null ? npcExtra : (npcExtra ?? extra), fieldSpell,
-                                 fieldSpellController, cartasCustom);
+                                 fieldSpellController, cartasCustom, maoInicial, tamanhoMao);
             _doisHumanos = doisHumanos;
             _npcEnabled = npc && !doisHumanos;
             // Sem `npcDeck` o oponente joga com o SEU deck — a mesma regra da
